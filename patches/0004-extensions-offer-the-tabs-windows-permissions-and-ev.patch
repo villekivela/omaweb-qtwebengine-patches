@@ -1,4 +1,4 @@
-From a7511de20d4125a2743f10afbb77ff8f17707971 Mon Sep 17 00:00:00 2001
+From 69720384ac80afb364ec0aa0c4fb83b8adf17423 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivela=CC=88?= <vkivela@hotmail.com>
 Date: Fri, 18 Sep 2026 17:47:06 +0300
 Subject: [PATCH 4/6] extensions: offer the tabs, windows, permissions and
