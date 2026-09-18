@@ -66,6 +66,10 @@ the series, build, run the tests, then run the
 [extension probe](https://github.com/villekivela/omaweb-extension-probe) against a real extension.
 Record what a conflict cost in people's time rather than machine time.
 
+| Release | Patches applying | People's time |
+| --- | --- | --- |
+| 6.11.2 | 6 of 6, no conflicts, no fuzz | none |
+
 ## Licence
 
 The patches contain Qt WebEngine and Chromium source and are derivative works of them: Qt files are
