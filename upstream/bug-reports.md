@@ -1,8 +1,7 @@
 # Two defect reports
 
-Both reproduce against a stock build, and both come with a test that fails without the fix. File
-them separately from the tab-delegate suggestion, and send the fixes to Gerrit against `dev` with
-`Pick-to: 6.11 6.10`.
+Both reproduce on a stock build. Both come with a test that fails without the fix. File separately
+from the tab-delegate suggestion. Fixes go to Gerrit against `dev` with `Pick-to: 6.11 6.10`.
 
 ---
 
@@ -12,47 +11,49 @@ them separately from the tab-delegate suggestion, and send the fixes to Gerrit a
 **Component:** WebEngine
 **Affects:** 6.10, 6.11.2, dev
 
-### Summary
+### Symptom
 
-`chrome.i18n.getMessage()` is a synchronous call from the renderer into the browser, over
-`extensions::mojom::RendererHost`. QtWebEngine binds no receiver for that interface, so the reply
-never arrives and the calling thread waits forever. An extension that localises anything at the top
-level of its service worker, which is a normal thing to do, never finishes evaluating that script.
-Registration eventually fails with "Service worker registration failed. Status code: 2".
+The extension loads and enables. Its service worker never runs. At shutdown the log says "Service
+worker registration failed. Status code: 2".
 
-### Steps to reproduce
+### Reproduce
 
-Load an unpacked Manifest V3 extension whose `service_worker.js` starts with
+Unpacked Manifest V3 extension, `service_worker.js` starting with
 
 ```js
 const greeting = chrome.i18n.getMessage("greeting")
 ```
 
-and whose `_locales/en/messages.json` defines `greeting`. Enable it. The worker never runs.
+and `_locales/en/messages.json` defining `greeting`. Enable it.
 
-The `serviceWorkerLocalization` case in `tst_qwebengineextension` covers this.
+Test: `tst_qwebengineextension::serviceWorkerLocalization`.
 
 ### Cause
 
+`chrome.i18n.getMessage()` is a synchronous call into the browser over
+`extensions::mojom::RendererHost`. QtWebEngine binds no receiver for it, so the worker thread waits
+forever inside script evaluation.
+
 `ContentBrowserClientQt::ExposeInterfacesToRenderer` registers `extensions::mojom::EventRouter` and
-nothing else. Chrome registers `RendererStartupHelper::BindForRenderer` for
-`extensions::mojom::RendererHost` alongside it.
+nothing else. Chrome registers `RendererStartupHelper::BindForRenderer` for `RendererHost` next to
+it.
 
-A renderer reaches the browser through three registries, and QtWebEngine serves none of them fully.
-The render process registry has `EventRouter` alone. The render frame registry
-(`RegisterAssociatedInterfaceBindersForRenderFrameHost`) has neither interface, which is a second
-bug hiding behind the first: an extension page never registers an event listener, so it never
-receives an event such as `storage.onChanged` that its own service worker does receive. The service
-worker registry has `ServiceWorkerHost` alone.
+A renderer reaches the browser through three registries. QtWebEngine serves none of them fully:
 
-Sampling the renderer while it hangs shows `V8ScriptRunner::CompileAndRunScript` →
+- render process: `EventRouter` only.
+- render frame (`RegisterAssociatedInterfaceBindersForRenderFrameHost`): neither. This is a second
+  bug behind the first. An extension page registers no event listener, so it never receives an event
+  such as `storage.onChanged` that its own service worker receives.
+- service worker: `ServiceWorkerHost` only.
+
+Renderer stack while hung: `V8ScriptRunner::CompileAndRunScript` →
 `I18nHooksDelegate::HandleGetMessage` → `SharedL10nMap::GetMapForExtension` →
 `mojom::RendererHostProxy::GetMessageBundle` → `mojo::SyncHandleRegistry::Wait`.
 
 ### Fix
 
 Patch 0001 in https://github.com/villekivela/omaweb-qtwebengine-patches registers `EventRouter` and
-`RendererHost` at all three points, which is what `ChromeContentBrowserClient` does.
+`RendererHost` at all three points, as `ChromeContentBrowserClient` does.
 
 ---
 
@@ -62,16 +63,13 @@ Patch 0001 in https://github.com/villekivela/omaweb-qtwebengine-patches register
 **Component:** WebEngine
 **Affects:** 6.10, 6.11.2, dev
 
-### Summary
+### Symptom
 
-Changing a profile's storage name, off-the-record flag or storage path after construction rebuilds
-its `PrefService`. `ProfileQt::setupPrefService` then builds a replacement `ExtensionPrefs` and
-installs it with `ExtensionPrefsFactory::SetInstanceForTesting`. `ExtensionRegistrar`, `EventRouter`
-and the other keyed services created with the profile keep the pointer they cached at construction,
-so they go on reading the instance that was replaced. The next
-`QWebEngineExtensionManager::setExtensionEnabled` dereferences the destroyed `PrefService`.
+Crash in `PrefService::GetPreferenceValue`, reached from `ExtensionPrefs::GetExtensionPref`,
+`blocklist_prefs::IsExtensionBlocklisted`, `ExtensionRegistrar::EnableExtension` and
+`QWebEngineExtensionManager::setExtensionEnabled`.
 
-### Steps to reproduce
+### Reproduce
 
 ```cpp
 QWebEngineProfile profile("Test");
@@ -81,17 +79,20 @@ manager->loadExtension(path);                        // succeeds
 manager->setExtensionEnabled(extension, true);       // crashes
 ```
 
-The crash is in `PrefService::GetPreferenceValue`, called from `ExtensionPrefs::GetExtensionPref`,
-`blocklist_prefs::IsExtensionBlocklisted`, `ExtensionRegistrar::EnableExtension` and
-`QWebEngineExtensionManager::setExtensionEnabled`.
+Test: `tst_qwebengineextension::enableAfterStoragePathChange`.
 
-This is the ordinary path for any application that names a storage path after constructing the
-profile, which the QML `WebEngineProfile` type does by design.
+This is the normal path for an application that sets a storage path after constructing the profile.
+The QML `WebEngineProfile` type does exactly that.
 
-The `enableAfterStoragePathChange` case in `tst_qwebengineextension` covers this.
+### Cause
+
+Changing a profile's storage name, off-the-record flag or storage path rebuilds its `PrefService`.
+`ProfileQt::setupPrefService` then builds a replacement `ExtensionPrefs` and installs it with
+`ExtensionPrefsFactory::SetInstanceForTesting`. `ExtensionRegistrar`, `EventRouter` and the other
+keyed services cached the old pointer at construction and keep using it. It points at a destroyed
+`PrefService`.
 
 ### Fix
 
 Patch 0003 in the same repository points the existing `ExtensionPrefs` at the new `PrefService`
-instead of replacing an instance other services already hold. The hook it adds is guarded by
-`IS_QTWEBENGINE`.
+instead of replacing an instance other services hold. The hook is guarded by `IS_QTWEBENGINE`.
