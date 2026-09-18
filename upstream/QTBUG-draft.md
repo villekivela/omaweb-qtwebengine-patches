@@ -2,29 +2,31 @@
 
 **Type:** Suggestion
 **Component:** WebEngine
-**Affects:** 6.10, 6.11, 6.12 (the extension API since it was introduced)
+**Affects:** 6.10, 6.11, 6.12
 
 ## Summary
 
-`QWebEngineExtensionManager` loads a Manifest V3 package, but an extension that wants to do
-anything with the pages the application is showing cannot: `tabs` carries one function,
-`tabs.update`, which ignores its `tabId` and navigates the sender, and there is no way for the
-application to say which of its pages are tabs or which one the user is looking at.
+`QWebEngineExtensionManager` loads a Manifest V3 package, but an extension can do almost nothing
+with the pages the application shows. The `tabs` namespace has one function, `tabs.update`, and it
+ignores its `tabId` and navigates whichever page asked. Nothing lets the application say which of
+its pages are tabs, or which one the user is looking at.
 
-This proposes the missing half: a delegate through which the application describes its own model,
-so the extension APIs that are about pages can be answered from it rather than from a guess inside
-QtWebEngine.
+I would like to add that. A delegate on the profile, through which the application describes its
+own model, and which the page-related extension APIs then read.
 
-## Why
+## Why a delegate
 
-QtWebEngine cannot know what a tab is. A page may be a tab, a preview shown over another page, a
-popup the application opened for an extension, or a view that is not part of any tab strip. Chrome
-answers these questions from `TabStripModel`, which is browser UI and does not belong in
-QtWebEngine. The application already knows, and is the only thing that does.
+QtWebEngine cannot work out what a tab is, and I do not think it should try. A page might be a tab.
+It might be a preview drawn over another page, or the popup the application opened to show an
+extension's own UI, or a view that belongs to no tab strip at all. Chrome answers these questions
+from `TabStripModel`, which is browser UI and has no place here. The application knows, and nothing
+else does.
+
+I prototyped the alternative first, out of curiosity, by treating every page of a profile as a tab.
+It breaks immediately. The extension's own popup shows up in `tabs.query()`, so an extension asking
+for the active tab can be told about its own UI instead of the page the user is reading.
 
 ## Proposed shape
-
-A delegate the application sets on a profile, along these lines:
 
 ```cpp
 class QWebEngineTabsDelegate
@@ -41,39 +43,43 @@ public:
 void setTabsDelegate(QWebEngineTabsDelegate *delegate);
 ```
 
-With no delegate set, behaviour is what it is today: no page is a tab, and the tab-shaped APIs
-answer empty. An application that sets one opts in to the extension seeing its pages.
+Set no delegate and nothing changes from today. No page is a tab, and the APIs that ask about tabs
+answer with nothing. Setting one is how an application opts in to extensions seeing its pages.
 
-The delegate answers the existing embedder hooks in `extensions/browser`, which already exist for
-exactly this purpose and which QtWebEngine does not currently override:
-`ExtensionsBrowserClient::GetTabAndWindowIdForWebContents`, `IsValidTabId`,
-`GetScriptExecutorForTab`, and `MessagingDelegate::MaybeGetTabInfo` and `GetWebContentsByTabId`.
-Chrome's own implementations of `tabs`, `windows` and `scripting` then work unmodified, because
-they reach a tab through those hooks rather than through anything Chrome-specific.
+Underneath, the delegate answers five hooks that `extensions/browser` already defines and
+QtWebEngine does not override today. `ExtensionsBrowserClient` declares
+`GetTabAndWindowIdForWebContents`, `IsValidTabId` and `GetScriptExecutorForTab`; `MessagingDelegate`
+declares `MaybeGetTabInfo` and `GetWebContentsByTabId`. Chrome's own `tabs`, `windows` and
+`scripting` implementations reach a tab through those hooks and nothing Chrome-specific, so they
+compile here unchanged once something answers them.
 
-## What it makes possible
+## What it buys
 
-Compiling Chrome's schemas for `tabs`, `windows` and `scripting` with the functions that have no
-implementation marked `nocompile`, which is how Chrome itself ships partial namespaces. A prototype
-doing this, against 6.11.1 and 6.11.2, is at
+Chrome's schemas for `tabs`, `windows` and `scripting` can then be compiled with the functions that
+have no implementation marked `nocompile`, which is how Chrome ships partial namespaces itself.
+
+I have a prototype doing this against 6.11.1 and 6.11.2:
 https://github.com/villekivela/omaweb-qtwebengine-patches. It implements `tabs.get`, `getCurrent`,
 `query` and `update`, `windows.get`, `getCurrent`, `getLastFocused` and `getAll`, and
-`permissions.contains` and `getAll`, and compiles Chrome's `scripting` implementation unchanged.
-With it, a real extension, Bitwarden, renders its interface, runs its service worker, collects a
-page's form fields and fills them.
+`permissions.contains` and `getAll`. Chrome's `scripting` implementation compiles with two include
+paths changed and nothing else. With that applied, Bitwarden's extension draws its interface, runs
+its service worker, reads a login form's fields and fills them.
 
-The prototype fills the delegate by treating every page of the profile as a tab, which is the guess
-this proposal exists to remove.
+The prototype is not the proposal. It fills the delegate with the every-page-is-a-tab guess
+described above, which is the part I want to replace with something the application supplies.
 
-## Questions for the maintainers
+## Questions
 
-1. Is an application-supplied tab model something QtWebEngine wants at all, or is the extension API
-   deliberately scoped to packages that do not look at the application's pages?
-2. If it is wanted, is a delegate on the profile the right shape, or would you rather the
-   application registered pages explicitly as they come and go?
-3. Would you take the compiled-with-`nocompile` approach to Chrome's schemas, or do you want Qt to
-   own smaller schemas of its own, as `qtwebengine/common/extensions/api/tabs.json` does today?
+1. Do you want an application-supplied tab model at all? If the extension API is deliberately scoped
+   to packages that never look at the application's pages, say so and I will stop here. A quick no
+   is more useful to me than a maybe.
+2. If you do want one, is a delegate on the profile the right shape? The alternative I considered is
+   the application registering and unregistering pages as they come and go, which is more work for
+   the application but removes any question about when the delegate gets called.
+3. Would you take Chrome's schemas compiled with `nocompile`, or would you rather Qt kept schemas of
+   its own, as `qtwebengine/common/extensions/api/tabs.json` does now? The first tracks upstream for
+   free and carries functions that throw. The second is smaller and honest about what exists.
 
-Two defects found while prototyping are reported separately, since they stand on their own:
-an extension that calls `chrome.i18n.getMessage` from its service worker never finishes evaluating,
-and `setExtensionEnabled` crashes after a profile's storage path changes.
+I found two defects while building this and will report them separately, since they are ordinary
+bugs in what 6.11 already ships. An extension that calls `chrome.i18n.getMessage` from its service
+worker hangs forever, and `setExtensionEnabled` crashes after a profile's storage path changes.
