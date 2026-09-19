@@ -48,11 +48,25 @@ Measured once, across Chromium 140 to 146: those files changed by 4 to 13 lines 
 lost two of the six calls it makes because those migrations finished upstream. Under an hour. All
 five embedder hooks the design depends on were still there with the same names.
 
-## When it goes wrong
+## When a rebase is late
 
-Stop, and ship the release on stock Qt with Known extensions reported absent. The engine does not
-wait for this series. A browser that is late on a Chromium security fix because an extension patch
-would not apply has its priorities backwards.
+Omaweb ships its own engine, so the release cadence is Omaweb's. A late patched engine means a late
+update, not a broken one. Readers keep the Omaweb they have, with the engine it came with, and
+everything goes on working.
+
+The cost is a security lag instead. While the rebase is being fixed, readers stay on the older
+Chromium, and they cannot see that from the outside.
+
+The target is one night. A Qt release carrying security fixes gets rebased and built the same
+evening and published the next day. That delay is acceptable.
+
+If a rebase cannot make that window, drop patches 0004 to 0006 and ship anyway. 0001 and 0003 are
+small and apply to anything, so the engine still carries the Chromium fix, and Known extensions go
+missing until a follow-up engine update restores them. Say so in the release notes: the vault data
+is untouched and comes back with the extension.
+
+That is the escape hatch, not the routine. Reach for it when the alternative is sitting on a
+security fix for days.
 
 ## If the engine is distributed
 
