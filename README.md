@@ -47,6 +47,11 @@ changed. It reaches a tab through the delegate from 0004. _Follows 0004._
 launcher and port dispatcher, with the manifest looked up through QtWebEngine path keys. _Follows
 0004._
 
+**0007, let an extension ask the application to open a page.** `tabs.create` and `windows.create`
+arrive where a page's own `window.open()` arrives, so the application decides what opening a page
+means. Bitwarden reaches this when its popup asks to open in a window of its own, which is how it
+shows its settings: it has no options page, only routes inside the popup document. _Follows 0004._
+
 ## The open question
 
 `TabsDelegateQt` is internal, and `ExtensionsBrowserClientQt` fills it by treating every page of the
@@ -58,13 +63,14 @@ one is active. That is what the QTBUG draft asks for. Ask before writing the API
 
 ## Tests
 
-22 tests pass with the series applied. Four of them fail on a stock build, which is why they are
+23 tests pass with the series applied. Five of them fail on a stock build, which is why they are
 worth having:
 
 - `serviceWorkerLocalization` fails
 - `enableAfterStoragePathChange` crashes, signal 11
 - `tabsWindowsAndScripting` fails
 - `nativeMessaging` fails
+- `anExtensionOpensAPage` fails
 
 `scripts/verify.sh` runs both halves and reports them.
 
@@ -72,7 +78,7 @@ worth having:
 
 | Release | Applying | Build | Tests | People's time |
 | ------- | -------- | ----- | ----- | ------------- |
-| 6.11.2  | 6 of 6, no conflicts | clean | 22 of 22 | none |
+| 6.11.2  | 6 of 6, no conflicts | clean | 23 of 23 | none |
 
 That row is the easy case. 6.11.1 and 6.11.2 share a Chromium base, so nothing under patches 0005
 and 0006 moved.

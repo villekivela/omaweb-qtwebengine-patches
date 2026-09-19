@@ -1,0 +1,441 @@
+From 182cd61fc0dcc75cbb21983e8be983bc39818f36 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Ville=20Kivela=CC=88?= <vkivela@hotmail.com>
+Date: Sat, 19 Sep 2026 23:02:38 +0300
+Subject: [PATCH 7/7] extensions: let an extension ask the application to open
+ a page
+
+tabs.create and windows.create arrive where a page's own window.open()
+arrives, through AddNewContents and adoptNewWindow, so the application
+decides what opening a page means with its own surfaces and its own
+rules. Declining is an error the extension is told about rather than a
+call that never returns.
+
+The page is handed over before it is navigated. Navigating first builds
+its render view while the view still has no client, and the adoption then
+walks into a view delegate that was never set, which is a crash in
+RenderViewHostChanged rather than a warning.
+
+Bitwarden reaches this when its popup asks to open in a window of its
+own, which is how its settings are shown: it has no options page, only
+routes inside the popup document.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_018xbboRpMqGunvBB9DyGVY2
+---
+ .../browser/extensions/api/tabs/tabs_api.cc   | 30 ++++++++++++
+ .../browser/extensions/api/tabs/tabs_api.h    |  6 +++
+ .../extensions/api/windows/windows_api.cc     | 49 +++++++++++++++++++
+ .../extensions/api/windows/windows_api.h      |  6 +++
+ .../browser/extensions/tab_registry_qt.cc     |  7 +++
+ .../browser/extensions/tab_registry_qt.h      | 11 +++++
+ .../common/extensions/api/tabs.json           |  3 +-
+ .../common/extensions/api/windows.json        |  3 +-
+ .../extensions_browser_client_qt.cpp          | 43 ++++++++++++++++
+ .../extensions/extensions_browser_client_qt.h |  2 +
+ .../resources/tabs_ext/content_script.js      | 13 +++++
+ .../resources/tabs_ext/service_worker.js      |  7 +++
+ .../extensions/tst_qwebengineextension.cpp    | 33 +++++++++++++
+ 13 files changed, 209 insertions(+), 4 deletions(-)
+
+diff --git a/src/3rdparty/chromium/qtwebengine/browser/extensions/api/tabs/tabs_api.cc b/src/3rdparty/chromium/qtwebengine/browser/extensions/api/tabs/tabs_api.cc
+index fe267560c9..bb52d21705 100644
+--- a/src/3rdparty/chromium/qtwebengine/browser/extensions/api/tabs/tabs_api.cc
++++ b/src/3rdparty/chromium/qtwebengine/browser/extensions/api/tabs/tabs_api.cc
+@@ -109,6 +109,36 @@ static std::string TabNotFoundError(int tab_id) {
+   return ErrorUtils::FormatErrorMessage("No tab with id: *.", base::NumberToString(tab_id));
+ }
+ 
++ExtensionFunction::ResponseAction TabsCreateFunction::Run() {
++  std::optional<tabs::Create::Params> params = tabs::Create::Params::Create(args());
++  EXTENSION_FUNCTION_VALIDATE(params);
++
++  GURL url;
++  std::string error;
++  if (params->create_properties.url) {
++    if (!PrepareURLForNavigation(*params->create_properties.url, extension(), &url, &error))
++      return RespondNow(Error(std::move(error)));
++    if (url.SchemeIs(url::kJavaScriptScheme))
++      return RespondNow(Error("JavaScript URLs are not allowed in chrome.tabs.create."));
++  } else {
++    url = GURL(url::kAboutBlankURL);
++  }
++
++  const bool active = params->create_properties.active.value_or(true);
++  content::WebContents* contents =
++      TabRegistryQt::Get()->OpenPage(browser_context(), url, active);
++  if (!contents)
++    return RespondNow(Error("The application did not open a tab."));
++
++  base::Value::Dict tab = TabRegistryQt::Get()->CreateTabValue(contents);
++  // The navigation has not committed yet, so the tab has no url. Chrome
++  // answers with the address it was asked for as pendingUrl, and an extension
++  // that follows the tab it just opened reads that.
++  if (!tab.FindString("pendingUrl"))
++    tab.Set("pendingUrl", url.spec());
++  return RespondNow(WithArguments(std::move(tab)));
++}
++
+ ExtensionFunction::ResponseAction TabsGetFunction::Run() {
+   std::optional<tabs::Get::Params> params = tabs::Get::Params::Create(args());
+   EXTENSION_FUNCTION_VALIDATE(params);
+diff --git a/src/3rdparty/chromium/qtwebengine/browser/extensions/api/tabs/tabs_api.h b/src/3rdparty/chromium/qtwebengine/browser/extensions/api/tabs/tabs_api.h
+index 08ffda0ec9..48fef788ad 100644
+--- a/src/3rdparty/chromium/qtwebengine/browser/extensions/api/tabs/tabs_api.h
++++ b/src/3rdparty/chromium/qtwebengine/browser/extensions/api/tabs/tabs_api.h
+@@ -13,6 +13,12 @@
+ 
+ namespace extensions {
+ 
++class TabsCreateFunction : public ExtensionFunction {
++  ~TabsCreateFunction() override {}
++  ResponseAction Run() override;
++  DECLARE_EXTENSION_FUNCTION("tabs.create", TABS_CREATE)
++};
++
+ class TabsGetFunction : public ExtensionFunction {
+   ~TabsGetFunction() override {}
+   ResponseAction Run() override;
+diff --git a/src/3rdparty/chromium/qtwebengine/browser/extensions/api/windows/windows_api.cc b/src/3rdparty/chromium/qtwebengine/browser/extensions/api/windows/windows_api.cc
+index 1fd37b5ce4..6c923085b0 100644
+--- a/src/3rdparty/chromium/qtwebengine/browser/extensions/api/windows/windows_api.cc
++++ b/src/3rdparty/chromium/qtwebengine/browser/extensions/api/windows/windows_api.cc
+@@ -7,6 +7,8 @@
+ #include "content/public/browser/browser_context.h"
+ #include "content/public/browser/web_contents.h"
+ #include "extensions/common/error_utils.h"
++#include "extensions/common/extension.h"
++#include "url/url_constants.h"
+ #include "qtwebengine/browser/extensions/tab_registry_qt.h"
+ #include "qtwebengine/common/extensions/api/windows.h"
+ 
+@@ -43,6 +45,53 @@ std::string NoWindowError(int window_id) {
+ 
+ }  // namespace
+ 
++ExtensionFunction::ResponseAction WindowsCreateFunction::Run() {
++  std::optional<windows::Create::Params> params = windows::Create::Params::Create(args());
++  EXTENSION_FUNCTION_VALIDATE(params);
++
++  // QtWebEngine has one window per browser context, so a window an extension
++  // asks for is a page the application opens. Which surface it opens in is the
++  // application's decision, not this one's.
++  std::vector<std::string> urls;
++  if (params->create_data && params->create_data->url) {
++    if (params->create_data->url->as_string)
++      urls.push_back(*params->create_data->url->as_string);
++    else if (params->create_data->url->as_strings)
++      urls = *params->create_data->url->as_strings;
++  }
++  if (urls.empty())
++    urls.push_back(url::kAboutBlankURL);
++
++  content::WebContents* opened = nullptr;
++  for (const std::string& candidate : urls) {
++    GURL url = GURL(candidate);
++    if (!url.is_valid() && extension())
++      url = extension()->GetResourceURL(candidate);
++    if (!url.is_valid())
++      return RespondNow(Error(ErrorUtils::FormatErrorMessage("Invalid url: \"*\".", candidate)));
++    if (url.SchemeIs(url::kJavaScriptScheme))
++      return RespondNow(Error("JavaScript URLs are not allowed in chrome.windows.create."));
++    content::WebContents* contents =
++        TabRegistryQt::Get()->OpenPage(browser_context(), url, true);
++    if (!contents)
++      return RespondNow(Error("The application did not open a window."));
++    if (!opened)
++      opened = contents;
++  }
++
++  windows::Window window;
++  window.id = TabRegistryQt::kWindowId;
++  window.focused = true;
++  window.incognito = browser_context()->IsOffTheRecord();
++  window.type = windows::WindowType::kNormal;
++  window.state = windows::WindowState::kNormal;
++  window.always_on_top = false;
++  std::vector<api::tabs::Tab> tabs;
++  tabs.push_back(TabRegistryQt::Get()->CreateTab(opened));
++  window.tabs = std::move(tabs);
++  return RespondNow(WithArguments(window.ToValue()));
++}
++
+ ExtensionFunction::ResponseAction WindowsGetFunction::Run() {
+   std::optional<windows::Get::Params> params = windows::Get::Params::Create(args());
+   EXTENSION_FUNCTION_VALIDATE(params);
+diff --git a/src/3rdparty/chromium/qtwebengine/browser/extensions/api/windows/windows_api.h b/src/3rdparty/chromium/qtwebengine/browser/extensions/api/windows/windows_api.h
+index 5dc2b18b9a..2d61fcf489 100644
+--- a/src/3rdparty/chromium/qtwebengine/browser/extensions/api/windows/windows_api.h
++++ b/src/3rdparty/chromium/qtwebengine/browser/extensions/api/windows/windows_api.h
+@@ -9,6 +9,12 @@
+ namespace extensions {
+ 
+ // QtWebEngine reports one window per browser context holding every tab the embedder lists.
++class WindowsCreateFunction : public ExtensionFunction {
++  ~WindowsCreateFunction() override {}
++  ResponseAction Run() override;
++  DECLARE_EXTENSION_FUNCTION("windows.create", WINDOWS_CREATE)
++};
++
+ class WindowsGetFunction : public ExtensionFunction {
+   ~WindowsGetFunction() override {}
+   ResponseAction Run() override;
+diff --git a/src/3rdparty/chromium/qtwebengine/browser/extensions/tab_registry_qt.cc b/src/3rdparty/chromium/qtwebengine/browser/extensions/tab_registry_qt.cc
+index 06335affb5..b62b4a76fc 100644
+--- a/src/3rdparty/chromium/qtwebengine/browser/extensions/tab_registry_qt.cc
++++ b/src/3rdparty/chromium/qtwebengine/browser/extensions/tab_registry_qt.cc
+@@ -99,6 +99,13 @@ content::WebContents* TabRegistryQt::GetActiveTab(content::BrowserContext* conte
+   return delegate_->GetActiveTab(context);
+ }
+ 
++content::WebContents* TabRegistryQt::OpenPage(content::BrowserContext* context,
++                                              const GURL& url, bool active) {
++  if (!delegate_)
++    return nullptr;
++  return delegate_->OpenPage(context, url, active);
++}
++
+ ScriptExecutor* TabRegistryQt::GetScriptExecutor(content::WebContents* web_contents) {
+   if (!web_contents)
+     return nullptr;
+diff --git a/src/3rdparty/chromium/qtwebengine/browser/extensions/tab_registry_qt.h b/src/3rdparty/chromium/qtwebengine/browser/extensions/tab_registry_qt.h
+index 3b2d6cc336..46803949ad 100644
+--- a/src/3rdparty/chromium/qtwebengine/browser/extensions/tab_registry_qt.h
++++ b/src/3rdparty/chromium/qtwebengine/browser/extensions/tab_registry_qt.h
+@@ -9,6 +9,8 @@
+ #include "base/values.h"
+ #include "qtwebengine/common/extensions/api/tabs.h"
+ 
++class GURL;
++
+ namespace content {
+ class BrowserContext;
+ class WebContents;
+@@ -30,6 +32,14 @@ class TabsDelegateQt {
+       content::BrowserContext* context) = 0;
+   // The tab the user is looking at, or null when none is.
+   virtual content::WebContents* GetActiveTab(content::BrowserContext* context) = 0;
++  // Open |url| for an extension that asked for a tab or a window, and answer
++  // with the page that now shows it. The application decides what opening
++  // means: an extension's own page may belong in whatever surface already
++  // shows that extension, and a web page belongs in a tab. Null means the
++  // application declined, which the extension is told about rather than left
++  // waiting for.
++  virtual content::WebContents* OpenPage(content::BrowserContext* context, const GURL& url,
++                                         bool active) = 0;
+ };
+ 
+ class TabRegistryQt {
+@@ -46,6 +56,7 @@ class TabRegistryQt {
+ 
+   std::vector<content::WebContents*> GetTabs(content::BrowserContext* context);
+   content::WebContents* GetActiveTab(content::BrowserContext* context);
++  content::WebContents* OpenPage(content::BrowserContext* context, const GURL& url, bool active);
+ 
+   // The script executor of |web_contents|, created on first use and owned by it. Injecting a
+   // script into a tab goes through this, so a WebContents the delegate does not list as a tab
+diff --git a/src/3rdparty/chromium/qtwebengine/common/extensions/api/tabs.json b/src/3rdparty/chromium/qtwebengine/common/extensions/api/tabs.json
+index 0e38e9f9b6..0b9cd971df 100644
+--- a/src/3rdparty/chromium/qtwebengine/common/extensions/api/tabs.json
++++ b/src/3rdparty/chromium/qtwebengine/common/extensions/api/tabs.json
+@@ -538,8 +538,7 @@
+               "description": "The created tab."
+             }
+           ]
+-        },
+-        "nocompile": true
++        }
+       },
+       {
+         "name": "duplicate",
+diff --git a/src/3rdparty/chromium/qtwebengine/common/extensions/api/windows.json b/src/3rdparty/chromium/qtwebengine/common/extensions/api/windows.json
+index a434f5a199..9f889f59d6 100644
+--- a/src/3rdparty/chromium/qtwebengine/common/extensions/api/windows.json
++++ b/src/3rdparty/chromium/qtwebengine/common/extensions/api/windows.json
+@@ -364,8 +364,7 @@
+               "optional": true
+             }
+           ]
+-        },
+-        "nocompile": true
++        }
+       },
+       {
+         "name": "update",
+diff --git a/src/core/extensions/extensions_browser_client_qt.cpp b/src/core/extensions/extensions_browser_client_qt.cpp
+index eacf5e86ba..ac2062e473 100644
+--- a/src/core/extensions/extensions_browser_client_qt.cpp
++++ b/src/core/extensions/extensions_browser_client_qt.cpp
+@@ -19,6 +19,9 @@
+ #include "base/memory/ref_counted_memory.h"
+ #include "chrome/browser/extensions/api/generated_api_registration.h"
+ #include "chrome/browser/profiles/profile.h"
++#include "content/public/browser/navigation_controller.h"
++#include "third_party/blink/public/mojom/window_features/window_features.mojom.h"
++#include "content/public/browser/web_contents_delegate.h"
+ #include "content/public/browser/browser_context.h"
+ #include "content/public/browser/render_frame_host.h"
+ #include "extensions/browser/api/core_extensions_browser_api_provider.h"
+@@ -49,6 +52,7 @@
+ #include "extensions_api_client_qt.h"
+ #include "extensions_browser_client_qt.h"
+ #include "extension_host_delegate_qt.h"
++#include "content/public/browser/web_contents.h"
+ #include "profile_adapter.h"
+ #include "profile_qt.h"
+ #include "web_contents_adapter.h"
+@@ -300,6 +304,45 @@ content::WebContents *ExtensionsBrowserClientQt::GetActiveTab(content::BrowserCo
+     return active;
+ }
+ 
++// An extension asking for a tab uses the door a page's own window.open() uses.
++// The application is handed the new page through adoptNewWindow with the
++// address the extension asked for, and decides there what opening it means:
++// its own surfaces, its own rules, its own refusal.
++content::WebContents *ExtensionsBrowserClientQt::OpenPage(content::BrowserContext *context,
++                                                          const GURL &url, bool active)
++{
++    // The delegate of a page already on show is what carries the request to the
++    // application, so a context showing nothing cannot open anything.
++    content::WebContents *source = GetActiveTab(context);
++    if (!source) {
++        std::vector<content::WebContents *> tabs = GetTabs(context);
++        source = tabs.empty() ? nullptr : tabs.front();
++    }
++    if (!source || !source->GetDelegate())
++        return nullptr;
++
++    content::WebContents::CreateParams params(context);
++    std::unique_ptr<content::WebContents> created = content::WebContents::Create(params);
++    content::WebContents *contents = created.get();
++
++    // The page is handed over before it goes anywhere. Navigating first builds
++    // its render view while the view still has no client, and the adoption then
++    // walks into a view delegate that was never set.
++    bool blocked = false;
++    source->GetDelegate()->AddNewContents(
++            source, std::move(created), url,
++            active ? WindowOpenDisposition::NEW_FOREGROUND_TAB
++                   : WindowOpenDisposition::NEW_BACKGROUND_TAB,
++            blink::mojom::WindowFeatures(), /* user_gesture = */ true, &blocked);
++    if (blocked)
++        return nullptr;
++
++    content::NavigationController::LoadURLParams load(url);
++    load.transition_type = ui::PAGE_TRANSITION_AUTO_TOPLEVEL;
++    contents->GetController().LoadURLWithParams(load);
++    return contents;
++}
++
+ ScriptExecutor *ExtensionsBrowserClientQt::GetScriptExecutorForTab(content::WebContents &web_contents)
+ {
+     return TabRegistryQt::Get()->GetScriptExecutor(&web_contents);
+diff --git a/src/core/extensions/extensions_browser_client_qt.h b/src/core/extensions/extensions_browser_client_qt.h
+index 1ad0f82f0a..fdd4848b91 100644
+--- a/src/core/extensions/extensions_browser_client_qt.h
++++ b/src/core/extensions/extensions_browser_client_qt.h
+@@ -31,6 +31,8 @@ public:
+     // is the active tab, until an embedder-facing API lets the application say otherwise.
+     std::vector<content::WebContents *> GetTabs(content::BrowserContext *context) override;
+     content::WebContents *GetActiveTab(content::BrowserContext *context) override;
++    content::WebContents *OpenPage(content::BrowserContext *context, const GURL &url,
++                                   bool active) override;
+ 
+     void GetTabAndWindowIdForWebContents(content::WebContents *web_contents, int *tab_id,
+                                          int *window_id) override;
+diff --git a/tests/auto/widgets/extensions/resources/tabs_ext/content_script.js b/tests/auto/widgets/extensions/resources/tabs_ext/content_script.js
+index 73b6aa49f7..eafd66ed3d 100644
+--- a/tests/auto/widgets/extensions/resources/tabs_ext/content_script.js
++++ b/tests/auto/widgets/extensions/resources/tabs_ext/content_script.js
+@@ -4,3 +4,16 @@ chrome.runtime.sendMessage("probe", (response) => {
+     testNode.textContent = JSON.stringify(response)
+     document.body.appendChild(testNode)
+ })
++
++// The page cannot reach chrome.* itself, so the test asks from its own world
++// and the content script carries the request across.
++window.addEventListener("message", event => {
++    if (!event.data || event.data.omawebOpen !== true)
++        return
++    chrome.runtime.sendMessage("open", response => {
++        let node = document.createElement("div")
++        node.id = "openedNode"
++        node.textContent = JSON.stringify(response)
++        document.body.appendChild(node)
++    })
++})
+diff --git a/tests/auto/widgets/extensions/resources/tabs_ext/service_worker.js b/tests/auto/widgets/extensions/resources/tabs_ext/service_worker.js
+index d20c54a0b1..fe30b19892 100644
+--- a/tests/auto/widgets/extensions/resources/tabs_ext/service_worker.js
++++ b/tests/auto/widgets/extensions/resources/tabs_ext/service_worker.js
+@@ -1,4 +1,11 @@
+ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
++    if (message === "open") {
++        (async () => {
++            const tab = await chrome.tabs.create({ url: "index.html" })
++            sendResponse({ openedId: tab.id, pending: tab.pendingUrl })
++        })()
++        return true;
++    }
+     if (message !== "probe")
+         return false;
+     (async () => {
+diff --git a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
+index 8b1398f323..65537ba634 100644
+--- a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
++++ b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
+@@ -7,6 +7,7 @@
+ #include <QtWebEngineCore/qwebengineprofile.h>
+ #include <QtWebEngineCore/qwebenginepage.h>
+ #include <QtWebEngineCore/qwebenginedownloadrequest.h>
++#include <QtWebEngineCore/qwebenginenewwindowrequest.h>
+ #include <QtWebEngineCore/qwebengineextensionmanager.h>
+ #include <httpserver.h>
+ #include <QtCore/qscopeguard.h>
+@@ -49,6 +50,7 @@ private Q_SLOTS:
+     void enableAfterStoragePathChange();
+     void tabsWindowsAndScripting();
+     void nativeMessaging();
++    void anExtensionOpensAPage();
+ 
+ private:
+     int installedFiles();
+@@ -547,5 +549,36 @@ void tst_QWebEngineExtension::nativeMessaging()
+ #endif
+ }
+ 
++void tst_QWebEngineExtension::anExtensionOpensAPage()
++{
++    // An extension asking for a tab arrives where a page's own window.open()
++    // arrives, so the application decides what opening one means. Here that is
++    // a second page, which the extension is then told about.
++    HttpServer server;
++    server.setResourceDirs({ resourcesPath() });
++    QVERIFY(server.start());
++
++    QWebEngineExtensionInfo extension = loadExtensionSync(resourcesPath() + "tabs_ext"_L1);
++    QVERIFY(extension.isLoaded());
++    m_manager->setExtensionEnabled(extension, true);
++
++    QSignalSpy loadSpy(m_page, SIGNAL(loadFinished(bool)));
++    m_page->load(server.url("/index.html"_L1));
++    QTRY_COMPARE(loadSpy.size(), 1);
++    QTRY_VERIFY(evaluateJavaScriptSync(m_page, "!!document.getElementById('testNode')").toBool());
++
++    std::unique_ptr<QWebEnginePage> opened;
++    connect(m_page, &QWebEnginePage::newWindowRequested, this,
++            [&opened, this](QWebEngineNewWindowRequest &request) {
++                opened = std::make_unique<QWebEnginePage>(m_profile);
++                request.openIn(opened.get());
++            });
++
++    evaluateJavaScriptSync(m_page, "window.postMessage({ omawebOpen: true }, '*')");
++    QTRY_VERIFY(opened);
++    QTRY_VERIFY(evaluateJavaScriptSync(m_page, "!!document.getElementById('openedNode')").toBool());
++    QTRY_COMPARE(opened->url().path(), "/index.html"_L1);
++}
++
+ QTEST_MAIN(tst_QWebEngineExtension)
+ #include "tst_qwebengineextension.moc"
+-- 
+2.54.0 (Apple Git-157)
+

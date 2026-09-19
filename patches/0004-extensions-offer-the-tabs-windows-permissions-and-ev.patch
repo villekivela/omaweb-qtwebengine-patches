@@ -1,7 +1,7 @@
-From 69720384ac80afb364ec0aa0c4fb83b8adf17423 Mon Sep 17 00:00:00 2001
+From dd369483ef58520d97f18439414f95df6a744388 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivela=CC=88?= <vkivela@hotmail.com>
 Date: Fri, 18 Sep 2026 17:47:06 +0300
-Subject: [PATCH 4/6] extensions: offer the tabs, windows, permissions and
+Subject: [PATCH 4/7] extensions: offer the tabs, windows, permissions and
  event namespaces
 
 Compile Chrome's schemas for tabs, windows, permissions, webNavigation,
@@ -6108,10 +6108,10 @@ index 0000000000..a434f5a199
 +  }
 +]
 diff --git a/src/core/configure/BUILD.root.gn.in b/src/core/configure/BUILD.root.gn.in
-index 0333d758ed..2ab768d59d 100644
+index cf9a3fe749..7946086c6b 100644
 --- a/src/core/configure/BUILD.root.gn.in
 +++ b/src/core/configure/BUILD.root.gn.in
-@@ -455,6 +455,7 @@ source_set("qtwebengine_sources") {
+@@ -463,6 +463,7 @@ source_set("qtwebengine_sources") {
        "//extensions:extensions_resources",
        "//extensions/strings",
        "//qtwebengine/browser/extensions/api:api_registration",
@@ -6119,7 +6119,7 @@ index 0333d758ed..2ab768d59d 100644
        "//qtwebengine/common/extensions/api:api",
        "//qtwebengine/browser/extensions/webui:mojo_bindings",
        "//qtwebengine/browser/extensions/resources",
-@@ -470,6 +471,10 @@ source_set("qtwebengine_sources") {
+@@ -478,6 +479,10 @@ source_set("qtwebengine_sources") {
        "//chrome/common/extensions/permissions/chrome_permission_message_provider.h",
        "//chrome/common/extensions/permissions/chrome_permission_message_rules.cc",
        "//chrome/common/extensions/permissions/chrome_permission_message_rules.h",
