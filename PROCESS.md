@@ -10,7 +10,7 @@ when, and what it costs when something goes wrong.
 | Qt publishes | The baseline check in the Omaweb repository notices and opens an issue with a due date | automated, daily | none |
 | Same day | `series-applies.yml` applies the series to the new release and reports a conflict | automated, daily | minutes |
 | Same evening | Read the Qt release notes for what the release carries | you | minutes |
-| Same evening | Development build on your own machine, then `verify.sh` | you, one command | hours, unattended |
+| Same evening | Qualifying build on whatever machine you are at, then `verify.sh` | you, one command | hours, unattended |
 | Next morning | `build-on-hetzner.sh` for x86_64 and aarch64 | you, two commands | hours each, unattended, under a euro |
 | Next morning | Package and sign, publish to the repository | you | minutes |
 | After | Record the release in the table in `README.md` | you | a line |
@@ -26,9 +26,14 @@ correctly, and what gets signed.
 before anyone spends a night. This is the cheap case and the common one. Fix it
 in a local tree and export the series back, as below.
 
-**It applies, and the build fails.** Found hours in, on your own machine rather
-than a rented one, because the development build runs first. Usually an API the
-patches call has moved. Fix, rebuild, export.
+**It applies, and the build fails.** Found hours in, at your own machine rather
+than on a rented one, because the qualifying build runs first and there is a
+person at it. Usually an API the patches call has moved. Fix, rebuild, export.
+
+That build is whatever you are working on, macOS or Linux. `refresh.sh` and
+`verify.sh` read `uname` and configure accordingly. What a macOS build cannot do
+is ship, so it qualifies the series and the rented Linux machines produce what
+readers install.
 
 **It builds, and the gate fails.** `verify.sh` says either that the patched
 engine regressed or that a test no longer fails on a stock one. The second means
