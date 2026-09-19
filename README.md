@@ -66,9 +66,15 @@ the series, build, run the tests, then run the
 [extension probe](https://github.com/villekivela/omaweb-extension-probe) against a real extension.
 Record what a conflict cost in people's time rather than machine time.
 
-| Release | Patches applying | People's time |
-| --- | --- | --- |
-| 6.11.2 | 6 of 6, no conflicts, no fuzz | none |
+| Release | Patches applying | Build | Tests | People's time |
+| --- | --- | --- | --- | --- |
+| 6.11.2 | 6 of 6, no conflicts, no fuzz | clean | 22 of 22 | none |
+
+One caveat about that row. 6.11.1 and 6.11.2 share a Chromium base, so nothing the copied Chrome
+files depend on moved. Patches 0005 and 0006 carry copies of `scripting_api.cc` and the native
+messaging stack, and a Chromium major bump means re-copying them from the new Chromium and adapting
+them again. Qt's `dev` is still on the 140-based fork and a 146-based branch exists, so that bump
+lands in 6.12 or 6.13. Until the series has been through one, the cost of a rebase is unmeasured.
 
 ## Licence
 

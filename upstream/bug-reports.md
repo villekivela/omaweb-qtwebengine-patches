@@ -13,15 +13,14 @@ from the tab-delegate suggestion. Fixes go to Gerrit against `dev` with `Pick-to
 
 ### Symptom
 
-The extension loads and enables. Its service worker never runs. At shutdown the log says "Service
-worker registration failed. Status code: 2".
+The extension loads and enables. Its service worker never runs. At shutdown the log says "Service worker registration failed. Status code: 2".
 
 ### Reproduce
 
 Unpacked Manifest V3 extension, `service_worker.js` starting with
 
 ```js
-const greeting = chrome.i18n.getMessage("greeting")
+const greeting = chrome.i18n.getMessage("greeting");
 ```
 
 and `_locales/en/messages.json` defining `greeting`. Enable it.
@@ -30,13 +29,9 @@ Test: `tst_qwebengineextension::serviceWorkerLocalization`.
 
 ### Cause
 
-`chrome.i18n.getMessage()` is a synchronous call into the browser over
-`extensions::mojom::RendererHost`. QtWebEngine binds no receiver for it, so the worker thread waits
-forever inside script evaluation.
+`chrome.i18n.getMessage()` is a synchronous call into the browser over `extensions::mojom::RendererHost`. QtWebEngine binds no receiver for it, so the worker thread waits forever inside script evaluation.
 
-`ContentBrowserClientQt::ExposeInterfacesToRenderer` registers `extensions::mojom::EventRouter` and
-nothing else. Chrome registers `RendererStartupHelper::BindForRenderer` for `RendererHost` next to
-it.
+`ContentBrowserClientQt::ExposeInterfacesToRenderer` registers `extensions::mojom::EventRouter` and nothing else. Chrome registers `RendererStartupHelper::BindForRenderer` for `RendererHost` next to it.
 
 A renderer reaches the browser through three registries. QtWebEngine serves none of them fully:
 
@@ -46,9 +41,7 @@ A renderer reaches the browser through three registries. QtWebEngine serves none
   such as `storage.onChanged` that its own service worker receives.
 - service worker: `ServiceWorkerHost` only.
 
-Renderer stack while hung: `V8ScriptRunner::CompileAndRunScript` →
-`I18nHooksDelegate::HandleGetMessage` → `SharedL10nMap::GetMapForExtension` →
-`mojom::RendererHostProxy::GetMessageBundle` → `mojo::SyncHandleRegistry::Wait`.
+Renderer stack while hung: `V8ScriptRunner::CompileAndRunScript` → `I18nHooksDelegate::HandleGetMessage` → `SharedL10nMap::GetMapForExtension` → `mojom::RendererHostProxy::GetMessageBundle` → `mojo::SyncHandleRegistry::Wait`.
 
 ### Fix
 
@@ -65,9 +58,7 @@ Patch 0001 in https://github.com/villekivela/omaweb-qtwebengine-patches register
 
 ### Symptom
 
-Crash in `PrefService::GetPreferenceValue`, reached from `ExtensionPrefs::GetExtensionPref`,
-`blocklist_prefs::IsExtensionBlocklisted`, `ExtensionRegistrar::EnableExtension` and
-`QWebEngineExtensionManager::setExtensionEnabled`.
+Crash in `PrefService::GetPreferenceValue`, reached from `ExtensionPrefs::GetExtensionPref`, `blocklist_prefs::IsExtensionBlocklisted`, `ExtensionRegistrar::EnableExtension` and `QWebEngineExtensionManager::setExtensionEnabled`.
 
 ### Reproduce
 
@@ -86,13 +77,8 @@ The QML `WebEngineProfile` type does exactly that.
 
 ### Cause
 
-Changing a profile's storage name, off-the-record flag or storage path rebuilds its `PrefService`.
-`ProfileQt::setupPrefService` then builds a replacement `ExtensionPrefs` and installs it with
-`ExtensionPrefsFactory::SetInstanceForTesting`. `ExtensionRegistrar`, `EventRouter` and the other
-keyed services cached the old pointer at construction and keep using it. It points at a destroyed
-`PrefService`.
+Changing a profile's storage name, off-the-record flag or storage path rebuilds its `PrefService`. `ProfileQt::setupPrefService` then builds a replacement `ExtensionPrefs` and installs it with `ExtensionPrefsFactory::SetInstanceForTesting`. `ExtensionRegistrar`, `EventRouter` and the other keyed services cached the old pointer at construction and keep using it. It points at a destroyed `PrefService`.
 
 ### Fix
 
-Patch 0003 in the same repository points the existing `ExtensionPrefs` at the new `PrefService`
-instead of replacing an instance other services hold. The hook is guarded by `IS_QTWEBENGINE`.
+Patch 0003 in the same repository points the existing `ExtensionPrefs` at the new `PrefService` instead of replacing an instance other services hold. The hook is guarded by `IS_QTWEBENGINE`.
