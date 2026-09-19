@@ -1,20 +1,63 @@
 # Keeping the series alive
 
-Qt publishes a release every couple of months. Each one needs two commands and a night of machine
-time.
+Qt publishes a release every couple of months. What follows is who does what,
+when, and what it costs when something goes wrong.
+
+## The run, in order
+
+| When | What | Who | Cost |
+| ---- | ---- | --- | ---- |
+| Qt publishes | The baseline check in the Omaweb repository notices and opens an issue with a due date | automated, daily | none |
+| Same day | `series-applies.yml` applies the series to the new release and reports a conflict | automated, daily | minutes |
+| Same evening | Read the Qt release notes for what the release carries | you | minutes |
+| Same evening | Development build on your own machine, then `verify.sh` | you, one command | hours, unattended |
+| Next morning | `build-on-hetzner.sh` for x86_64 and aarch64 | you, two commands | hours each, unattended, under a euro |
+| Next morning | Package and sign, publish to the repository | you | minutes |
+| After | Record the release in the table in `README.md` | you | a line |
+
+Two of those are automated and they are the two that answer questions rather
+than make decisions. Everything that decides something has a person in it, on
+purpose: whether a release is worth shipping, whether a conflict was resolved
+correctly, and what gets signed.
+
+## Where a conflict can appear, and what it costs
+
+**The series does not apply.** Found the day Qt publishes, by the daily check,
+before anyone spends a night. This is the cheap case and the common one. Fix it
+in a local tree and export the series back, as below.
+
+**It applies, and the build fails.** Found hours in, on your own machine rather
+than a rented one, because the development build runs first. Usually an API the
+patches call has moved. Fix, rebuild, export.
+
+**It builds, and the gate fails.** `verify.sh` says either that the patched
+engine regressed or that a test no longer fails on a stock one. The second means
+the test has stopped proving anything, which is worth more attention than the
+first.
+
+**Chromium moved underneath.** The expensive case, described below. Found as a
+build failure, and the fix is mechanical rather than clever.
+
+**System Qt is older than the engine.** The remote build refuses before it
+starts: QtWebEngine builds against the Qt it belongs to, and Arch is a day or
+two behind Qt. Either wait for the distribution or build the rest of Qt too.
+
+## Resolving a conflict
+
+Always on your own machine, never on a builder. A builder has no person at it
+and no history to look at, and the rented machine costs money while it waits.
 
 ```sh
-scripts/refresh.sh 6.12.0
-~/Projects/villekivela/qtwebengine/qtwebengine-everywhere-src-6.12.0/build.sh
-scripts/verify.sh ~/Projects/villekivela/qtwebengine/qtwebengine-everywhere-src-6.12.0
+scripts/refresh.sh 6.12.0            # stops and names the patch that failed
+cd ~/Projects/villekivela/qtwebengine/qtwebengine-everywhere-src-6.12.0
+# fix the conflict in the tree
+git am --continue
+git format-patch -o /path/to/omaweb-qtwebengine-patches/patches v6.12.0-tarball..HEAD
 ```
 
-`refresh.sh` stops and names the patch if one conflicts. `verify.sh` runs the tests twice: against
-the patched build, where all 22 must pass, and against a stock engine, where four must fail. The
-second run is what keeps the tests honest. Without it, a test that quietly stopped proving anything
-would still be green.
-
-Add the result to the table in `README.md`.
+Then build and verify before the builders run. The patches in this repository
+are always the current ones: there is no branch to merge and no older copy to
+reconcile.
 
 ## When a patch conflicts
 
