@@ -59,17 +59,6 @@ Then build and verify before the builders run. The patches in this repository
 are always the current ones: there is no branch to merge and no older copy to
 reconcile.
 
-## When a patch conflicts
-
-Fix it in the tree, `git am --continue`, then export the series back:
-
-```sh
-git format-patch -o /path/to/omaweb-qtwebengine-patches/patches v<version>-tarball..HEAD
-```
-
-The patches in this repository are always the current ones. There is no branch to merge and no
-older copy to reconcile.
-
 ## When Chromium moves
 
 Qt bumps its Chromium fork every few releases. This is the only expensive case, because patches 0005
