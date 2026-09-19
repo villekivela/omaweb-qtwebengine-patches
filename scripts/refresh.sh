@@ -7,6 +7,7 @@ set -eu
 version="${1:?usage: refresh.sh <version> [work-dir]}"
 work="${2:-$HOME/Projects/villekivela/qtwebengine}"
 series="$(cd "$(dirname "$0")/.." && pwd)/patches"
+system="$(uname -s)"
 minor="$(echo "$version" | cut -d. -f1,2)"
 tarball="qtwebengine-everywhere-src-$version.tar.xz"
 tree="$work/qtwebengine-everywhere-src-$version"
@@ -55,34 +56,52 @@ else
     exit 2
 fi
 
-cat > build.sh <<'BUILD'
+cat > build.sh <<BUILD
 #!/bin/sh
-export PATH="$HOME/Projects/villekivela/qtwebengine/venv/bin:$PATH"
-export PYTHONPATH="$HOME/Projects/villekivela/qtwebengine/venv/lib/python3.14/site-packages"
-cd "$(dirname "$0")" || exit 1
-cmake --build build --target "${1:-all}"
-echo "exit $?"
+# Written by refresh.sh for this tree. The venv carries html5lib, which the
+# Chromium build needs and which no platform ships by default.
+if [ -d "$work/venv" ]; then
+    PATH="$work/venv/bin:\$PATH"
+    export PATH
+fi
+cd "\$(dirname "\$0")" || exit 1
+cmake --build build --target "\${1:-all}"
+echo "exit \$?"
 BUILD
 chmod +x build.sh
 
 echo "configuring"
-PATH="$work/venv/bin:$PATH"
-export PATH
-PYTHONPATH="$work/venv/lib/python3.14/site-packages"
-export PYTHONPATH
-cmake -S . -B build -G Ninja \
-    -DCMAKE_PREFIX_PATH=/opt/homebrew/opt/qt \
+if [ -d "$work/venv" ]; then
+    PATH="$work/venv/bin:$PATH"
+    export PATH
+fi
+
+# The engine installs beside Omaweb rather than over the distribution's Qt, so
+# every other Qt application on the machine keeps the engine it had.
+prefix="${OMAWEB_ENGINE_PREFIX:-/usr/lib/omaweb}"
+
+set -- -S . -B build -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DFEATURE_webengine_proprietary_codecs=ON \
-    -DQT_NO_APPLE_SDK_AND_XCODE_CHECK=ON \
-    -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
     -DNinja_EXECUTABLE="$(command -v ninja)" \
     -DQT_BUILD_EXAMPLES=OFF \
     -DQT_BUILD_TESTS=ON \
-    -DQT_BUILD_TESTS_BATCHED=OFF \
-    -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-    -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-    > configure.log 2>&1
+    -DQT_BUILD_TESTS_BATCHED=OFF
+
+if command -v ccache > /dev/null 2>&1; then
+    set -- "$@" -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_C_COMPILER_LAUNCHER=ccache
+fi
+
+if [ "$system" = "Darwin" ]; then
+    # A development build. It produces macOS frameworks, which cannot ship.
+    set -- "$@" -DCMAKE_PREFIX_PATH=/opt/homebrew/opt/qt \
+        -DQT_NO_APPLE_SDK_AND_XCODE_CHECK=ON \
+        -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0
+else
+    set -- "$@" -DCMAKE_INSTALL_PREFIX="$prefix"
+fi
+
+cmake "$@" > configure.log 2>&1
 
 sed -n '/Build QtWebEngine Modules/,/QtPdf Modules/p' build/config.summary
 

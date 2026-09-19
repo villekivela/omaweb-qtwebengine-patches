@@ -1,0 +1,32 @@
+# Maintainer: Ville Kivelä <5814559+villekivela@users.noreply.github.com>
+#
+# The engine Omaweb ships, built from Qt's released source with the patch
+# series applied (ADR 0049). It installs into /usr/lib/omaweb and never
+# replaces the distribution's qt6-webengine, so every other Qt application on
+# the machine keeps the engine it had.
+#
+# This packages a tarball a builder already produced, because the build takes
+# hours on a machine rented for it and signing happens where the key is. Run
+# scripts/build-on-hetzner.sh to produce the tarball.
+
+pkgname=omaweb-qtwebengine
+pkgver=6.11.2
+pkgrel=1
+pkgdesc="QtWebEngine with Omaweb's extension patches, installed beside Omaweb"
+arch=('x86_64' 'aarch64')
+url="https://github.com/villekivela/omaweb-qtwebengine-patches"
+# QtWebEngine is LGPL-3.0, and this is a modified build of it: the patches are
+# published at the url above, and the library stays separate so it can be
+# relinked. Chromium's own code is BSD-3-Clause.
+license=('LGPL-3.0-only' 'BSD-3-Clause')
+depends=('qt6-base' 'qt6-declarative' 'qt6-positioning' 'qt6-webchannel' 'nss' 'libxkbcommon')
+source=("omaweb-qtwebengine-${pkgver}-$(uname -m).tar.zst")
+sha256sums=('SKIP')
+
+package() {
+    # The tarball is already an install tree rooted at /usr/lib/omaweb.
+    cp -a "${srcdir}/usr" "${pkgdir}/usr"
+
+    install -Dm644 "${srcdir}/usr/lib/omaweb/LICENSES/LGPL-3.0-only.txt" \
+        "${pkgdir}/usr/share/licenses/${pkgname}/LGPL-3.0-only.txt" 2> /dev/null || true
+}

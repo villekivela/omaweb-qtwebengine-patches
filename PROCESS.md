@@ -82,3 +82,36 @@ reader installs one:
 - Sign on your own machine. The builder hands back an unsigned package.
 - State how long after a Qt release the rebuild may take. From then on that lag is the security lag
   for every reader.
+
+## Building the package
+
+The build runs on a machine rented for it and destroyed afterwards, because a
+macOS build cannot ship and a laptop should not be the release machine.
+
+```sh
+export HCLOUD_TOKEN=...            # a Hetzner project token
+scripts/build-on-hetzner.sh 6.11.2 x86
+scripts/build-on-hetzner.sh 6.11.2 arm
+```
+
+Each run creates a server, sends the series, builds inside an Arch container,
+runs `verify.sh`, and refuses to package anything if the gate does not pass. It
+returns an unsigned tarball of the install tree and a checksum, then deletes the
+server. Deleting is what stops the billing; a stopped server still bills for its
+disk.
+
+Package and sign on your own machine, with `packaging/PKGBUILD` and the tarball
+in the same directory:
+
+```sh
+cd packaging && makepkg --sign
+```
+
+The engine installs into `/usr/lib/omaweb`, so the distribution's
+`qt6-webengine` is untouched and every other Qt application on the machine keeps
+the engine it had.
+
+One constraint the remote script checks before it spends hours: QtWebEngine
+builds against the Qt it belongs to, so the container's `qt6-base` has to be the
+same version as the engine. When Qt has published a release the distribution has
+not packaged yet, that check fails early rather than at link time.
