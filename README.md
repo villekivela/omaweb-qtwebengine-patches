@@ -1,83 +1,92 @@
 # QtWebEngine extension patches
 
-Patches that let QtWebEngine host a password manager's Chromium extension. They are proposed
-upstream rather than maintained as a fork: nothing patched is distributed, and this series exists to
-be submitted, rebased, and eventually deleted when Qt carries the same work.
+Six patches that let QtWebEngine host a password manager's Chromium extension. Base is the released
+`qtwebengine-everywhere-src-6.11.1` tarball, and they apply to 6.11.2 unchanged.
 
-Written for [omaweb#344](https://github.com/villekivela/omaweb/issues/344), which asks whether
-Omaweb can host Bitwarden and 1Password as Known extensions. The findings are recorded in
-`docs/research/password-manager-extensions.md` in that repository.
+Built for [omaweb#344](https://github.com/villekivela/omaweb/issues/344), which asks whether Omaweb
+can host Bitwarden and 1Password. The findings live in `docs/research/password-manager-extensions.md`
+in that repository.
 
-Base: `qtwebengine-everywhere-src-6.11.1`, the released tarball.
+Two of the six are ordinary bug fixes headed for Gerrit. The rest wait on one question to Qt, in
+`upstream/QTBUG-draft.md`. If Qt takes the work, this repository is deleted rather than maintained.
+
+## Running it
+
+```sh
+scripts/refresh.sh 6.12.0     # fetch, unpack, apply the series, configure
+<tree>/build.sh               # hours
+scripts/verify.sh <tree>      # tests, twice
+```
+
+`PROCESS.md` has the rest, including what to do when a patch conflicts and what a Chromium bump
+costs.
 
 ## The series
 
-| Patch | What it does | Upstream shape |
-| --- | --- | --- |
-| 0001 | Binds `EventRouter` and `RendererHost` for a render process, a render frame and a service worker. Without the worker binding an extension that calls `chrome.i18n.getMessage` at the top of its service worker never finishes evaluating; without the frame binding an extension page never receives an event its worker did. | A bug fix with a test. Submit as-is. |
-| 0002 | Defines the pure-computation seatbelt profile name, which the macOS 26 SDK dropped. | A local build fix, not part of the series. Do not submit. |
-| 0003 | Re-points `ExtensionPrefs` when a profile's `PrefService` is rebuilt, instead of replacing the instance other keyed services already cached. Fixes a crash in `setExtensionEnabled` after the storage path changes. | A bug fix with a test. Submit as-is. |
-| 0004 | Compiles Chrome's schemas for `tabs`, `windows`, `permissions`, `webNavigation`, `commands`, `contextMenus`, `privacy`, `action` and `extension`, and implements the read side of `tabs` and `windows` on a tab registry behind an embedder delegate. | A feature. Needs a public API before submission, see below. |
-| 0005 | Compiles Chrome's `scripting` API, which reaches a tab through the delegate above. | Follows 0004. |
-| 0006 | Compiles Chrome's native messaging host manifest parser, process launcher and port dispatcher, and looks a manifest up through QtWebEngine path keys of its own. | Follows 0004. |
+**0001, bind EventRouter and RendererHost.** A renderer reaches the browser through three
+registries. Qt serves none of them fully, so an extension that calls `chrome.i18n.getMessage` from
+its service worker hangs forever, and an extension page never receives events its own worker gets.
+_A bug fix with a test. Submit as is._
 
-## The open design question
+**0002, define the pure-computation seatbelt profile name.** The macOS 26 SDK dropped the constant.
+_A local build fix. Not part of the series, do not submit._
 
-`TabsDelegateQt` is internal, and `ExtensionsBrowserClientQt` fills it by walking the profile's
-adapter clients and treating every page as a tab. That is a guess about what a tab is, which is
-fine for a prototype and not fine for Qt. Before 0004 can be proposed, the application has to be
-able to say which of its pages are tabs and which one is active, through public API. Raise that on
-QTBUG before writing code.
+**0003, keep ExtensionPrefs valid when the PrefService is rebuilt.** Changing a profile's storage
+path replaces the pref service. Qt replaces the `ExtensionPrefs` instance too, while other keyed
+services keep the pointer they cached, and `setExtensionEnabled` then crashes. _A bug fix with a
+test. Submit as is._
 
-## Applying them
+**0004, offer the tabs, windows, permissions and event namespaces.** Compiles Chrome's schemas with
+the unimplemented functions marked `nocompile`, and implements the read side of `tabs` and `windows`
+on a tab registry behind an embedder delegate. _A feature. Needs public API first, see below._
 
-```sh
-curl -O https://download.qt.io/official_releases/qt/6.11/6.11.1/submodules/qtwebengine-everywhere-src-6.11.1.tar.xz
-tar xJf qtwebengine-everywhere-src-6.11.1.tar.xz
-cd qtwebengine-everywhere-src-6.11.1
-git init && git add -A && git commit -qm "qtwebengine 6.11.1" && git tag v6.11.1-tarball
-git am /path/to/patches/*.patch
-```
+**0005, offer the scripting namespace.** Chrome's `scripting_api.cc` compiles with two include paths
+changed. It reaches a tab through the delegate from 0004. _Follows 0004._
 
-Building needs a Python environment with `html5lib`, and on macOS the Metal toolchain
-(`xcodebuild -downloadComponent MetalToolchain`):
+**0006, connect an extension to a native messaging host.** Chrome's host manifest parser, process
+launcher and port dispatcher, with the manifest looked up through QtWebEngine path keys. _Follows
+0004._
 
-```sh
-cmake -S . -B build -G Ninja -DCMAKE_PREFIX_PATH=/opt/homebrew/opt/qt \
-  -DQT_NO_APPLE_SDK_AND_XCODE_CHECK=ON -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
-  -DQT_BUILD_TESTS=ON -DQT_BUILD_TESTS_BATCHED=OFF
-cmake --build build
-```
+## The open question
 
-A first build is hours. Afterwards:
+`TabsDelegateQt` is internal, and `ExtensionsBrowserClientQt` fills it by treating every page of the
+profile as a tab. That guess is fine for a prototype and wrong for Qt: the extension's own popup
+turns up in `tabs.query()`.
 
-```sh
-DYLD_FRAMEWORK_PATH=$PWD/build/lib ./build/tests/auto/widgets/extensions/tst_qwebengineextension
-```
+Before 0004 can be proposed, an application needs a way to say which of its pages are tabs and which
+one is active. That is what the QTBUG draft asks for. Ask before writing the API.
 
-22 tests pass with the series applied. Four of them fail against a stock build, which is the point
-of them: `serviceWorkerLocalization`, `enableAfterStoragePathChange`, `tabsWindowsAndScripting` and
-`nativeMessaging`.
+## Tests
 
-## Rebasing onto a new Qt release
+22 tests pass with the series applied. Four of them fail on a stock build, which is why they are
+worth having:
 
-The measurement that decides whether this series is maintainable. For each new tag: unpack it, apply
-the series, build, run the tests, then run the
-[extension probe](https://github.com/villekivela/omaweb-extension-probe) against a real extension.
-Record what a conflict cost in people's time rather than machine time.
+- `serviceWorkerLocalization` fails
+- `enableAfterStoragePathChange` crashes, signal 11
+- `tabsWindowsAndScripting` fails
+- `nativeMessaging` fails
 
-| Release | Patches applying | Build | Tests | People's time |
-| --- | --- | --- | --- | --- |
-| 6.11.2 | 6 of 6, no conflicts, no fuzz | clean | 22 of 22 | none |
+`scripts/verify.sh` runs both halves and reports them.
 
-One caveat about that row. 6.11.1 and 6.11.2 share a Chromium base, so nothing the copied Chrome
-files depend on moved. Patches 0005 and 0006 carry copies of `scripting_api.cc` and the native
-messaging stack, and a Chromium major bump means re-copying them from the new Chromium and adapting
-them again. Qt's `dev` is still on the 140-based fork and a 146-based branch exists, so that bump
-lands in 6.12 or 6.13. Until the series has been through one, the cost of a rebase is unmeasured.
+## Rebase record
+
+| Release | Applying | Build | Tests | People's time |
+| ------- | -------- | ----- | ----- | ------------- |
+| 6.11.2  | 6 of 6, no conflicts | clean | 22 of 22 | none |
+
+That row is the easy case. 6.11.1 and 6.11.2 share a Chromium base, so nothing under patches 0005
+and 0006 moved.
+
+The expensive case is a Chromium bump, measured across 140 to 146, six major versions apart:
+
+- the copied Chrome files moved 4 to 13 lines each, so re-copying them is mechanical
+- patch 0003 lost two of the six calls it makes, because those migrations finished upstream
+- all five embedder hooks the design rests on survived, with the same names
+
+Call it an hour. Qt's `dev` is still on the 140-based fork, so the real bump lands in 6.12 or 6.13.
 
 ## Licence
 
-The patches contain Qt WebEngine and Chromium source and are derivative works of them: Qt files are
-LGPL-3.0 / GPL-2.0 / GPL-3.0 or the Qt commercial licence, Chromium files are BSD-3-Clause. Each
-file keeps the headers it arrived with. Nothing here is under Omaweb's own licence.
+The patches carry Qt WebEngine and Chromium source and are derivative works of both. Qt files are
+LGPL-3.0, GPL-2.0, GPL-3.0 or the Qt commercial licence. Chromium files are BSD-3-Clause. Every file
+keeps the headers it arrived with, and nothing here is under Omaweb's licence.
