@@ -1,0 +1,75 @@
+name: Series applies
+
+# Answer one question daily: does the series still apply to the newest Qt?
+# It needs no Qt, no toolchain and no hours, so it can run every day and say
+# what a release will cost before anyone spends a night on a build.
+on:
+  schedule:
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Qt version to try, instead of the newest"
+        required: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Find the newest Qt release
+        id: qt
+        run: |
+          version="${{ inputs.version }}"
+          if [ -z "$version" ]; then
+            series=$(curl -fsSL https://download.qt.io/official_releases/qt/ \
+              | grep -o 'href="6\.[0-9]*/"' | grep -o '6\.[0-9]*' \
+              | sort -t. -k1,1n -k2,2n | tail -1)
+            version=$(curl -fsSL "https://download.qt.io/official_releases/qt/$series/" \
+              | grep -o "href=\"$series\.[0-9]*/\"" | grep -o "$series\.[0-9]*" \
+              | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Trying $version"
+
+      - name: Apply the series
+        id: apply
+        run: |
+          git config --global user.email "builder@example.invalid"
+          git config --global user.name "Series check"
+          scripts/refresh.sh --apply-only "${{ steps.qt.outputs.version }}" "$RUNNER_TEMP/qt"
+
+      - name: Report a conflict
+        if: failure() && steps.apply.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.qt.outputs.version }}
+        run: |
+          title="The series does not apply to Qt $VERSION"
+          existing=$(gh issue list --state open --search "$title in:title" \
+            --json number --jq '.[0].number // empty')
+          body=$(printf '%s\n' \
+            "\`scripts/refresh.sh --apply-only $VERSION\` failed, so the series needs a person before any build is worth starting." \
+            "" \
+            "Resolve it in a local tree, then export the series back:" \
+            "" \
+            '```sh' \
+            "scripts/refresh.sh $VERSION" \
+            "# fix, then: git am --continue" \
+            "git format-patch -o /path/to/patches v$VERSION-tarball..HEAD" \
+            '```' \
+            "" \
+            "PROCESS.md says what a Chromium bump costs and which files go stale." \
+            "" \
+            "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}")
+          if [ -n "$existing" ]; then
+            gh issue edit "$existing" --body "$body"
+          else
+            gh issue create --title "$title" --body "$body"
+          fi

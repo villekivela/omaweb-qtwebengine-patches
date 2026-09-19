@@ -1,10 +1,16 @@
 #!/bin/sh
 # Fetch a QtWebEngine release, apply the series, and configure it for building.
-# Usage: scripts/refresh.sh 6.12.0 [work-dir]
+# Usage: scripts/refresh.sh [--apply-only] 6.12.0 [work-dir]
 # Leaves a tree ready for scripts/verify.sh. Reports what conflicted, if anything.
 set -eu
 
-version="${1:?usage: refresh.sh <version> [work-dir]}"
+apply_only=""
+if [ "${1:-}" = "--apply-only" ]; then
+    apply_only=yes
+    shift
+fi
+
+version="${1:?usage: refresh.sh [--apply-only] <version> [work-dir]}"
 work="${2:-$HOME/Projects/villekivela/qtwebengine}"
 series="$(cd "$(dirname "$0")/.." && pwd)/patches"
 system="$(uname -s)"
@@ -54,6 +60,13 @@ else
     echo "When the series is in, export it back with:"
     echo "  git format-patch -o $series v$version-tarball..HEAD"
     exit 2
+fi
+
+if [ -n "$apply_only" ]; then
+    # Answering "does the series still apply" needs no Qt, no toolchain and no
+    # hours. This is the check that runs the day Qt publishes.
+    echo "apply-only: stopping before configure"
+    exit 0
 fi
 
 cat > build.sh <<BUILD
