@@ -1,13 +1,13 @@
 # QtWebEngine extension patches
 
-Six patches that let QtWebEngine host a password manager's Chromium extension. Base is the released
-`qtwebengine-everywhere-src-6.11.1` tarball, and they apply to 6.11.2 unchanged.
+Seven patches that let QtWebEngine host a password manager's Chromium extension. Base is the
+released `qtwebengine-everywhere-src-6.11.2` tarball.
 
 Built for [omaweb#344](https://github.com/villekivela/omaweb/issues/344), which asks whether Omaweb
 can host Bitwarden and 1Password. The findings live in `docs/research/password-manager-extensions.md`
 in that repository.
 
-Two of the six are ordinary bug fixes headed for Gerrit. The rest wait on one question to Qt, in
+Two of the seven are ordinary bug fixes headed for Gerrit. The rest wait on one question to Qt, in
 `upstream/QTBUG-draft.md`. If Qt takes the work, this repository is deleted rather than maintained.
 
 ## Running it
@@ -78,7 +78,9 @@ worth having:
 
 | Release | Applying | Build | Tests | People's time |
 | ------- | -------- | ----- | ----- | ------------- |
-| 6.11.2  | 6 of 6, no conflicts | clean | 23 of 23 | none |
+| 6.11.2  | 6 of 6, no conflicts | clean | 22 of 22 | none |
+
+The series has grown a patch since that row, so the next release is the next measurement.
 
 That row is the easy case. 6.11.1 and 6.11.2 share a Chromium base, so nothing under patches 0005
 and 0006 moved.
