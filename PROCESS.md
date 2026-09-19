@@ -120,6 +120,18 @@ reader installs one:
 - State how long after a Qt release the rebuild may take. From then on that lag is the security lag
   for every reader.
 
+## Setting the builders up, once
+
+```sh
+scripts/setup-builders.sh
+```
+
+It walks through a Hetzner project of its own, a token, a keypair that only ever
+opens rented machines, and a GitHub token that can open issues in Omaweb and
+nothing else. It writes the three secrets the workflows ask for and checks each
+credential against the service before storing it. Run it again to rotate any of
+them.
+
 ## Building the package
 
 The build runs on a machine rented for it and destroyed afterwards, because a
