@@ -1,0 +1,79 @@
+name: Build the engine
+
+# Started by hand, with the version, after the series has been qualified on a
+# machine with a person at it. A clean series is not a reason to ship: whether
+# the release is worth shipping is a judgement about what Qt's notes say, and
+# this workflow does not make it.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Qt version, for example 6.11.2"
+        required: true
+      arch:
+        description: "Which architecture to build"
+        required: true
+        default: both
+        type: choice
+        options: [both, x86, arm]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 600
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: ${{ inputs.arch == 'both' && fromJSON('["x86","arm"]') || fromJSON(format('["{0}"]', inputs.arch)) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Refuse a series that does not apply
+        # Minutes here save hours on a rented machine. The same check runs
+        # daily; this is the one that gates spending money.
+        run: |
+          git config --global user.email "builder@example.invalid"
+          git config --global user.name "Engine build"
+          scripts/refresh.sh --apply-only "${{ inputs.version }}" "$RUNNER_TEMP/qt"
+
+      - name: Install hcloud
+        run: |
+          curl -fsSL https://github.com/hetznercloud/cli/releases/latest/download/hcloud-linux-amd64.tar.gz \
+            | tar xz -C /usr/local/bin hcloud
+          hcloud version
+
+      - name: Add the builder key
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.BUILDER_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+
+      - name: Build on a rented machine
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+          OMAWEB_SSH_KEY: ${{ vars.BUILDER_SSH_KEY_NAME || 'omaweb-builder' }}
+        run: scripts/build-on-hetzner.sh "${{ inputs.version }}" "${{ matrix.arch }}"
+
+      - name: Keep the artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine-${{ inputs.version }}-${{ matrix.arch }}
+          path: out/*
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Say what happens next
+        run: |
+          {
+            echo "### Unsigned engine for ${{ inputs.version }} (${{ matrix.arch }})"
+            echo
+            echo 'Download the artifact, check it against `SHA256SUMS`, then package'
+            echo 'and sign where the key is:'
+            echo
+            echo '```sh'
+            echo 'cd packaging && makepkg --sign'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -48,7 +48,10 @@ jobs:
       - name: Report a conflict
         if: failure() && steps.apply.outcome == 'failure'
         env:
-          GH_TOKEN: ${{ github.token }}
+          # The tracker is Omaweb's. One place holds everything that needs a
+          # person, and this repository keeps no issues of its own.
+          GH_TOKEN: ${{ secrets.OMAWEB_ISSUES_TOKEN }}
+          GH_REPO: villekivela/omaweb
           VERSION: ${{ steps.qt.outputs.version }}
         run: |
           title="The series does not apply to Qt $VERSION"
@@ -71,5 +74,6 @@ jobs:
           if [ -n "$existing" ]; then
             gh issue edit "$existing" --body "$body"
           else
-            gh issue create --title "$title" --body "$body"
+            gh issue create --title "$title" --body "$body" \
+              --label ready-for-human --assignee villekivela
           fi
