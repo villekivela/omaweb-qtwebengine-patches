@@ -30,7 +30,12 @@ mkdir -p "$out"
 docker volume create omaweb-engine-work > /dev/null
 
 echo "building $version in $image, which takes hours"
+echo "watch it with: docker logs -f omaweb-engine-build"
+# Named, so it can be watched by name rather than by whichever animal Docker
+# picked: docker logs -f omaweb-engine-build, or lazydocker.
+docker rm -f omaweb-engine-build > /dev/null 2>&1 || true
 docker run --rm \
+    --name omaweb-engine-build \
     --platform "linux/$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')" \
     -v omaweb-engine-work:/root/work \
     -v "$here:/root/series:ro" \
