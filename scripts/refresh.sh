@@ -50,8 +50,15 @@ else
     cd "$tree"
 fi
 
-echo "applying the series"
-if git am "$series"/*.patch; then
+# A tree that already carries the series is left alone. Re-running after the
+# gate failed, or after a build was interrupted, should pick the tree up rather
+# than refuse it: the hours are in the tree, and `git am` on an applied series
+# fails in a way that reads like a conflict when nothing has conflicted.
+if git rev-parse -q --verify "v$version-tarball" > /dev/null 2>&1 \
+    && [ "$(git rev-list --count "v$version-tarball"..HEAD)" -gt 0 ]
+then
+    echo "SERIES ALREADY APPLIED: $(git rev-list --count "v$version-tarball"..HEAD) commits on the tarball"
+elif git am "$series"/*.patch; then
     echo "SERIES APPLIED: $(ls "$series"/*.patch | wc -l | tr -d ' ') patches, no conflicts"
 else
     echo
