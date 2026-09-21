@@ -1,13 +1,13 @@
 # QtWebEngine extension patches
 
-Eleven patches that let QtWebEngine host a password manager's Chromium extension. Base is the
+Twelve patches that let QtWebEngine host a password manager's Chromium extension. Base is the
 released `qtwebengine-everywhere-src-6.11.2` tarball.
 
 Built for [omaweb#344](https://github.com/villekivela/omaweb/issues/344), which asks whether Omaweb
 can host Bitwarden and 1Password. The findings live in `docs/research/password-manager-extensions.md`
 in that repository.
 
-Two of the eleven are ordinary bug fixes headed for Gerrit. The rest wait on one question to Qt, in
+Two of the twelve are ordinary bug fixes headed for Gerrit. The rest wait on one question to Qt, in
 `upstream/QTBUG-draft.md`. If Qt takes the work, this repository is deleted rather than maintained.
 
 ## Running it
@@ -70,6 +70,11 @@ worker went and never came back. _A bug fix with a test. Submit as is._
 itself, because Blink only lets a page close a window it opened. Chrome exempts extension documents
 in a file QtWebEngine does not build. _A bug fix with a test. Submit as is._
 
+**0012, offer the notifications namespace.** 1Password registers `notifications.onClicked` at the top
+level of its worker, so without the namespace the worker throws on its first line and never starts.
+A notification goes to the application the way a page's does, and the reader's answer comes back as
+`onClicked` and `onClosed`. _A feature. Follows 0004._
+
 ## The open question
 
 `TabsDelegateQt` is internal, and `ExtensionsBrowserClientQt` fills it by treating every page of the
@@ -81,7 +86,7 @@ one is active. That is what the QTBUG draft asks for. Ask before writing the API
 
 ## Tests
 
-30 tests pass with the series applied. Five of them fail on a stock build, which is why they are
+33 tests pass with the series applied. Five of them fail on a stock build, which is why they are
 worth having:
 
 - `serviceWorkerLocalization` fails

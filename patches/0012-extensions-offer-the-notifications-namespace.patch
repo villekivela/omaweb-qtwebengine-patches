@@ -1,0 +1,1128 @@
+From 69628c3257fd72abc3060e534f8001f0264acaaa Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Ville=20Kivela=CC=88?= <vkivela@hotmail.com>
+Date: Mon, 21 Sep 2026 13:39:54 +0300
+Subject: [PATCH 12/12] extensions: offer the notifications namespace
+
+1Password registers notifications.onClicked and onButtonClicked at the
+top level of its worker. The namespace was absent, so the worker threw
+on its first line and never started: "Service worker registration
+failed. Status code: 15". It calls create, update, clear and getAll
+besides, so declaring the events alone would only move the failure to
+the first thing it wanted to say.
+
+A notification an extension asks for is a notification. It goes where a
+page's goes, to the application, as a UserNotificationController through
+the profile adapter's clients, so an application that already shows one
+shows this one and the reader is not asked to tell them apart. The
+reader's answer comes back the same way: a click is
+notifications.onClicked and a close is onClosed.
+
+What an application can show is a title, a message and an origin, so
+buttons, images and progress are read and not passed on, and
+onButtonClicked is declared and never raised. getPermissionLevel is
+nocompile: there is no level to report and the extensions layer has no
+histogram value for the call.
+
+The registry gives each notification an id of its own, so two profiles
+running the same extension do not collide on a name either of them
+chose, and drops what an extension that is no longer enabled was
+showing. At context teardown its notifications are dropped rather than
+closed: that runs inside ~ProfileQt, and the adapter the close would
+reach through is already going.
+---
+ .../common/api/_webengine_api_features.json   |   4 +
+ .../browser/extensions/api/BUILD.gn           |  17 ++
+ .../api/notifications/notifications_api.cc    |  80 +++++++
+ .../api/notifications/notifications_api.h     |  40 ++++
+ .../extensions/notification_registry_qt.cc    | 160 +++++++++++++
+ .../extensions/notification_registry_qt.h     |  97 ++++++++
+ .../common/extensions/api/notifications.idl   | 222 ++++++++++++++++++
+ .../common/extensions/api/schema.gni          |   1 +
+ src/core/extensions/extension_system_qt.cpp   |   6 +
+ .../extensions_browser_client_qt.cpp          |  63 +++++
+ .../extensions/extensions_browser_client_qt.h |  12 +-
+ .../resources/notifications_ext/icon.png      | Bin 0 -> 68 bytes
+ .../resources/notifications_ext/manifest.json |  15 ++
+ .../notifications_ext/popup_page.html         |   1 +
+ .../notifications_ext/service_worker.js       |  23 ++
+ .../extensions/tst_qwebengineextension.cpp    | 129 ++++++++++
+ 16 files changed, 869 insertions(+), 1 deletion(-)
+ create mode 100644 src/3rdparty/chromium/qtwebengine/browser/extensions/api/notifications/notifications_api.cc
+ create mode 100644 src/3rdparty/chromium/qtwebengine/browser/extensions/api/notifications/notifications_api.h
+ create mode 100644 src/3rdparty/chromium/qtwebengine/browser/extensions/notification_registry_qt.cc
+ create mode 100644 src/3rdparty/chromium/qtwebengine/browser/extensions/notification_registry_qt.h
+ create mode 100644 src/3rdparty/chromium/qtwebengine/common/extensions/api/notifications.idl
+ create mode 100644 tests/auto/widgets/extensions/resources/notifications_ext/icon.png
+ create mode 100644 tests/auto/widgets/extensions/resources/notifications_ext/manifest.json
+ create mode 100644 tests/auto/widgets/extensions/resources/notifications_ext/popup_page.html
+ create mode 100644 tests/auto/widgets/extensions/resources/notifications_ext/service_worker.js
+
+diff --git a/src/3rdparty/chromium/extensions/common/api/_webengine_api_features.json b/src/3rdparty/chromium/extensions/common/api/_webengine_api_features.json
+index 0cb88d56bc..fa0912ac5b 100644
+--- a/src/3rdparty/chromium/extensions/common/api/_webengine_api_features.json
++++ b/src/3rdparty/chromium/extensions/common/api/_webengine_api_features.json
+@@ -80,6 +80,10 @@
+     "dependencies": ["permission:scripting"],
+     "contexts": ["privileged_extension"]
+   },
++  "notifications": {
++    "dependencies": ["permission:notifications"],
++    "contexts": ["privileged_extension"]
++  },
+   "webNavigation": {
+     "dependencies": ["permission:webNavigation"],
+     "contexts": ["privileged_extension"]
+diff --git a/src/3rdparty/chromium/qtwebengine/browser/extensions/api/BUILD.gn b/src/3rdparty/chromium/qtwebengine/browser/extensions/api/BUILD.gn
+index 836340988c..eac7bceaef 100644
+--- a/src/3rdparty/chromium/qtwebengine/browser/extensions/api/BUILD.gn
++++ b/src/3rdparty/chromium/qtwebengine/browser/extensions/api/BUILD.gn
+@@ -21,6 +21,20 @@ source_set("resources_private") {
+   }
+ }
+ 
++source_set("notification_registry") {
++  sources = [
++    "../notification_registry_qt.cc",
++    "../notification_registry_qt.h",
++  ]
++
++  deps = [
++    "//content/public/browser",
++    "//extensions/browser",
++    "//extensions/common",
++    "//qtwebengine/common/extensions/api",
++  ]
++}
++
+ source_set("tab_registry") {
+   sources = [
+     "../tab_registry_qt.cc",
+@@ -39,6 +53,8 @@ source_set("tabs") {
+   sources = [
+     "tabs/tabs_api.cc",
+     "tabs/tabs_api.h",
++    "notifications/notifications_api.cc",
++    "notifications/notifications_api.h",
+     "web_navigation/web_navigation_api.cc",
+     "web_navigation/web_navigation_api.h",
+     "windows/windows_api.cc",
+@@ -46,6 +62,7 @@ source_set("tabs") {
+   ]
+ 
+   deps = [
++    ":notification_registry",
+     ":tab_registry",
+     "//chrome/common:buildflags",
+     "//content/public/browser",
+diff --git a/src/3rdparty/chromium/qtwebengine/browser/extensions/api/notifications/notifications_api.cc b/src/3rdparty/chromium/qtwebengine/browser/extensions/api/notifications/notifications_api.cc
+new file mode 100644
+index 0000000000..cc93e2a50c
+--- /dev/null
++++ b/src/3rdparty/chromium/qtwebengine/browser/extensions/api/notifications/notifications_api.cc
+@@ -0,0 +1,80 @@
++// Copyright (C) 2026 The Qt Company Ltd.
++// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
++
++#include "qtwebengine/browser/extensions/api/notifications/notifications_api.h"
++
++#include "base/strings/string_number_conversions.h"
++#include "extensions/common/extension.h"
++#include "qtwebengine/browser/extensions/notification_registry_qt.h"
++#include "qtwebengine/common/extensions/api/notifications.h"
++
++namespace extensions {
++
++namespace {
++
++namespace notifications = api::notifications;
++
++// What the application is given to show. Chrome draws these itself and so honours buttons, images
++// and progress; QtWebEngine hands the notification over, and what an application can show is a
++// title, a message and where it came from. The rest of the options are read and not passed on.
++NotificationRequestQt RequestFrom(const notifications::NotificationOptions& options,
++                                  const Extension* extension) {
++  NotificationRequestQt request;
++  if (options.title) {
++    request.title = *options.title;
++  }
++  if (options.message) {
++    request.message = *options.message;
++  }
++  request.origin = extension->url();
++  return request;
++}
++
++}  // namespace
++
++ExtensionFunction::ResponseAction NotificationsCreateFunction::Run() {
++  std::optional<notifications::Create::Params> params =
++      notifications::Create::Params::Create(args());
++  EXTENSION_FUNCTION_VALIDATE(params);
++
++  // An extension may leave the id to the browser, and is told which one it got.
++  std::string id = params->notification_id.value_or(std::string());
++  if (id.empty()) {
++    static int next = 0;
++    id = "qtwebengine-" + base::NumberToString(++next);
++  }
++  NotificationRegistryQt::Get()->Show(browser_context(), extension()->id(), id,
++                                      RequestFrom(params->options, extension()));
++  return RespondNow(ArgumentList(notifications::Create::Results::Create(id)));
++}
++
++ExtensionFunction::ResponseAction NotificationsUpdateFunction::Run() {
++  std::optional<notifications::Update::Params> params =
++      notifications::Update::Params::Create(args());
++  EXTENSION_FUNCTION_VALIDATE(params);
++
++  const bool updated = NotificationRegistryQt::Get()->Update(
++      browser_context(), extension()->id(), params->notification_id,
++      RequestFrom(params->options, extension()));
++  return RespondNow(ArgumentList(notifications::Update::Results::Create(updated)));
++}
++
++ExtensionFunction::ResponseAction NotificationsClearFunction::Run() {
++  std::optional<notifications::Clear::Params> params =
++      notifications::Clear::Params::Create(args());
++  EXTENSION_FUNCTION_VALIDATE(params);
++
++  const bool cleared = NotificationRegistryQt::Get()->Clear(browser_context(), extension()->id(),
++                                                            params->notification_id);
++  return RespondNow(ArgumentList(notifications::Clear::Results::Create(cleared)));
++}
++
++ExtensionFunction::ResponseAction NotificationsGetAllFunction::Run() {
++  base::Value::Dict ids;
++  for (const std::string& id : NotificationRegistryQt::Get()->GetAll(browser_context(), extension()->id())) {
++    ids.Set(id, true);
++  }
++  return RespondNow(WithArguments(std::move(ids)));
++}
++
++}  // namespace extensions
+diff --git a/src/3rdparty/chromium/qtwebengine/browser/extensions/api/notifications/notifications_api.h b/src/3rdparty/chromium/qtwebengine/browser/extensions/api/notifications/notifications_api.h
+new file mode 100644
+index 0000000000..273f22f554
+--- /dev/null
++++ b/src/3rdparty/chromium/qtwebengine/browser/extensions/api/notifications/notifications_api.h
+@@ -0,0 +1,40 @@
++// Copyright (C) 2026 The Qt Company Ltd.
++// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
++
++#ifndef QTWEBENGINE_BROWSER_EXTENSIONS_API_NOTIFICATIONS_NOTIFICATIONS_API_H_
++#define QTWEBENGINE_BROWSER_EXTENSIONS_API_NOTIFICATIONS_NOTIFICATIONS_API_H_
++
++#include "extensions/browser/extension_function.h"
++
++namespace extensions {
++
++// A notification an extension asks for is handed to the application the way a page's is. A
++// password manager uses these to say what it just saved, and registers its listeners at the top
++// level of its worker, so the namespace has to be there before it has anything to show.
++class NotificationsCreateFunction : public ExtensionFunction {
++  ~NotificationsCreateFunction() override {}
++  ResponseAction Run() override;
++  DECLARE_EXTENSION_FUNCTION("notifications.create", NOTIFICATIONS_CREATE)
++};
++
++class NotificationsUpdateFunction : public ExtensionFunction {
++  ~NotificationsUpdateFunction() override {}
++  ResponseAction Run() override;
++  DECLARE_EXTENSION_FUNCTION("notifications.update", NOTIFICATIONS_UPDATE)
++};
++
++class NotificationsClearFunction : public ExtensionFunction {
++  ~NotificationsClearFunction() override {}
++  ResponseAction Run() override;
++  DECLARE_EXTENSION_FUNCTION("notifications.clear", NOTIFICATIONS_CLEAR)
++};
++
++class NotificationsGetAllFunction : public ExtensionFunction {
++  ~NotificationsGetAllFunction() override {}
++  ResponseAction Run() override;
++  DECLARE_EXTENSION_FUNCTION("notifications.getAll", NOTIFICATIONS_GET_ALL)
++};
++
++}  // namespace extensions
++
++#endif  // QTWEBENGINE_BROWSER_EXTENSIONS_API_NOTIFICATIONS_NOTIFICATIONS_API_H_
+diff --git a/src/3rdparty/chromium/qtwebengine/browser/extensions/notification_registry_qt.cc b/src/3rdparty/chromium/qtwebengine/browser/extensions/notification_registry_qt.cc
+new file mode 100644
+index 0000000000..861fc24e08
+--- /dev/null
++++ b/src/3rdparty/chromium/qtwebengine/browser/extensions/notification_registry_qt.cc
+@@ -0,0 +1,160 @@
++// Copyright (C) 2026 The Qt Company Ltd.
++// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
++
++#include "qtwebengine/browser/extensions/notification_registry_qt.h"
++
++#include <iterator>
++
++#include "base/no_destructor.h"
++#include "base/strings/string_number_conversions.h"
++#include "base/values.h"
++#include "extensions/browser/event_router.h"
++#include "extensions/browser/extension_registry.h"
++#include "qtwebengine/common/extensions/api/notifications.h"
++
++namespace extensions {
++
++// static
++NotificationRegistryQt* NotificationRegistryQt::Get() {
++  static base::NoDestructor<NotificationRegistryQt> registry;
++  return registry.get();
++}
++
++void NotificationRegistryQt::SetDelegate(NotificationsDelegateQt* delegate) {
++  delegate_ = delegate;
++  if (!delegate) {
++    showing_.clear();
++  }
++}
++
++std::map<std::string, NotificationRegistryQt::Showing>::iterator NotificationRegistryQt::Find(
++    content::BrowserContext* context, const ExtensionId& extension_id, const std::string& id) {
++  for (auto it = showing_.begin(); it != showing_.end(); ++it) {
++    if (it->second.context == context && it->second.extension_id == extension_id &&
++        it->second.id == id) {
++      return it;
++    }
++  }
++  return showing_.end();
++}
++
++void NotificationRegistryQt::Forget() {
++  for (auto it = showing_.begin(); it != showing_.end();) {
++    ExtensionRegistry* registry = ExtensionRegistry::Get(it->second.context);
++    if (registry && registry->enabled_extensions().Contains(it->second.extension_id)) {
++      ++it;
++      continue;
++    }
++    if (delegate_) {
++      delegate_->Close(it->second.context, it->first);
++    }
++    it = showing_.erase(it);
++  }
++}
++
++void NotificationRegistryQt::ForgetContext(content::BrowserContext* context) {
++  // Dropped rather than closed. This runs while the context is being destroyed, and the
++  // application it would be asked to take them back from is going down with it.
++  for (auto it = showing_.begin(); it != showing_.end();) {
++    it = it->second.context == context ? showing_.erase(it) : std::next(it);
++  }
++}
++
++bool NotificationRegistryQt::Show(content::BrowserContext* context,
++                                  const ExtensionId& extension_id, const std::string& id,
++                                  const NotificationRequestQt& request) {
++  Forget();
++  if (!delegate_) {
++    return false;
++  }
++  // Chrome clears a notification it is about to replace, rather than showing two.
++  auto existing = Find(context, extension_id, id);
++  if (existing != showing_.end()) {
++    delegate_->Close(context, existing->first);
++    showing_.erase(existing);
++  }
++  const std::string scoped_id = "n" + base::NumberToString(++next_);
++  showing_[scoped_id] = Showing{extension_id, id, context};
++  delegate_->Show(context, scoped_id, request);
++  return true;
++}
++
++bool NotificationRegistryQt::Update(content::BrowserContext* context,
++                                    const ExtensionId& extension_id, const std::string& id,
++                                    const NotificationRequestQt& request) {
++  Forget();
++  if (Find(context, extension_id, id) == showing_.end()) {
++    return false;
++  }
++  return Show(context, extension_id, id, request);
++}
++
++bool NotificationRegistryQt::Clear(content::BrowserContext* context,
++                                   const ExtensionId& extension_id, const std::string& id) {
++  Forget();
++  auto showing = Find(context, extension_id, id);
++  if (showing == showing_.end()) {
++    return false;
++  }
++  if (delegate_) {
++    delegate_->Close(context, showing->first);
++  }
++  showing_.erase(showing);
++  return true;
++}
++
++std::vector<std::string> NotificationRegistryQt::GetAll(content::BrowserContext* context,
++                                                        const ExtensionId& extension_id) {
++  Forget();
++  std::vector<std::string> ids;
++  for (const auto& [scoped_id, showing] : showing_) {
++    if (showing.context == context && showing.extension_id == extension_id) {
++      ids.push_back(showing.id);
++    }
++  }
++  return ids;
++}
++
++void NotificationRegistryQt::Clicked(const std::string& scoped_id) {
++  auto showing = showing_.find(scoped_id);
++  if (showing == showing_.end()) {
++    return;
++  }
++  EventRouter* router = EventRouter::Get(showing->second.context);
++  if (!router) {
++    return;
++  }
++  base::Value::List args;
++  args.Append(showing->second.id);
++  router->DispatchEventToExtension(
++      showing->second.extension_id,
++      std::make_unique<Event>(events::NOTIFICATIONS_ON_CLICKED,
++                              api::notifications::OnClicked::kEventName, std::move(args)));
++}
++
++void NotificationRegistryQt::Closed(const std::string& scoped_id, bool by_user) {
++  auto showing = showing_.find(scoped_id);
++  if (showing == showing_.end()) {
++    return;
++  }
++  const ExtensionId extension_id = showing->second.extension_id;
++  const std::string id = showing->second.id;
++  content::BrowserContext* context = showing->second.context;
++  // Gone before the extension hears about it, so a listener that asks what is showing is answered
++  // with what is showing.
++  showing_.erase(showing);
++
++  EventRouter* router = EventRouter::Get(context);
++  if (!router) {
++    return;
++  }
++  base::Value::List args;
++  args.Append(id);
++  args.Append(by_user);
++  router->DispatchEventToExtension(
++      extension_id, std::make_unique<Event>(events::NOTIFICATIONS_ON_CLOSED,
++                                            api::notifications::OnClosed::kEventName,
++                                            std::move(args)));
++}
++
++}  // namespace extensions
+diff --git a/src/3rdparty/chromium/qtwebengine/browser/extensions/notification_registry_qt.h b/src/3rdparty/chromium/qtwebengine/browser/extensions/notification_registry_qt.h
+new file mode 100644
+index 0000000000..b3bc968059
+--- /dev/null
++++ b/src/3rdparty/chromium/qtwebengine/browser/extensions/notification_registry_qt.h
+@@ -0,0 +1,97 @@
++// Copyright (C) 2026 The Qt Company Ltd.
++// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
++
++#ifndef QTWEBENGINE_BROWSER_EXTENSIONS_NOTIFICATION_REGISTRY_QT_H_
++#define QTWEBENGINE_BROWSER_EXTENSIONS_NOTIFICATION_REGISTRY_QT_H_
++
++#include <map>
++#include <string>
++#include <vector>
++
++#include "base/memory/raw_ptr.h"
++#include "extensions/common/extension_id.h"
++#include "url/gurl.h"
++
++namespace content {
++class BrowserContext;
++}
++
++namespace extensions {
++
++// What a notification says, as an extension asked for it.
++struct NotificationRequestQt {
++  std::string title;
++  std::string message;
++  GURL origin;
++};
++
++// QtWebEngine hands a notification to the application rather than drawing one, and a page's
++// notification already goes that way. An extension's goes the same way, through this delegate, so
++// an application that shows one shows both and the reader is not asked to tell them apart.
++class NotificationsDelegateQt {
++ public:
++  virtual ~NotificationsDelegateQt() = default;
++
++  // Show |request| under |scoped_id|. The registry is told when the reader answers it.
++  virtual void Show(content::BrowserContext* context, const std::string& scoped_id,
++                    const NotificationRequestQt& request) = 0;
++  // Take it back, because the extension cleared it or replaced it.
++  virtual void Close(content::BrowserContext* context, const std::string& scoped_id) = 0;
++};
++
++// The notifications each extension has showing. Chrome keeps ids per extension, so two extensions
++// may both call one "login-saved" without colliding; the scoped id is what the application sees.
++class NotificationRegistryQt {
++ public:
++  static NotificationRegistryQt* Get();
++
++  void SetDelegate(NotificationsDelegateQt* delegate);
++
++  // Show, replacing any notification this extension already has under |id|.
++  bool Show(content::BrowserContext* context, const ExtensionId& extension_id,
++            const std::string& id, const NotificationRequestQt& request);
++  // Update an existing one, answering whether there was one to update.
++  bool Update(content::BrowserContext* context, const ExtensionId& extension_id,
++              const std::string& id, const NotificationRequestQt& request);
++  // Clear one, answering whether there was one to clear.
++  bool Clear(content::BrowserContext* context, const ExtensionId& extension_id,
++             const std::string& id);
++  std::vector<std::string> GetAll(content::BrowserContext* context,
++                                  const ExtensionId& extension_id);
++
++  // Everything |context| was showing, because its extension system is going away and the
++  // pointers this holds are about to be stale.
++  void ForgetContext(content::BrowserContext* context);
++
++  // The reader answered a notification, or it went away. Called by the delegate, and passed on to
++  // the extension as notifications.onClicked and notifications.onClosed.
++  void Clicked(const std::string& scoped_id);
++  void Closed(const std::string& scoped_id, bool by_user);
++
++ private:
++  struct Showing {
++    ExtensionId extension_id;
++    std::string id;
++    raw_ptr<content::BrowserContext> context;
++  };
++
++  // Drop what an extension that is no longer enabled was showing. An extension that is turned
++  // off, reloaded or uninstalled has nothing on screen the reader can still answer, and its ids
++  // are not the next extension's to inherit.
++  void Forget();
++  // What this extension is showing under |id| in |context|, or the end.
++  std::map<std::string, Showing>::iterator Find(content::BrowserContext* context,
++                                                const ExtensionId& extension_id,
++                                                const std::string& id);
++
++  // The id the application sees is this registry's own, so two extensions, or two profiles
++  // running the same extension, never collide on a name either of them chose.
++  int next_ = 0;
++  // That id to what is showing under it.
++  std::map<std::string, Showing> showing_;
++  raw_ptr<NotificationsDelegateQt> delegate_ = nullptr;
++};
++
++}  // namespace extensions
++
++#endif  // QTWEBENGINE_BROWSER_EXTENSIONS_NOTIFICATION_REGISTRY_QT_H_
+diff --git a/src/3rdparty/chromium/qtwebengine/common/extensions/api/notifications.idl b/src/3rdparty/chromium/qtwebengine/common/extensions/api/notifications.idl
+new file mode 100644
+index 0000000000..d28dd7ad4a
+--- /dev/null
++++ b/src/3rdparty/chromium/qtwebengine/common/extensions/api/notifications.idl
+@@ -0,0 +1,222 @@
++// Copied from //chrome/common/extensions/api/notifications.idl for QtWebEngine. A notification
++// an extension asks for is handed to the application the way a page's is, so an application
++// that shows one shows both.
++// Copyright 2013 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++// Use the <code>chrome.notifications</code> API to create rich notifications
++// using templates and show these notifications to users in the system tray.
++namespace notifications {
++  enum TemplateType {
++    // Contains an icon, title, message, expandedMessage, and up to two
++    // buttons.
++    basic,
++
++    // Contains an icon, title, message, expandedMessage, image, and up
++    //  to two buttons.
++    [deprecated="The image is not visible for Mac OS X users."]
++    image,
++
++    // Contains an icon, title, message, items, and up to two buttons.
++    // Users on Mac OS X only see the first item.
++    list,
++
++    // Contains an icon, title, message, progress, and up to two buttons.
++    progress
++  };
++
++  enum PermissionLevel {
++    // Specifies that the user has elected to show notifications
++    // from the app or extension. This is the default at install time.
++    granted,
++
++    // Specifies that the user has elected not to show notifications
++    // from the app or extension.
++    denied
++  };
++
++  dictionary NotificationItem {
++    // Title of one item of a list notification.
++    DOMString title;
++
++    // Additional details about this item.
++    DOMString message;
++  };
++
++  [nodoc] dictionary NotificationBitmap {
++    long width;
++    long height;
++    ArrayBuffer? data;
++  };
++
++  dictionary NotificationButton {
++    DOMString title;
++    [deprecated="Button icons not visible for Mac OS X users."]
++    DOMString? iconUrl;
++    [nodoc] NotificationBitmap? iconBitmap;
++  };
++
++  dictionary NotificationOptions {
++    // Which type of notification to display.
++    // <em>Required for $(ref:notifications.create)</em> method.
++    TemplateType? type;
++
++    // A URL to the sender's avatar, app icon, or a thumbnail for image
++    // notifications.
++    //
++    // URLs can be a data URL, a blob URL, or a URL relative to a resource
++    // within this extension's .crx file
++    // <aside class="note"><b>Note:</b>This value is required for the
++    // $(ref:notifications.create)<code>()</code> method.</aside>
++    DOMString? iconUrl;
++    [nodoc] NotificationBitmap? iconBitmap;
++
++    // A URL to the app icon mask. URLs have the same restrictions as
++    // $(ref:notifications.NotificationOptions.iconUrl iconUrl).
++    //
++    // The app icon mask should be in alpha channel, as only the alpha channel
++    // of the image will be considered.
++    [deprecated="The app icon mask is not visible for Mac OS X users."]
++    DOMString? appIconMaskUrl;
++    [nodoc] NotificationBitmap? appIconMaskBitmap;
++
++    // Title of the notification (e.g. sender name for email).
++    // <aside class="note"><b>Note:</b>This value is required for the
++    // $(ref:notifications.create)<code>()</code> method.</aside>
++    DOMString? title;
++
++    // Main notification content.
++    // <aside class="note"><b>Note:</b>This value is required for the
++    // $(ref:notifications.create)<code>()</code> method.</aside>
++    DOMString? message;
++
++    // Alternate notification content with a lower-weight font.
++    DOMString? contextMessage;
++
++    // Priority ranges from -2 to 2. -2 is lowest priority. 2 is highest. Zero
++    // is default.  On platforms that don't support a notification center
++    // (Windows, Linux & Mac), -2 and -1 result in an error as notifications
++    // with those priorities will not be shown at all.
++    long? priority;
++
++    // A timestamp associated with the notification, in milliseconds past the
++    // epoch (e.g. <code>Date.now() + n</code>).
++    double? eventTime;
++
++    // Text and icons for up to two notification action buttons.
++    NotificationButton[]? buttons;
++
++    // Secondary notification content.
++    [nodoc] DOMString? expandedMessage;
++
++    // A URL to the image thumbnail for image-type notifications.
++    // URLs have the same restrictions as
++    // $(ref:notifications.NotificationOptions.iconUrl iconUrl).
++    [deprecated="The image is not visible for Mac OS X users."]
++    DOMString? imageUrl;
++    [nodoc] NotificationBitmap? imageBitmap;
++
++    // Items for multi-item notifications. Users on Mac OS X only see the first
++    // item.
++    NotificationItem[]? items;
++
++    // Current progress ranges from 0 to 100.
++    long? progress;
++
++    [deprecated="This UI hint is ignored as of Chrome 67"]
++    boolean? isClickable;
++
++    // Indicates that the notification should remain visible on screen until the
++    // user activates or dismisses the notification. This defaults to false.
++    boolean? requireInteraction;
++
++    // Indicates that no sounds or vibrations should be made when the
++    // notification is being shown. This defaults to false.
++    boolean? silent;
++  };
++
++  callback CreateCallback = void (DOMString notificationId);
++
++  callback UpdateCallback = void (boolean wasUpdated);
++
++  callback ClearCallback = void (boolean wasCleared);
++
++  callback GetAllCallback = void (object notifications);
++
++  callback PermissionLevelCallback = void (PermissionLevel level);
++
++  interface Functions {
++    // Creates and displays a notification.
++    // |notificationId|: Identifier of the notification. If not set or empty, an
++    // ID will automatically be generated. If it matches an existing
++    // notification, this method first clears that notification before
++    // proceeding with the create operation. The identifier may not be longer
++    // than 500 characters.
++    //
++    // The <code>notificationId</code> parameter is required before Chrome 42.
++    // |options|: Contents of the notification.
++    // |callback|: Returns the notification id (either supplied or generated)
++    // that represents the created notification.
++    //
++    // The callback is required before Chrome 42.
++    static void create(
++        optional DOMString notificationId,
++        NotificationOptions options,
++        optional CreateCallback callback);
++
++    // Updates an existing notification.
++    // |notificationId|: The id of the notification to be updated. This is
++    // returned by $(ref:notifications.create) method.
++    // |options|: Contents of the notification to update to.
++    // |callback|: Called to indicate whether a matching notification existed.
++    //
++    // The callback is required before Chrome 42.
++    static void update(
++        DOMString notificationId,
++        NotificationOptions options,
++        optional UpdateCallback callback);
++
++    // Clears the specified notification.
++    // |notificationId|: The id of the notification to be cleared. This is
++    // returned by $(ref:notifications.create) method.
++    // |callback|: Called to indicate whether a matching notification existed.
++    //
++    // The callback is required before Chrome 42.
++    static void clear(
++        DOMString notificationId,
++        optional ClearCallback callback);
++
++    // Retrieves all the notifications of this app or extension.
++    // |callback|: Returns the set of notification_ids currently in the system.
++    static void getAll(GetAllCallback callback);
++
++    // Retrieves whether the user has enabled notifications from this app
++    // or extension. Not implemented here: an application that shows the
++    // notifications it is handed has no level to report, and the extensions
++    // layer has no place to record the call.
++    [nocompile] static void getPermissionLevel(
++        PermissionLevelCallback callback);
++  };
++
++  interface Events {
++    // The notification closed, either by the system or by user action.
++    static void onClosed(DOMString notificationId, boolean byUser);
++
++    // The user clicked in a non-button area of the notification.
++    static void onClicked(DOMString notificationId);
++
++    // The user pressed a button in the notification.
++    static void onButtonClicked(DOMString notificationId, long buttonIndex);
++
++    // The user changes the permission level.  As of Chrome 47, only ChromeOS
++    // has UI that dispatches this event.
++    static void onPermissionLevelChanged(PermissionLevel level);
++
++    // The user clicked on a link for the app's notification settings.  As of
++    // Chrome 47, only ChromeOS has UI that dispatches this event.
++    // As of Chrome 65, that UI has been removed from ChromeOS, too.
++    [deprecated="Custom notification settings button is no longer supported."]
++    static void onShowSettings();
++  };
++};
+diff --git a/src/3rdparty/chromium/qtwebengine/common/extensions/api/schema.gni b/src/3rdparty/chromium/qtwebengine/common/extensions/api/schema.gni
+index f0a7846c9d..0597147afb 100644
+--- a/src/3rdparty/chromium/qtwebengine/common/extensions/api/schema.gni
++++ b/src/3rdparty/chromium/qtwebengine/common/extensions/api/schema.gni
+@@ -1,6 +1,7 @@
+ webengine_extensions_api_schema_files_ = [
+   "commands.json",
+   "context_menus.json",
++  "notifications.idl",
+   "pdf_viewer_private.idl",
+   "permissions.json",
+   "privacy.json",
+diff --git a/src/core/extensions/extension_system_qt.cpp b/src/core/extensions/extension_system_qt.cpp
+index 3e692cf951..9dce104f63 100644
+--- a/src/core/extensions/extension_system_qt.cpp
++++ b/src/core/extensions/extension_system_qt.cpp
+@@ -8,6 +8,8 @@
+ 
+ #include "extension_system_qt.h"
+ 
++#include "qtwebengine/browser/extensions/notification_registry_qt.h"
++
+ #include "extension_manager.h"
+ 
+ #include <algorithm>
+@@ -209,6 +211,10 @@ void ExtensionSystemQt::NotifyExtensionLoaded(const Extension *extension)
+ 
+ void ExtensionSystemQt::Shutdown()
+ {
++    // The notifications this context's extensions were showing outlive nothing: the registry
++    // holds pointers to it, and it is going away.
++    NotificationRegistryQt::Get()->ForgetContext(browser_context_);
++
+     if (content_verifier_.get())
+         content_verifier_->Shutdown();
+ }
+diff --git a/src/core/extensions/extensions_browser_client_qt.cpp b/src/core/extensions/extensions_browser_client_qt.cpp
+index ac2062e473..f4a5176d5a 100644
+--- a/src/core/extensions/extensions_browser_client_qt.cpp
++++ b/src/core/extensions/extensions_browser_client_qt.cpp
+@@ -54,7 +54,13 @@
+ #include "extension_host_delegate_qt.h"
+ #include "content/public/browser/web_contents.h"
+ #include "profile_adapter.h"
++#include "profile_adapter_client.h"
+ #include "profile_qt.h"
++#include "user_notification_controller.h"
++
++#include "base/strings/utf_string_conversions.h"
++#include "third_party/blink/public/common/notifications/notification_resources.h"
++#include "third_party/blink/public/common/notifications/platform_notification_data.h"
+ #include "web_contents_adapter.h"
+ #include "web_contents_adapter_client.h"
+ #include "web_engine_library_info.h"
+@@ -256,11 +262,68 @@ public:
+ ExtensionsBrowserClientQt::ExtensionsBrowserClientQt()
+ {
+     TabRegistryQt::Get()->SetDelegate(this);
++    NotificationRegistryQt::Get()->SetDelegate(this);
+ }
+ 
+ ExtensionsBrowserClientQt::~ExtensionsBrowserClientQt()
+ {
+     TabRegistryQt::Get()->SetDelegate(nullptr);
++    NotificationRegistryQt::Get()->SetDelegate(nullptr);
++}
++
++namespace {
++
++// The reader's answer to a notification, on its way back to the extension. Chromium's own
++// notifications carry a delegate of this shape, and an extension's is told the same things.
++class ExtensionNotificationDelegate : public QtWebEngineCore::UserNotificationController::Delegate
++{
++public:
++    explicit ExtensionNotificationDelegate(std::string scopedId) : m_scopedId(std::move(scopedId)) { }
++
++    void shown() override { }
++    void clicked() override { NotificationRegistryQt::Get()->Clicked(m_scopedId); }
++    void closed(bool byUser) override { NotificationRegistryQt::Get()->Closed(m_scopedId, byUser); }
++
++private:
++    std::string m_scopedId;
++};
++
++} // namespace
++
++void ExtensionsBrowserClientQt::Show(content::BrowserContext *context, const std::string &scopedId,
++                                     const NotificationRequestQt &request)
++{
++    QtWebEngineCore::ProfileQt *profile = static_cast<QtWebEngineCore::ProfileQt *>(context);
++    if (!profile)
++        return;
++
++    blink::PlatformNotificationData data;
++    data.title = base::UTF8ToUTF16(request.title);
++    data.body = base::UTF8ToUTF16(request.message);
++
++    QSharedPointer<QtWebEngineCore::UserNotificationController> controller(
++            new QtWebEngineCore::UserNotificationController(
++            data, blink::NotificationResources(), request.origin,
++            new ExtensionNotificationDelegate(scopedId)));
++    profile->profileAdapter()->ephemeralNotifications().insert(
++            QByteArray::fromStdString(scopedId), controller);
++
++    const QList<QtWebEngineCore::ProfileAdapterClient *> clients =
++            profile->profileAdapter()->clients();
++    for (QtWebEngineCore::ProfileAdapterClient *client : clients)
++        client->showNotification(controller);
++}
++
++void ExtensionsBrowserClientQt::Close(content::BrowserContext *context, const std::string &scopedId)
++{
++    QtWebEngineCore::ProfileQt *profile = static_cast<QtWebEngineCore::ProfileQt *>(context);
++    if (!profile)
++        return;
++    auto &notifications = profile->profileAdapter()->ephemeralNotifications();
++    const QByteArray key = QByteArray::fromStdString(scopedId);
++    if (QSharedPointer<QtWebEngineCore::UserNotificationController> controller =
++                notifications.take(key))
++        controller->closeNotification();
+ }
+ 
+ // A page the extension itself put on show, such as the view an application loads
+diff --git a/src/core/extensions/extensions_browser_client_qt.h b/src/core/extensions/extensions_browser_client_qt.h
+index fdd4848b91..b8f878ae28 100644
+--- a/src/core/extensions/extensions_browser_client_qt.h
++++ b/src/core/extensions/extensions_browser_client_qt.h
+@@ -11,6 +11,7 @@
+ #define EXTENSIONS_BROWSER_CLIENT_QT_H_
+ 
+ #include "extensions/browser/extensions_browser_client.h"
++#include "qtwebengine/browser/extensions/notification_registry_qt.h"
+ #include "qtwebengine/browser/extensions/tab_registry_qt.h"
+ #include "mojo/public/cpp/bindings/pending_receiver.h"
+ #include "mojo/public/cpp/bindings/pending_remote.h"
+@@ -21,12 +22,21 @@ class ExtensionsAPIClient;
+ 
+ // An ExtensionsBrowserClient that supports a single content::BrowserContent
+ // with no related incognito context.
+-class ExtensionsBrowserClientQt : public ExtensionsBrowserClient, public TabsDelegateQt
++class ExtensionsBrowserClientQt : public ExtensionsBrowserClient,
++                                  public TabsDelegateQt,
++                                  public NotificationsDelegateQt
+ {
+ public:
+     ExtensionsBrowserClientQt();
+     ~ExtensionsBrowserClientQt() override;
+ 
++    // NotificationsDelegateQt. An extension's notification goes where a page's goes: to the
++    // application, through the profile adapter's clients, as a UserNotificationController. The
++    // reader's answer comes back the same way and is passed to the extension as an event.
++    void Show(content::BrowserContext *context, const std::string &scopedId,
++              const NotificationRequestQt &request) override;
++    void Close(content::BrowserContext *context, const std::string &scopedId) override;
++
+     // TabsDelegateQt. Every WebContents the profile's adapters own is a tab, and the one on show
+     // is the active tab, until an embedder-facing API lets the application say otherwise.
+     std::vector<content::WebContents *> GetTabs(content::BrowserContext *context) override;
+diff --git a/tests/auto/widgets/extensions/resources/notifications_ext/icon.png b/tests/auto/widgets/extensions/resources/notifications_ext/icon.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..91740ca76159c90c7d904255c56f0733e3ae6c1c
+GIT binary patch
+literal 68
+zcmeAS@N?(olHy`uVBq!ia0vp^j3CUx1|;Q0k8}blZci7-kcwN$DG5Lh8v~O;;{|;n
+Oi^0>?&t;ucLK6URFbux{
+
+literal 0
+HcmV?d00001
+
+diff --git a/tests/auto/widgets/extensions/resources/notifications_ext/manifest.json b/tests/auto/widgets/extensions/resources/notifications_ext/manifest.json
+new file mode 100644
+index 0000000000..9adf72be3a
+--- /dev/null
++++ b/tests/auto/widgets/extensions/resources/notifications_ext/manifest.json
+@@ -0,0 +1,15 @@
++{
++    "name": "notifier",
++    "version": "1.0",
++    "manifest_version": 3,
++    "permissions": ["notifications"],
++    "background": {
++        "service_worker": "service_worker.js"
++    },
++    "action": {
++        "default_popup": "popup_page.html"
++    },
++    "icons": {
++        "16": "icon.png"
++    }
++}
+diff --git a/tests/auto/widgets/extensions/resources/notifications_ext/popup_page.html b/tests/auto/widgets/extensions/resources/notifications_ext/popup_page.html
+new file mode 100644
+index 0000000000..7cd667d59a
+--- /dev/null
++++ b/tests/auto/widgets/extensions/resources/notifications_ext/popup_page.html
+@@ -0,0 +1 @@
++<html><body>popup</body></html>
+diff --git a/tests/auto/widgets/extensions/resources/notifications_ext/service_worker.js b/tests/auto/widgets/extensions/resources/notifications_ext/service_worker.js
+new file mode 100644
+index 0000000000..4343325e20
+--- /dev/null
++++ b/tests/auto/widgets/extensions/resources/notifications_ext/service_worker.js
+@@ -0,0 +1,23 @@
++// A password manager registers these at its top level, before it has anything
++// to notify about, and the worker never starts if they are not there.
++const seen = []
++chrome.notifications.onClicked.addListener(id => seen.push(["clicked", id]))
++chrome.notifications.onButtonClicked.addListener((id, index) => seen.push(["button", id, index]))
++chrome.notifications.onClosed.addListener((id, byUser) => seen.push(["closed", id, byUser]))
++
++chrome.runtime.onMessage.addListener((message, _, sendResponse) => {
++    if (message === "events") {
++        sendResponse(seen)
++        return true
++    }
++    if (message === "notify") {
++        chrome.notifications.create("first", {
++            type: "basic",
++            iconUrl: "icon.png",
++            title: "A title",
++            message: "A message"
++        }, id => sendResponse(id))
++        return true
++    }
++    return false
++})
+diff --git a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
+index 27a65d420c..f0d60b31be 100644
+--- a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
++++ b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
+@@ -9,6 +9,7 @@
+ #include <QtWebEngineCore/qwebenginedownloadrequest.h>
+ #include <QtWebEngineCore/qwebenginenewwindowrequest.h>
+ #include <QtWebEngineCore/qwebengineextensionmanager.h>
++#include <QtWebEngineCore/qwebenginenotification.h>
+ #include <httpserver.h>
+ #include <QtCore/qscopeguard.h>
+ #include <memory>
+@@ -54,6 +55,9 @@ private Q_SLOTS:
+     void aWorkerThatListensLateCanReachThePageThatAlreadyAsked();
+     void loadingTheSamePathTwiceLeavesOneWorkingExtension();
+     void aPopupMayCloseItselfAfterRoutingByHash();
++    void anExtensionNotificationReachesTheProfilesPresenter();
++    void anExtensionKeepsTrackOfTheNotificationsItIsShowing();
++    void theReadersAnswerToANotificationReachesTheExtension();
+     void enableAfterStoragePathChange();
+     void tabsWindowsAndScripting();
+     void nativeMessaging();
+@@ -627,6 +631,131 @@ void tst_QWebEngineExtension::aPopupMayCloseItselfAfterRoutingByHash()
+     QTRY_COMPARE(closeSpy.size(), 1);
+ }
+ 
++void tst_QWebEngineExtension::anExtensionNotificationReachesTheProfilesPresenter()
++{
++    // An extension's notification is a notification. It goes where a page's does, so an
++    // application that already shows one shows this one, and the reader is not asked to tell them
++    // apart. A password manager uses them to say what it just saved.
++    QWebEngineExtensionInfo extension =
++            loadExtensionSync(resourcesPath() + "notifications_ext"_L1);
++    QVERIFY2(extension.isLoaded(), qPrintable(extension.error()));
++    m_manager->setExtensionEnabled(extension, true);
++
++    std::unique_ptr<QWebEngineNotification> shown;
++    m_profile->setNotificationPresenter([&](std::unique_ptr<QWebEngineNotification> notification) {
++        shown = std::move(notification);
++    });
++
++    // Asked for from the extension's own page, which is how an extension asks.
++    QWebEnginePage popup(m_profile);
++    QSignalSpy popupSpy(&popup, SIGNAL(loadFinished(bool)));
++    popup.load(extension.actionPopupUrl());
++    QTRY_COMPARE(popupSpy.size(), 1);
++    evaluateJavaScriptSync(&popup, "chrome.runtime.sendMessage('notify')");
++
++    QTRY_VERIFY(shown);
++    QCOMPARE(shown->title(), "A title"_L1);
++    QCOMPARE(shown->message(), "A message"_L1);
++    QCOMPARE(shown->origin().host(), extension.id());
++}
++
++void tst_QWebEngineExtension::anExtensionKeepsTrackOfTheNotificationsItIsShowing()
++{
++    // getAll, clear and update answer about this extension's own notifications: an extension that
++    // asks what it is showing is told, and one that clears something it never showed is told no.
++    QWebEngineExtensionInfo extension =
++            loadExtensionSync(resourcesPath() + "notifications_ext"_L1);
++    QVERIFY2(extension.isLoaded(), qPrintable(extension.error()));
++    m_manager->setExtensionEnabled(extension, true);
++
++    std::vector<std::unique_ptr<QWebEngineNotification>> shown;
++    m_profile->setNotificationPresenter([&](std::unique_ptr<QWebEngineNotification> notification) {
++        shown.push_back(std::move(notification));
++    });
++
++    QWebEnginePage popup(m_profile);
++    QSignalSpy popupSpy(&popup, SIGNAL(loadFinished(bool)));
++    popup.load(extension.actionPopupUrl());
++    QTRY_COMPARE(popupSpy.size(), 1);
++
++    // evaluateJavaScriptSync does not await, so the sequence runs in the page and records what it
++    // saw; the assertions read the record afterwards.
++    evaluateJavaScriptSync(&popup, R"((async () => {
++        const seen = {};
++        seen.before = await chrome.notifications.getAll();
++        seen.created = await chrome.notifications.create(
++            'mine', {type: 'basic', iconUrl: 'icon.png', title: 'T', message: 'M'});
++        seen.showing = await chrome.notifications.getAll();
++        seen.updatedOther = await chrome.notifications.update('other', {title: 'T2'});
++        seen.clearedOther = await chrome.notifications.clear('other');
++        seen.updatedMine = await chrome.notifications.update('mine', {title: 'T2'});
++        seen.clearedMine = await chrome.notifications.clear('mine');
++        seen.after = await chrome.notifications.getAll();
++        window.seen = seen;
++    })())");
++    QTRY_VERIFY(evaluateJavaScriptSync(&popup, "window.seen !== undefined").toBool());
++
++    const auto seen = [this, &popup](const QString &name) {
++        return evaluateJavaScriptSync(&popup, "window.seen." + name);
++    };
++    QCOMPARE(seen("before"_L1).toMap(), QVariantMap());
++    QCOMPARE(seen("created"_L1), "mine"_L1);
++    QCOMPARE(seen("showing"_L1).toMap(), QVariantMap({ { "mine"_L1, true } }));
++
++    // An id it never showed is not its to update or clear.
++    QCOMPARE(seen("updatedOther"_L1).toBool(), false);
++    QCOMPARE(seen("clearedOther"_L1).toBool(), false);
++
++    QCOMPARE(seen("updatedMine"_L1).toBool(), true);
++    QCOMPARE(seen("clearedMine"_L1).toBool(), true);
++    QCOMPARE(seen("after"_L1).toMap(), QVariantMap());
++
++    // Two reached the application for one notification: what it was shown as, and what the update
++    // replaced it with. A QWebEngineNotification cannot be changed after it is handed over, so an
++    // update is the old one taken back and a new one given.
++    QCOMPARE(shown.size(), 2u);
++}
++
++void tst_QWebEngineExtension::theReadersAnswerToANotificationReachesTheExtension()
++{
++    // A notification nobody can answer is a notice. A password manager registers onClicked at the
++    // top level of its worker and acts on it, so the click the application reports has to arrive
++    // as that event, and the notification going away has to arrive as onClosed.
++    QWebEngineExtensionInfo extension =
++            loadExtensionSync(resourcesPath() + "notifications_ext"_L1);
++    QVERIFY2(extension.isLoaded(), qPrintable(extension.error()));
++    m_manager->setExtensionEnabled(extension, true);
++
++    std::unique_ptr<QWebEngineNotification> shown;
++    m_profile->setNotificationPresenter([&](std::unique_ptr<QWebEngineNotification> notification) {
++        shown = std::move(notification);
++    });
++
++    QWebEnginePage popup(m_profile);
++    QSignalSpy popupSpy(&popup, SIGNAL(loadFinished(bool)));
++    popup.load(extension.actionPopupUrl());
++    QTRY_COMPARE(popupSpy.size(), 1);
++
++    // The worker asked, so the worker is what hears the answer.
++    evaluateJavaScriptSync(&popup, "chrome.runtime.sendMessage('notify')");
++    QTRY_VERIFY(shown);
++
++    shown->click();
++    const auto events = [this, &popup] {
++        evaluateJavaScriptSync(&popup,
++                               "chrome.runtime.sendMessage('events', r => { window.events = r })");
++        return evaluateJavaScriptSync(&popup, "JSON.stringify(window.events)").toString();
++    };
++    QTRY_COMPARE(events(), R"([["clicked","first"]])"_L1);
++
++    // byUser is true because that is what the engine says: QWebEngineNotification::close() is the
++    // platform reporting a close "either by the underlying platform or by the user", and the
++    // controller cannot tell those apart. Passing that through is better than inventing a
++    // distinction the application never made.
++    shown->close();
++    QTRY_COMPARE(events(), R"([["clicked","first"],["closed","first",true]])"_L1);
++}
++
+ void tst_QWebEngineExtension::enableAfterStoragePathChange()
+ {
+     // Changing the storage path after construction rebuilds the profile's PrefService. The
+-- 
+2.54.0 (Apple Git-157)
+
