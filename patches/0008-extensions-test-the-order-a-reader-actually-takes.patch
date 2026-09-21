@@ -1,0 +1,121 @@
+From 83dc91e0d7930e59a69ed472d45a7acf75e27a3b Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Ville=20Kivela=CC=88?= <vkivela@hotmail.com>
+Date: Mon, 21 Sep 2026 09:37:46 +0300
+Subject: [PATCH 8/8] extensions: test the order a reader actually takes
+
+Every existing case loads an extension into a profile that is not yet
+running anything. A reader does the opposite: the browser is open, a
+page is up, and they turn an extension on. The Omarchy VM found that an
+extension arriving that way reaches no renderer at all, so its popup
+draws nothing and its worker has no `chrome`, until the browser is
+restarted.
+
+Three cases for that order: a content script and worker on the next page
+load, a popup opened straight after, and the same on a profile whose
+storage path was set after it was built, which is what a declarative
+profile does. All three pass on macOS, which is why the failure needs
+these run where it happens.
+---
+ .../extensions/tst_qwebengineextension.cpp    | 79 +++++++++++++++++++
+ 1 file changed, 79 insertions(+)
+
+diff --git a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
+index 65537ba634..668629aaa0 100644
+--- a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
++++ b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
+@@ -47,6 +47,9 @@ private Q_SLOTS:
+     void loadInstalledExtensions();
+     void serviceWorkerMessaging();
+     void serviceWorkerLocalization();
++    void extensionLoadedIntoARunningProfile();
++    void aPopupOpenedAfterARuntimeLoadHasItsApis();
++    void aPopupOnAProfileWithItsOwnStorageHasItsApis();
+     void enableAfterStoragePathChange();
+     void tabsWindowsAndScripting();
+     void nativeMessaging();
+@@ -431,6 +434,82 @@ void tst_QWebEngineExtension::serviceWorkerLocalization()
+                  "hello from the worker"_L1);
+ }
+ 
++void tst_QWebEngineExtension::extensionLoadedIntoARunningProfile()
++{
++    // The same extension as serviceWorkerLocalization, but arriving after the profile is already
++    // running a page. That is the order every reader takes: the browser is open, and they turn an
++    // extension on. A renderer already exists, and the extension has to reach it.
++    QSignalSpy loadSpy(m_page, SIGNAL(loadFinished(bool)));
++    m_page->load(QUrl("qrc:///resources/index.html"));
++    QTRY_COMPARE(loadSpy.size(), 1);
++
++    QWebEngineExtensionInfo extension =
++            loadExtensionSync(resourcesPath() + "localized_worker_ext"_L1);
++    QVERIFY(extension.isLoaded());
++    m_manager->setExtensionEnabled(extension, true);
++
++    // The page is loaded again, because a page that was open before the extension was enabled has
++    // no content script in it. What is being asked here is whether the next page gets one.
++    m_page->load(QUrl("qrc:///resources/index.html"));
++    QTRY_COMPARE(loadSpy.size(), 2);
++    QTRY_COMPARE(evaluateJavaScriptSync(m_page, "document.getElementById('testNode').textContent"),
++                 "hello from the worker"_L1);
++}
++
++void tst_QWebEngineExtension::aPopupOpenedAfterARuntimeLoadHasItsApis()
++{
++    // What a browser actually does when a reader turns an extension on: a page is already up, the
++    // extension arrives, and then its own popup document is opened in a page of its own. The popup
++    // is a chrome-extension:// document and has to be a blessed extension context, or every API it
++    // reaches for is undefined and it draws nothing.
++    QSignalSpy loadSpy(m_page, SIGNAL(loadFinished(bool)));
++    m_page->load(QUrl("qrc:///resources/index.html"));
++    QTRY_COMPARE(loadSpy.size(), 1);
++
++    QWebEngineExtensionInfo extension = loadExtensionSync(resourcesPath() + "action_popup_ext"_L1);
++    QVERIFY(extension.isLoaded());
++    m_manager->setExtensionEnabled(extension, true);
++    QVERIFY(extension.actionPopupUrl().isValid());
++
++    QWebEnginePage popup(m_profile);
++    QSignalSpy popupSpy(&popup, SIGNAL(loadFinished(bool)));
++    popup.load(extension.actionPopupUrl());
++    QTRY_COMPARE(popupSpy.size(), 1);
++    QCOMPARE(evaluateJavaScriptSync(&popup, "typeof chrome.runtime"), "object"_L1);
++    QCOMPARE(evaluateJavaScriptSync(&popup, "chrome.runtime.id"), extension.id());
++}
++
++void tst_QWebEngineExtension::aPopupOnAProfileWithItsOwnStorageHasItsApis()
++{
++    // As above, but on a profile whose storage path was set after it was built, which is what a
++    // declarative profile does and what every Omaweb Space is. Rebuilding the PrefService is
++    // already known to disturb the extension system (see enableAfterStoragePathChange); this asks
++    // whether it also leaves the renderers uninformed.
++    QTemporaryDir tempDir(QDir::tempPath() + "/tst_QWebEngineExtension-XXXXXX"_L1);
++    QWebEngineProfile profile("RuntimeLoadWithStorage");
++    profile.setPersistentStoragePath(tempDir.path());
++    QWebEngineExtensionManager *manager = profile.extensionManager();
++
++    QWebEnginePage page(&profile);
++    QSignalSpy loadSpy(&page, SIGNAL(loadFinished(bool)));
++    page.load(QUrl("qrc:///resources/index.html"));
++    QTRY_COMPARE(loadSpy.size(), 1);
++
++    QSignalSpy spy(manager, SIGNAL(loadFinished(QWebEngineExtensionInfo)));
++    manager->loadExtension(resourcesPath() + "action_popup_ext"_L1);
++    QTRY_COMPARE(spy.size(), 1);
++    QWebEngineExtensionInfo extension = spy.takeFirst().value(0).value<QWebEngineExtensionInfo>();
++    QVERIFY(extension.isLoaded());
++    manager->setExtensionEnabled(extension, true);
++
++    QWebEnginePage popup(&profile);
++    QSignalSpy popupSpy(&popup, SIGNAL(loadFinished(bool)));
++    popup.load(extension.actionPopupUrl());
++    QTRY_COMPARE(popupSpy.size(), 1);
++    QCOMPARE(evaluateJavaScriptSync(&popup, "typeof chrome.runtime"), "object"_L1);
++    QVERIFY(QDir(manager->installPath()).removeRecursively());
++}
++
+ void tst_QWebEngineExtension::enableAfterStoragePathChange()
+ {
+     // Changing the storage path after construction rebuilds the profile's PrefService. The
+-- 
+2.54.0 (Apple Git-157)
+
