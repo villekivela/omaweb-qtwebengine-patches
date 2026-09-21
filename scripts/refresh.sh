@@ -63,7 +63,7 @@ total="$(ls "$series"/*.patch | wc -l | tr -d ' ')"
 # since the tree was built is applied from where it stopped. Anything left
 # uncommitted in the tree is discarded first: it is a leftover of a build, not
 # work, and `git am` refuses a dirty tree.
-git checkout -q -- . && git clean -qfd
+git reset -q --hard && git clean -qfd
 if [ "$applied" -ge "$total" ]; then
     echo "SERIES ALREADY APPLIED: $applied commits on the tarball"
 elif [ "$applied" -gt 0 ] && git am $(ls "$series"/*.patch | tail -n +"$((applied + 1))"); then
