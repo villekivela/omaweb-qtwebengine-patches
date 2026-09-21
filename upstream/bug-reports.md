@@ -10,17 +10,28 @@ Four touch `qtwebengine` alone and can go up in any order. The `ExtensionPrefs` 
 change in `qtwebengine-chromium`, so it is two changes with a dependency and is worth sending last,
 once the others have shown the reviewers what this is about.
 
-All five are filed. The first is on Gerrit; the rest are written and waiting to be pushed.
+All five are filed. Four are on Gerrit; the fifth waits on an answer about where its fix belongs.
 
 | Order | Patch | Report | Change | What it is |
 | ----- | ----- | ------ | ------ | ---------- |
 | 1 | 0014 | [QTBUG-150590](https://bugreports.qt.io/browse/QTBUG-150590) | [772845](https://codereview.qt-project.org/c/qt/qtwebengine/+/772845) | A page cannot load a web accessible resource |
-| 2 | 0001 | [QTBUG-150591](https://bugreports.qt.io/browse/QTBUG-150591) | ready | A localising service worker hangs forever |
-| 3 | 0010 | [QTBUG-150592](https://bugreports.qt.io/browse/QTBUG-150592) | to write | Loading a loaded extension leaves it dead |
-| 4 | 0011 | [QTBUG-150593](https://bugreports.qt.io/browse/QTBUG-150593) | to write | An extension document cannot close its own window |
-| 5 | 0003 | [QTBUG-150594](https://bugreports.qt.io/browse/QTBUG-150594) | to write | `setExtensionEnabled` crashes after a storage path change |
+| 2 | 0001 | [QTBUG-150591](https://bugreports.qt.io/browse/QTBUG-150591) | [772848](https://codereview.qt-project.org/c/qt/qtwebengine/+/772848) | A localising service worker hangs forever |
+| 3 | 0010 | [QTBUG-150592](https://bugreports.qt.io/browse/QTBUG-150592) | [772849](https://codereview.qt-project.org/c/qt/qtwebengine/+/772849) | Loading a loaded extension leaves it dead |
+| 4 | 0011 | [QTBUG-150593](https://bugreports.qt.io/browse/QTBUG-150593) | [772850](https://codereview.qt-project.org/c/qt/qtwebengine/+/772850) | An extension document cannot close its own window |
+| 5 | 0003 | [QTBUG-150594](https://bugreports.qt.io/browse/QTBUG-150594) | waiting | `setExtensionEnabled` crashes after a storage path change |
 
 Each change carries `Fixes: QTBUG-…` and `Pick-to: 6.11 6.10`.
+
+Qt builds nothing until a change has a +2 and someone stages it. The Sanity Bot runs on upload and
+checks style only; it caught a missing trailing newline in a fixture. So the first real build of
+these happens after a reviewer has already read them, which is the argument for the changes being
+small and for reusing the fixtures the test directory already has.
+
+None of the four has been compiled against `dev`. Five of the six source files they touch are
+byte-identical between 6.11.2 and `dev`, and the sixth differs by fourteen lines in functions none
+of this goes near, so the risk sits in the tests rather than the code. Changes 3 and 4 use only
+fixtures and helpers `dev`'s own tests already use. Change 1 is the one that links the HTTP server
+into that test directory for the first time.
 
 ---
 
