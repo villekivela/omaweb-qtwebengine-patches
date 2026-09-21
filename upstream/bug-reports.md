@@ -10,13 +10,17 @@ Four touch `qtwebengine` alone and can go up in any order. The `ExtensionPrefs` 
 change in `qtwebengine-chromium`, so it is two changes with a dependency and is worth sending last,
 once the others have shown the reviewers what this is about.
 
-| Order | Patch | Repositories | What it is |
-| ----- | ----- | ------------ | ---------- |
-| 1 | 0014 | qtwebengine | A page cannot load a web accessible resource |
-| 2 | 0001 | qtwebengine | A localising service worker hangs forever |
-| 3 | 0010 | qtwebengine | Loading a loaded extension leaves it dead |
-| 4 | 0011 | qtwebengine | An extension document cannot close its own window |
-| 5 | 0003 | qtwebengine + qtwebengine-chromium | `setExtensionEnabled` crashes after a storage path change |
+All five are filed. The first is on Gerrit; the rest are written and waiting to be pushed.
+
+| Order | Patch | Report | Change | What it is |
+| ----- | ----- | ------ | ------ | ---------- |
+| 1 | 0014 | [QTBUG-150590](https://bugreports.qt.io/browse/QTBUG-150590) | [772845](https://codereview.qt-project.org/c/qt/qtwebengine/+/772845) | A page cannot load a web accessible resource |
+| 2 | 0001 | [QTBUG-150591](https://bugreports.qt.io/browse/QTBUG-150591) | ready | A localising service worker hangs forever |
+| 3 | 0010 | [QTBUG-150592](https://bugreports.qt.io/browse/QTBUG-150592) | to write | Loading a loaded extension leaves it dead |
+| 4 | 0011 | [QTBUG-150593](https://bugreports.qt.io/browse/QTBUG-150593) | to write | An extension document cannot close its own window |
+| 5 | 0003 | [QTBUG-150594](https://bugreports.qt.io/browse/QTBUG-150594) | to write | `setExtensionEnabled` crashes after a storage path change |
+
+Each change carries `Fixes: QTBUG-…` and `Pick-to: 6.11 6.10`.
 
 ---
 
