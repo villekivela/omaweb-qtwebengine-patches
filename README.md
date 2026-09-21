@@ -1,13 +1,13 @@
 # QtWebEngine extension patches
 
-Seven patches that let QtWebEngine host a password manager's Chromium extension. Base is the
+Nine patches that let QtWebEngine host a password manager's Chromium extension. Base is the
 released `qtwebengine-everywhere-src-6.11.2` tarball.
 
 Built for [omaweb#344](https://github.com/villekivela/omaweb/issues/344), which asks whether Omaweb
 can host Bitwarden and 1Password. The findings live in `docs/research/password-manager-extensions.md`
 in that repository.
 
-Two of the seven are ordinary bug fixes headed for Gerrit. The rest wait on one question to Qt, in
+Two of the nine are ordinary bug fixes headed for Gerrit. The rest wait on one question to Qt, in
 `upstream/QTBUG-draft.md`. If Qt takes the work, this repository is deleted rather than maintained.
 
 ## Running it
@@ -52,6 +52,16 @@ arrive where a page's own `window.open()` arrives, so the application decides wh
 means. Bitwarden reaches this when its popup asks to open in a window of its own, which is how it
 shows its settings: it has no options page, only routes inside the popup document. _Follows 0004._
 
+**0008, test the order a reader actually takes.** The browser is open, a page is up, and then an
+extension is turned on. Every earlier case loads an extension into a profile running nothing. _Tests
+only._
+
+**0009, answer webNavigation.getFrame and getAllFrames.** A password manager's worker registers its
+listener inside asynchronous set-up, so the first page's message is dropped, in Chrome as here; the
+worker then reaches back into every frame of every open tab, and that needs `getAllFrames`. Answered
+off the tab registry and the frame's own state, without Chrome's tab-strip observer. The events stay
+declared and unraised. _Follows 0004._
+
 ## The open question
 
 `TabsDelegateQt` is internal, and `ExtensionsBrowserClientQt` fills it by treating every page of the
@@ -63,7 +73,7 @@ one is active. That is what the QTBUG draft asks for. Ask before writing the API
 
 ## Tests
 
-23 tests pass with the series applied. Five of them fail on a stock build, which is why they are
+28 tests pass with the series applied. Five of them fail on a stock build, which is why they are
 worth having:
 
 - `serviceWorkerLocalization` fails

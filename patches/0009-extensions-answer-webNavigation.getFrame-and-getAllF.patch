@@ -1,0 +1,474 @@
+From db4875d87926998c0ef2e04ac8db0e9a7192b319 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Ville=20Kivela=CC=88?= <vkivela@hotmail.com>
+Date: Mon, 21 Sep 2026 12:12:51 +0300
+Subject: [PATCH 9/9] extensions: answer webNavigation.getFrame and
+ getAllFrames
+
+A password manager's worker registers its message listener inside
+asynchronous set-up, long after its script has evaluated, so the first
+page's message finds no listener and is dropped, in Chrome as here.
+Chrome users never notice, because the worker then reaches back into
+every open tab: tabs.query, then webNavigation.getAllFrames for each,
+then scripting.executeScript into every frame. With getAllFrames
+unknown the callback never fires, the loop never injects, and the first
+page after a launch has no autofill until it is reloaded.
+
+Chrome answers these from a per-document navigation state that its
+tab-strip observer maintains, which is the half of webNavigation the
+research marked as a stop. It is not needed: the frame itself knows its
+committed URL and whether it is an error document, and the core
+ExtensionApiFrameIdMap numbers frames and documents. The two functions
+read the tab off the registry and the frames off its WebContents. The
+events stay declared and unraised.
+
+Two fixtures with the worker shapes the existing ones lacked: one that
+is busy for its first moments, whose message is parked and delivered,
+and one that listens late and reaches back the way Bitwarden does.
+---
+ .../browser/extensions/api/BUILD.gn           |   2 +
+ .../api/web_navigation/web_navigation_api.cc  | 124 ++++++++++++++++++
+ .../api/web_navigation/web_navigation_api.h   |  35 +++++
+ .../common/extensions/api/web_navigation.json |  14 +-
+ .../late_listener_ext/content_script.js       |   6 +
+ .../resources/late_listener_ext/manifest.json |  27 ++++
+ .../late_listener_ext/service_worker.js       |  29 ++++
+ .../slow_worker_ext/content_script.js         |   6 +
+ .../resources/slow_worker_ext/manifest.json   |  19 +++
+ .../slow_worker_ext/service_worker.js         |  10 ++
+ .../extensions/tst_qwebengineextension.cpp    |  47 +++++++
+ 11 files changed, 313 insertions(+), 6 deletions(-)
+ create mode 100644 src/3rdparty/chromium/qtwebengine/browser/extensions/api/web_navigation/web_navigation_api.cc
+ create mode 100644 src/3rdparty/chromium/qtwebengine/browser/extensions/api/web_navigation/web_navigation_api.h
+ create mode 100644 tests/auto/widgets/extensions/resources/late_listener_ext/content_script.js
+ create mode 100644 tests/auto/widgets/extensions/resources/late_listener_ext/manifest.json
+ create mode 100644 tests/auto/widgets/extensions/resources/late_listener_ext/service_worker.js
+ create mode 100644 tests/auto/widgets/extensions/resources/slow_worker_ext/content_script.js
+ create mode 100644 tests/auto/widgets/extensions/resources/slow_worker_ext/manifest.json
+ create mode 100644 tests/auto/widgets/extensions/resources/slow_worker_ext/service_worker.js
+
+diff --git a/src/3rdparty/chromium/qtwebengine/browser/extensions/api/BUILD.gn b/src/3rdparty/chromium/qtwebengine/browser/extensions/api/BUILD.gn
+index 3371283eb0..836340988c 100644
+--- a/src/3rdparty/chromium/qtwebengine/browser/extensions/api/BUILD.gn
++++ b/src/3rdparty/chromium/qtwebengine/browser/extensions/api/BUILD.gn
+@@ -39,6 +39,8 @@ source_set("tabs") {
+   sources = [
+     "tabs/tabs_api.cc",
+     "tabs/tabs_api.h",
++    "web_navigation/web_navigation_api.cc",
++    "web_navigation/web_navigation_api.h",
+     "windows/windows_api.cc",
+     "windows/windows_api.h",
+   ]
+diff --git a/src/3rdparty/chromium/qtwebengine/browser/extensions/api/web_navigation/web_navigation_api.cc b/src/3rdparty/chromium/qtwebengine/browser/extensions/api/web_navigation/web_navigation_api.cc
+new file mode 100644
+index 0000000000..12dfadb0a4
+--- /dev/null
++++ b/src/3rdparty/chromium/qtwebengine/browser/extensions/api/web_navigation/web_navigation_api.cc
+@@ -0,0 +1,124 @@
++// Copyright (C) 2026 The Qt Company Ltd.
++// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
++
++// based on //chrome/browser/extensions/api/web_navigation/web_navigation_api.cc
++// Copyright 2012 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "qtwebengine/browser/extensions/api/web_navigation/web_navigation_api.h"
++
++#include "content/public/browser/render_frame_host.h"
++#include "content/public/browser/render_process_host.h"
++#include "content/public/browser/web_contents.h"
++#include "extensions/browser/extension_api_frame_id_map.h"
++#include "qtwebengine/browser/extensions/tab_registry_qt.h"
++#include "qtwebengine/common/extensions/api/web_navigation.h"
++
++namespace extensions {
++
++namespace {
++
++namespace GetFrame = api::web_navigation::GetFrame;
++namespace GetAllFrames = api::web_navigation::GetAllFrames;
++
++// Chrome reports only frames whose URL an extension may see; a frame that has not committed
++// anything yet has none.
++bool IsReportable(content::RenderFrameHost* frame) {
++  const GURL& url = frame->GetLastCommittedURL();
++  return url.is_valid() && !url.is_empty();
++}
++
++// What both functions say about a frame, filled the same way so the two never disagree.
++template <typename Details>
++void Describe(content::RenderFrameHost* frame, Details* details) {
++  details->url = frame->GetLastCommittedURL().spec();
++  details->error_occurred = frame->IsErrorDocument();
++  details->document_id = ExtensionApiFrameIdMap::GetDocumentId(frame).ToString();
++  if (content::RenderFrameHost* parent = frame->GetParentOrOuterDocument()) {
++    details->parent_document_id = ExtensionApiFrameIdMap::GetDocumentId(parent).ToString();
++  }
++  details->frame_type = ExtensionApiFrameIdMap::GetFrameType(frame);
++  details->document_lifecycle = ExtensionApiFrameIdMap::GetDocumentLifecycle(frame);
++}
++
++}  // namespace
++
++ExtensionFunction::ResponseAction WebNavigationGetFrameFunction::Run() {
++  std::optional<GetFrame::Params> params = GetFrame::Params::Create(args());
++  EXTENSION_FUNCTION_VALIDATE(params);
++
++  content::RenderFrameHost* frame = nullptr;
++  if (params->details.document_id) {
++    ExtensionApiFrameIdMap::DocumentId document_id =
++        ExtensionApiFrameIdMap::DocumentIdFromString(*params->details.document_id);
++    if (!document_id)
++      return RespondNow(Error("Invalid documentId."));
++    frame = ExtensionApiFrameIdMap::Get()->GetRenderFrameHostByDocumentId(document_id);
++    if (!frame)
++      return RespondNow(WithArguments(base::Value()));
++    // Found by a global lookup, so it may belong to another profile.
++    content::WebContents* contents = content::WebContents::FromRenderFrameHost(frame);
++    if (!contents || contents->GetBrowserContext() != browser_context())
++      return RespondNow(WithArguments(base::Value()));
++    const int tab_id = TabRegistryQt::Get()->GetTabId(contents);
++    const int frame_id = ExtensionApiFrameIdMap::GetFrameId(frame);
++    if ((params->details.tab_id && *params->details.tab_id != tab_id) ||
++        (params->details.frame_id && *params->details.frame_id != frame_id)) {
++      return RespondNow(WithArguments(base::Value()));
++    }
++  } else {
++    if (!params->details.tab_id || !params->details.frame_id) {
++      return RespondNow(Error("Either documentId or both tabId and frameId must be specified."));
++    }
++    content::WebContents* contents =
++        TabRegistryQt::Get()->GetWebContents(browser_context(), *params->details.tab_id);
++    if (!contents)
++      return RespondNow(WithArguments(base::Value()));
++    frame = ExtensionApiFrameIdMap::Get()->GetRenderFrameHostById(contents,
++                                                                  *params->details.frame_id);
++  }
++
++  if (!frame || !IsReportable(frame))
++    return RespondNow(WithArguments(base::Value()));
++
++  GetFrame::Results::Details details;
++  Describe(frame, &details);
++  details.parent_frame_id = ExtensionApiFrameIdMap::GetParentFrameId(frame);
++  return RespondNow(ArgumentList(GetFrame::Results::Create(details)));
++}
++
++ExtensionFunction::ResponseAction WebNavigationGetAllFramesFunction::Run() {
++  std::optional<GetAllFrames::Params> params = GetAllFrames::Params::Create(args());
++  EXTENSION_FUNCTION_VALIDATE(params);
++
++  content::WebContents* contents =
++      TabRegistryQt::Get()->GetWebContents(browser_context(), params->details.tab_id);
++  if (!contents)
++    return RespondNow(WithArguments(base::Value()));
++
++  std::vector<GetAllFrames::Results::DetailsType> frames;
++  contents->ForEachRenderFrameHostWithAction([contents, &frames](
++                                                 content::RenderFrameHost* frame) {
++    // An inner WebContents is not part of this tab's frame tree, as far as an extension is told.
++    if (content::WebContents::FromRenderFrameHost(frame) != contents)
++      return content::RenderFrameHost::FrameIterationAction::kSkipChildren;
++    // A frame kept for back/forward is not a frame the page is showing.
++    if (frame->IsInLifecycleState(content::RenderFrameHost::LifecycleState::kInBackForwardCache))
++      return content::RenderFrameHost::FrameIterationAction::kSkipChildren;
++    if (!IsReportable(frame))
++      return content::RenderFrameHost::FrameIterationAction::kContinue;
++
++    GetAllFrames::Results::DetailsType details;
++    Describe(frame, &details);
++    details.frame_id = ExtensionApiFrameIdMap::GetFrameId(frame);
++    details.parent_frame_id = ExtensionApiFrameIdMap::GetParentFrameId(frame);
++    details.process_id = frame->GetProcess()->GetDeprecatedID();
++    frames.push_back(std::move(details));
++    return content::RenderFrameHost::FrameIterationAction::kContinue;
++  });
++
++  return RespondNow(ArgumentList(GetAllFrames::Results::Create(frames)));
++}
++
++}  // namespace extensions
+diff --git a/src/3rdparty/chromium/qtwebengine/browser/extensions/api/web_navigation/web_navigation_api.h b/src/3rdparty/chromium/qtwebengine/browser/extensions/api/web_navigation/web_navigation_api.h
+new file mode 100644
+index 0000000000..e8bd802597
+--- /dev/null
++++ b/src/3rdparty/chromium/qtwebengine/browser/extensions/api/web_navigation/web_navigation_api.h
+@@ -0,0 +1,35 @@
++// Copyright (C) 2026 The Qt Company Ltd.
++// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
++
++// based on //chrome/browser/extensions/api/web_navigation/web_navigation_api.h
++// Copyright 2012 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef QTWEBENGINE_BROWSER_EXTENSIONS_API_WEB_NAVIGATION_WEB_NAVIGATION_API_H_
++#define QTWEBENGINE_BROWSER_EXTENSIONS_API_WEB_NAVIGATION_WEB_NAVIGATION_API_H_
++
++#include "extensions/browser/extension_function.h"
++
++namespace extensions {
++
++// The frames of a tab, read off the tab's WebContents. Chrome answers these from a per-document
++// navigation state its tab-strip observer maintains; QtWebEngine has no tab strip, and the frame
++// itself already knows its URL and whether it is an error document, so the answer comes from
++// there. A password manager reaches back into every frame of every open tab this way when its
++// worker has finished starting, and a page that was open first is only reached if this answers.
++class WebNavigationGetFrameFunction : public ExtensionFunction {
++  ~WebNavigationGetFrameFunction() override {}
++  ResponseAction Run() override;
++  DECLARE_EXTENSION_FUNCTION("webNavigation.getFrame", WEBNAVIGATION_GETFRAME)
++};
++
++class WebNavigationGetAllFramesFunction : public ExtensionFunction {
++  ~WebNavigationGetAllFramesFunction() override {}
++  ResponseAction Run() override;
++  DECLARE_EXTENSION_FUNCTION("webNavigation.getAllFrames", WEBNAVIGATION_GETALLFRAMES)
++};
++
++}  // namespace extensions
++
++#endif  // QTWEBENGINE_BROWSER_EXTENSIONS_API_WEB_NAVIGATION_WEB_NAVIGATION_API_H_
+diff --git a/src/3rdparty/chromium/qtwebengine/common/extensions/api/web_navigation.json b/src/3rdparty/chromium/qtwebengine/common/extensions/api/web_navigation.json
+index 3fcf28c8b1..b7f984a3d5 100644
+--- a/src/3rdparty/chromium/qtwebengine/common/extensions/api/web_navigation.json
++++ b/src/3rdparty/chromium/qtwebengine/common/extensions/api/web_navigation.json
+@@ -1,9 +1,13 @@
+-// Copied from //chrome/common/extensions/api/web_navigation.json for QtWebEngine. Functions without a
+-// QtWebEngine implementation are marked nocompile so the namespace and its events exist.
++// Copied from //chrome/common/extensions/api/web_navigation.json for QtWebEngine. getFrame and
++// getAllFrames are implemented on the tab registry; the events are declared so an extension can
++// listen for them, and are not yet raised.
+ [
+   {
+     "namespace": "webNavigation",
+     "description": "Use the <code>chrome.webNavigation</code> API to receive notifications about the status of navigation requests in-flight.",
++    "compiler_options": {
++      "implemented_in": "qtwebengine/browser/extensions/api/web_navigation/web_navigation_api.h"
++    },
+     "types": [
+       {
+         "id": "TransitionType",
+@@ -112,8 +116,7 @@
+               }
+             }
+           ]
+-        },
+-        "nocompile": true
++        }
+       },
+       {
+         "name": "getAllFrames",
+@@ -185,8 +188,7 @@
+               }
+             }
+           ]
+-        },
+-        "nocompile": true
++        }
+       }
+     ],
+     "events": [
+diff --git a/tests/auto/widgets/extensions/resources/late_listener_ext/content_script.js b/tests/auto/widgets/extensions/resources/late_listener_ext/content_script.js
+new file mode 100644
+index 0000000000..e82fb19707
+--- /dev/null
++++ b/tests/auto/widgets/extensions/resources/late_listener_ext/content_script.js
+@@ -0,0 +1,6 @@
++chrome.runtime.sendMessage("ping", (response) => {
++    let node = document.createElement("div")
++    node.id = "firstTry"
++    node.textContent = response === undefined ? "lost" : response
++    document.documentElement.appendChild(node)
++})
+diff --git a/tests/auto/widgets/extensions/resources/late_listener_ext/manifest.json b/tests/auto/widgets/extensions/resources/late_listener_ext/manifest.json
+new file mode 100644
+index 0000000000..0c575da0a7
+--- /dev/null
++++ b/tests/auto/widgets/extensions/resources/late_listener_ext/manifest.json
+@@ -0,0 +1,27 @@
++{
++    "name": "late listener",
++    "version": "1.0",
++    "manifest_version": 3,
++    "permissions": [
++        "tabs",
++        "scripting",
++        "webNavigation"
++    ],
++    "host_permissions": [
++        "<all_urls>"
++    ],
++    "background": {
++        "service_worker": "service_worker.js"
++    },
++    "content_scripts": [
++        {
++            "matches": [
++                "<all_urls>"
++            ],
++            "run_at": "document_start",
++            "js": [
++                "content_script.js"
++            ]
++        }
++    ]
++}
+\ No newline at end of file
+diff --git a/tests/auto/widgets/extensions/resources/late_listener_ext/service_worker.js b/tests/auto/widgets/extensions/resources/late_listener_ext/service_worker.js
+new file mode 100644
+index 0000000000..cae021ec62
+--- /dev/null
++++ b/tests/auto/widgets/extensions/resources/late_listener_ext/service_worker.js
+@@ -0,0 +1,29 @@
++// A worker that, like a real password manager's, registers its listener only
++// after asynchronous set-up, and then reaches back into every page that was
++// already open, because any message those pages sent in the meantime was lost.
++// It reaches them the way Bitwarden does: every frame of every tab, by
++// webNavigation.getAllFrames, then scripting.executeScript into each.
++setTimeout(async () => {
++    chrome.runtime.onMessage.addListener((message, _, sendResponse) => {
++        sendResponse("late")
++        return true
++    })
++    const tabs = await chrome.tabs.query({})
++    for (const tab of tabs) {
++        if (!tab.id || !tab.url?.startsWith("http"))
++            continue
++        const frames = await new Promise(resolve =>
++            chrome.webNavigation.getAllFrames({ tabId: tab.id }, resolve))
++        for (const frame of frames ?? []) {
++            chrome.scripting.executeScript({
++                target: { tabId: tab.id, frameIds: [frame.frameId] },
++                func: () => {
++                    let node = document.createElement("div")
++                    node.id = "injected"
++                    node.textContent = "reached by the worker"
++                    document.documentElement.appendChild(node)
++                }
++            })
++        }
++    }
++}, 1500)
+diff --git a/tests/auto/widgets/extensions/resources/slow_worker_ext/content_script.js b/tests/auto/widgets/extensions/resources/slow_worker_ext/content_script.js
+new file mode 100644
+index 0000000000..85d180dc1d
+--- /dev/null
++++ b/tests/auto/widgets/extensions/resources/slow_worker_ext/content_script.js
+@@ -0,0 +1,6 @@
++chrome.runtime.sendMessage("ping", (response) => {
++    let testNode = document.createElement("div")
++    testNode.id = "testNode"
++    testNode.textContent = response === undefined ? "no answer: " + chrome.runtime.lastError?.message : response
++    document.documentElement.appendChild(testNode)
++})
+diff --git a/tests/auto/widgets/extensions/resources/slow_worker_ext/manifest.json b/tests/auto/widgets/extensions/resources/slow_worker_ext/manifest.json
+new file mode 100644
+index 0000000000..9e6e430f39
+--- /dev/null
++++ b/tests/auto/widgets/extensions/resources/slow_worker_ext/manifest.json
+@@ -0,0 +1,19 @@
++{
++    "name": "slow worker",
++    "version": "1.0",
++    "manifest_version": 3,
++    "background": {
++        "service_worker": "service_worker.js"
++    },
++    "content_scripts": [
++        {
++            "matches": [
++                "<all_urls>"
++            ],
++            "run_at": "document_start",
++            "js": [
++                "content_script.js"
++            ]
++        }
++    ]
++}
+diff --git a/tests/auto/widgets/extensions/resources/slow_worker_ext/service_worker.js b/tests/auto/widgets/extensions/resources/slow_worker_ext/service_worker.js
+new file mode 100644
+index 0000000000..e4695f17f1
+--- /dev/null
++++ b/tests/auto/widgets/extensions/resources/slow_worker_ext/service_worker.js
+@@ -0,0 +1,10 @@
++// A worker that takes its time to start, the way a real password manager's
++// does: its top level runs for a while before the listener is registered.
++// A message sent by a page in that window has to wait for it, not vanish.
++const started = Date.now()
++while (Date.now() - started < 1500) {}
++chrome.runtime.onMessage.addListener((message, _, sendResponse) => {
++    if (message === "ping")
++        sendResponse("pong after a slow start")
++    return true
++})
+diff --git a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
+index 668629aaa0..2ab235bfee 100644
+--- a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
++++ b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
+@@ -50,6 +50,8 @@ private Q_SLOTS:
+     void extensionLoadedIntoARunningProfile();
+     void aPopupOpenedAfterARuntimeLoadHasItsApis();
+     void aPopupOnAProfileWithItsOwnStorageHasItsApis();
++    void aMessageSentWhileTheWorkerIsStartingIsDelivered();
++    void aWorkerThatListensLateCanReachThePageThatAlreadyAsked();
+     void enableAfterStoragePathChange();
+     void tabsWindowsAndScripting();
+     void nativeMessaging();
+@@ -510,6 +512,51 @@ void tst_QWebEngineExtension::aPopupOnAProfileWithItsOwnStorageHasItsApis()
+     QVERIFY(QDir(manager->installPath()).removeRecursively());
+ }
+ 
++void tst_QWebEngineExtension::aMessageSentWhileTheWorkerIsStartingIsDelivered()
++{
++    // A real password manager's worker takes seconds to start, and the first page a browser
++    // opens sends it a message before it is listening. Chrome parks the message until the worker
++    // is ready. The fixture's worker spends its first moments busy, so the content script's
++    // message lands in exactly that window.
++    QWebEngineExtensionInfo extension = loadExtensionSync(resourcesPath() + "slow_worker_ext"_L1);
++    QVERIFY(extension.isLoaded());
++    m_manager->setExtensionEnabled(extension, true);
++
++    QSignalSpy loadSpy(m_page, SIGNAL(loadFinished(bool)));
++    m_page->load(QUrl("qrc:///resources/index.html"));
++    QTRY_COMPARE(loadSpy.size(), 1);
++    QTRY_COMPARE_WITH_TIMEOUT(
++            evaluateJavaScriptSync(m_page, "document.getElementById('testNode')?.textContent"),
++            "pong after a slow start"_L1, 10000);
++}
++
++void tst_QWebEngineExtension::aWorkerThatListensLateCanReachThePageThatAlreadyAsked()
++{
++    // Bitwarden's worker registers its message listener inside asynchronous set-up, long after
++    // its script has evaluated, so the first page's message finds no listener and is dropped, in
++    // Chrome as here. Chrome users never notice because the worker then reaches back into every
++    // open tab with tabs.query and scripting.executeScript. That recovery runs on the tabs and
++    // scripting namespaces this series provides, and it has to find the page that was open first.
++    HttpServer server;
++    server.setResourceDirs({ resourcesPath() });
++    QVERIFY(server.start());
++
++    QWebEngineExtensionInfo extension =
++            loadExtensionSync(resourcesPath() + "late_listener_ext"_L1);
++    QVERIFY(extension.isLoaded());
++    m_manager->setExtensionEnabled(extension, true);
++
++    QSignalSpy loadSpy(m_page, SIGNAL(loadFinished(bool)));
++    m_page->load(server.url("/index.html"_L1));
++    QTRY_COMPARE(loadSpy.size(), 1);
++    // The first message is lost, as it is in Chrome: nothing was listening.
++    QTRY_COMPARE(evaluateJavaScriptSync(m_page, "document.getElementById('firstTry')?.textContent"),
++                 "lost"_L1);
++    QTRY_COMPARE_WITH_TIMEOUT(
++            evaluateJavaScriptSync(m_page, "document.getElementById('injected')?.textContent"),
++            "reached by the worker"_L1, 10000);
++}
++
+ void tst_QWebEngineExtension::enableAfterStoragePathChange()
+ {
+     // Changing the storage path after construction rebuilds the profile's PrefService. The
+-- 
+2.54.0 (Apple Git-157)
+
