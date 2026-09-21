@@ -1,2 +1,3 @@
 *.tar.xz
 .env
+out/

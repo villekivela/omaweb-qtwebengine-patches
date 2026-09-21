@@ -25,6 +25,17 @@ fi
 helper="$tree/build/lib/qt6/QtWebEngineProcess"
 [ -x "$helper" ] || helper=""
 
+# The engine's own data — the resource packs, the ICU table and the locale
+# packs — is written under the Chromium output directory rather than beside the
+# library, and is only gathered into one place by `cmake --install`. An
+# uninstalled tree has to be told where each of them is, for the same reason as
+# the helper above.
+resources="$(dirname "$(find "$tree/build/src/core" -name qtwebengine_resources.pak \
+    -not -path '*/host/*' 2> /dev/null | head -1)")"
+locales="$(find "$tree/build/src/core" -type d -name qtwebengine_locales 2> /dev/null | head -1)"
+[ -d "$resources" ] 2> /dev/null || resources=""
+[ -d "$locales" ] 2> /dev/null || locales=""
+
 # A build machine has no display. Widgets draw into nothing rather than
 # refusing to start.
 if [ -z "${DISPLAY:-}" ] && [ -z "${WAYLAND_DISPLAY:-}" ]; then
@@ -36,6 +47,13 @@ fi
 # build machine turns a test that died in a second into twenty minutes of
 # waiting. The verdict is what is wanted here, not the backtrace.
 QTWEBENGINE_CHROMIUM_FLAGS="${QTWEBENGINE_CHROMIUM_FLAGS:-} --disable-in-process-stack-traces"
+if [ "$(id -u)" = "0" ]; then
+    # A build container is root, and Chromium refuses to start its own sandbox
+    # as root. This is off for a test run on a machine that exists to run this
+    # test and is then destroyed. It says nothing about the browser, which ships
+    # with the sandbox it was built with.
+    QTWEBENGINE_CHROMIUM_FLAGS="$QTWEBENGINE_CHROMIUM_FLAGS --no-sandbox"
+fi
 export QTWEBENGINE_CHROMIUM_FLAGS
 
 [ -x "$test" ] || "$tree/build.sh" tst_qwebengineextension
@@ -44,9 +62,13 @@ echo "=== patched engine, where everything must pass"
 # Every line is kept. A gate that reports only the lines it was looking for
 # says nothing at all on the day the test never reaches a verdict, which is the
 # day the report is most needed.
+# `-nocrashhandler` stops Qt Test answering a crash with its own gdb backtrace,
+# which is the other twenty-minute wait.
 if env "$path_var=$tree/build/lib" \
     ${helper:+QTWEBENGINEPROCESS_PATH="$helper"} \
-    "$test" -o -,txt 2>&1
+    ${resources:+QTWEBENGINE_RESOURCES_PATH="$resources"} \
+    ${locales:+QTWEBENGINE_LOCALES_PATH="$locales"} \
+    "$test" -nocrashhandler -o -,txt 2>&1
 then
     :
 else
@@ -62,7 +84,8 @@ then
 fi
 for case in serviceWorkerLocalization enableAfterStoragePathChange tabsWindowsAndScripting nativeMessaging
 do
-    output=$(env "$path_var=$stock" "$test" "$case" -o -,txt 2>&1) && status=0 || status=$?
+    output=$(env "$path_var=$stock" "$test" "$case" -nocrashhandler -o -,txt 2>&1) \
+        && status=0 || status=$?
     verdict=$(echo "$output" | grep -E "^(PASS|FAIL).*$case" | head -1 | cut -d: -f1 | tr -d ' ')
     case "$verdict" in
         FAIL*) result="fails" ;;
