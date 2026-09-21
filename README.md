@@ -7,7 +7,7 @@ Built for [omaweb#344](https://github.com/villekivela/omaweb/issues/344), which 
 can host Bitwarden and 1Password. The findings live in `docs/research/password-manager-extensions.md`
 in that repository.
 
-Three of the fourteen are ordinary bug fixes headed for Gerrit. The rest wait on one question to Qt, in
+Five of the fourteen are ordinary bug fixes headed for Gerrit. The rest wait on one question to Qt, in
 `upstream/QTBUG-draft.md`. If Qt takes the work, this repository is deleted rather than maintained.
 
 ## Running it

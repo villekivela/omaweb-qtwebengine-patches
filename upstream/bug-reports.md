@@ -1,11 +1,77 @@
-# Two defect reports
+# Five defect reports
 
-Both reproduce on a stock build. Both come with a test that fails without the fix. File separately
-from the tab-delegate suggestion. Fixes go to Gerrit against `dev` with `Pick-to: 6.11 6.10`.
+All five reproduce on a stock build and each comes with a test that fails without the fix. File
+separately from the tab-delegate suggestion in `QTBUG-draft.md`, which asks for new API and is a
+different conversation.
+
+Fixes go to Gerrit against `dev` with `Pick-to: 6.11 6.10`.
+
+Four touch `qtwebengine` alone and can go up in any order. The `ExtensionPrefs` crash also needs a
+change in `qtwebengine-chromium`, so it is two changes with a dependency and is worth sending last,
+once the others have shown the reviewers what this is about.
+
+| Order | Patch | Repositories | What it is |
+| ----- | ----- | ------------ | ---------- |
+| 1 | 0014 | qtwebengine | A page cannot load a web accessible resource |
+| 2 | 0001 | qtwebengine | A localising service worker hangs forever |
+| 3 | 0010 | qtwebengine | Loading a loaded extension leaves it dead |
+| 4 | 0011 | qtwebengine | An extension document cannot close its own window |
+| 5 | 0003 | qtwebengine + qtwebengine-chromium | `setExtensionEnabled` crashes after a storage path change |
 
 ---
 
-## 1. An extension whose service worker localises never starts
+## 1. A page cannot load a web accessible resource
+
+**Type:** Bug **Component:** WebEngine **Affects:** 6.10, 6.11.2, dev
+
+This is the one worth reading first. It is small, and it stops a whole class of extension working.
+
+### Symptom
+
+An ordinary page cannot load a resource an extension declares in `web_accessible_resources`, by
+`fetch`, as an image, or as a script. The request never arrives as itself: the browser is asked for
+`chrome-extension://invalid/`.
+
+### Reproduce
+
+Extension declaring `{"resources": ["shared.txt"], "matches": ["<all_urls>"]}`. From any http page:
+
+```js
+fetch("chrome-extension://<id>/shared.txt")   // rejects
+```
+
+Test: `tst_qwebengineextension::aPageCanLoadAWebAccessibleResource`, covering both `fetch` and a
+`script` element.
+
+### Cause
+
+Two copies of the renderer's resource policy.
+
+`ExtensionsRendererClient` owns a `ResourceRequestPolicy`, is told which extensions have loaded
+through `OnExtensionLoaded`, and answers `WillSendRequest` from it.
+
+`ExtensionsRendererClientQt` creates a second `ResourceRequestPolicyQt` of its own and overrides
+`WillSendRequest` to use that one instead. Nothing ever calls `OnExtensionLoaded` on it, so its set
+of ids with web accessible resources is permanently empty, `CanRequestResource` returns false for
+every request, and the renderer rewrites the URL to `kExtensionInvalidRequestURL`. The Qt copy
+appears to predate the base class owning one.
+
+### Fix
+
+Patch 0014 deletes the Qt copy and the override, so the base class answers. Its `WillSendRequest`
+also takes `upstream_url`, which `ContentRendererClientQt::WillSendRequest` already receives and
+currently drops, so a resource reached through a redirect becomes allowed by the extension that
+redirected to it.
+
+### Why it went unnoticed
+
+It breaks a class of extension rather than an API. An extension whose scripts are all declared in
+the manifest never notices. One that declares a small loader and imports its real bundle gets
+nothing into the page at all, with no error naming the cause.
+
+---
+
+## 2. An extension whose service worker localises never starts
 
 **Type:** Bug
 **Component:** WebEngine
@@ -45,12 +111,86 @@ Renderer stack while hung: `V8ScriptRunner::CompileAndRunScript` → `I18nHooksD
 
 ### Fix
 
-Patch 0001 in https://github.com/villekivela/omaweb-qtwebengine-patches registers `EventRouter` and
+Patch 0001 registers `EventRouter` and
 `RendererHost` at all three points, as `ChromeContentBrowserClient` does.
 
 ---
 
-## 2. setExtensionEnabled crashes after a profile's storage path changes
+## 3. Loading an extension that is already loaded leaves it dead
+
+**Type:** Bug **Component:** WebEngine **Affects:** 6.10, 6.11.2, dev
+
+### Symptom
+
+`loadExtension()` on a path that is already loaded reports success and the manager goes on listing
+the extension as loaded. Its service worker has stopped, its popup has no `chrome` bindings, and it
+stays that way until the application restarts.
+
+### Reproduce
+
+Load a path, enable it, let its worker run, then load the same path again.
+
+Test: `tst_qwebengineextension::loadingTheSamePathTwiceLeavesOneWorkingExtension`.
+
+### Cause
+
+`ExtensionLoader::addExtension` sends an already-loaded id through
+`ExtensionRegistrar::ReloadExtensionWithQuietFailure`. The registrar disables the extension with
+`DISABLE_RELOAD` and asks its delegate to load it again. Both
+`ExtensionLoader::LoadExtensionForReload` and `LoadExtensionForReloadWithQuietFailure` have empty
+bodies, so nothing finishes the reload.
+
+The existing `reloadExtension` test counts extensions and checks `isLoaded()`, both of which still
+hold while the extension is disabled, which is why this was not caught.
+
+### Fix
+
+Patch 0010 treats the same path loaded again as the same extension updated in place, through
+`ExtensionRegistrar::AddExtension`, and implements the two reload delegate methods so
+`reloadExtension()` also finishes what it starts.
+
+---
+
+## 4. An extension document cannot close its own window
+
+**Type:** Bug **Component:** WebEngine **Affects:** 6.10, 6.11.2, dev
+
+### Symptom
+
+`window.close()` from an extension page is refused with "Scripts may close only the windows that
+were opened by them" once the document's history is longer than one entry.
+
+### Reproduce
+
+Open an extension's `actionPopupUrl()` in a `QWebEnginePage`, push a few history entries the way a
+hash router does, then call `window.close()`. `windowCloseRequested` never arrives.
+
+Test: `tst_qwebengineextension::aPopupMayCloseItselfAfterRoutingByHash`.
+
+### Cause
+
+Blink allows a page to close a window it did not open only while `BackForwardLength()` is 1. Chrome
+exempts extension documents in `extensions/browser/extension_webkit_preferences.cc`:
+
+```cpp
+// Tabs aren't typically allowed to close windows. But extensions shouldn't be
+// subject to that.
+webkit_prefs->allow_scripts_to_close_windows = true;
+```
+
+That file is not among the extensions sources QtWebEngine builds, so nothing sets the preference and
+every extension document is held to the ordinary rule. A password manager's popup routes by hash and
+closes itself once it has filled a form, which is past one history entry within a click or two.
+
+### Fix
+
+Patch 0011 sets `allow_scripts_to_close_windows` in
+`ContentBrowserClientQt::OverrideWebPreferences` for documents served from an enabled extension that
+is not a hosted app, which is the condition Chrome applies.
+
+---
+
+## 5. setExtensionEnabled crashes after a profile's storage path changes
 
 **Type:** Bug
 **Component:** WebEngine
@@ -81,4 +221,29 @@ Changing a profile's storage name, off-the-record flag or storage path rebuilds 
 
 ### Fix
 
-Patch 0003 in the same repository points the existing `ExtensionPrefs` at the new `PrefService` instead of replacing an instance other services hold. The hook is guarded by `IS_QTWEBENGINE`.
+Patch 0003 points the existing `ExtensionPrefs` at the new `PrefService` instead of replacing an
+instance other services hold.
+
+This one is two changes: `ExtensionPrefs::ResetPrefService` in `qtwebengine-chromium`, guarded by
+`IS_QTWEBENGINE`, and the call from `ProfileQt::setupPrefService` in `qtwebengine`. If the reviewers
+would rather not add a method to Chromium's `ExtensionPrefs`, the alternative is to rebuild the
+keyed services that hold the pointer, which is a larger change and worth asking about rather than
+guessing at.
+
+---
+
+## What is needed to send these
+
+Nothing here goes anywhere without a Qt account and a signed contributor agreement, and the patches
+in this repository are not in a form Gerrit accepts: they apply to an unpacked release tarball, not
+to a clone of `dev`.
+
+For each change:
+
+1. Clone `https://code.qt.io/qt/qtwebengine.git` and check out `dev`.
+2. Apply the patch's `qtwebengine` half and commit with a Qt-style message: one summary line, a body
+   explaining the cause, then `Fixes: QTBUG-xxxxx`, `Pick-to: 6.11 6.10`, and the `Change-Id` the
+   commit hook adds.
+3. `git push gerrit HEAD:refs/for/dev`.
+
+The test in each patch goes up with the fix, in the same change.
