@@ -1,7 +1,7 @@
 From 83dc91e0d7930e59a69ed472d45a7acf75e27a3b Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivela=CC=88?= <vkivela@hotmail.com>
 Date: Mon, 21 Sep 2026 09:37:46 +0300
-Subject: [PATCH 08/13] extensions: test the order a reader actually takes
+Subject: [PATCH 08/14] extensions: test the order a reader actually takes
 
 Every existing case loads an extension into a profile that is not yet
 running anything. A reader does the opposite: the browser is open, a

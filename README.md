@@ -1,13 +1,13 @@
 # QtWebEngine extension patches
 
-Thirteen patches that let QtWebEngine host a password manager's Chromium extension. Base is the
+Fourteen patches that let QtWebEngine host a password manager's Chromium extension. Base is the
 released `qtwebengine-everywhere-src-6.11.2` tarball.
 
 Built for [omaweb#344](https://github.com/villekivela/omaweb/issues/344), which asks whether Omaweb
 can host Bitwarden and 1Password. The findings live in `docs/research/password-manager-extensions.md`
 in that repository.
 
-Two of the thirteen are ordinary bug fixes headed for Gerrit. The rest wait on one question to Qt, in
+Three of the fourteen are ordinary bug fixes headed for Gerrit. The rest wait on one question to Qt, in
 `upstream/QTBUG-draft.md`. If Qt takes the work, this repository is deleted rather than maintained.
 
 ## Running it
@@ -80,6 +80,12 @@ registers throws where the extension called it, so twenty-one of them did. `acti
 `contextMenus` keep what an extension asks the chrome to show and answer with it; `commands.getAll`
 reports the manifest's. _A feature. Follows 0004._
 
+**0014, serve a web accessible resource to a page.** QtWebEngine kept its own copy of the renderer's
+resource policy, from before the base class had one, and nothing ever told that copy which
+extensions had loaded. Every request for a web accessible resource was rewritten to
+`chrome-extension://invalid/`. It stops any extension that declares a small content script and
+imports its real bundle. _A bug fix with a test. Submit as is._
+
 ## The open question
 
 `TabsDelegateQt` is internal, and `ExtensionsBrowserClientQt` fills it by treating every page of the
@@ -91,7 +97,7 @@ one is active. That is what the QTBUG draft asks for. Ask before writing the API
 
 ## Tests
 
-34 tests pass with the series applied. Five of them fail on a stock build, which is why they are
+35 tests pass with the series applied. Five of them fail on a stock build, which is why they are
 worth having:
 
 - `serviceWorkerLocalization` fails

@@ -1,7 +1,7 @@
 From db4875d87926998c0ef2e04ac8db0e9a7192b319 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivela=CC=88?= <vkivela@hotmail.com>
 Date: Mon, 21 Sep 2026 12:12:51 +0300
-Subject: [PATCH 09/13] extensions: answer webNavigation.getFrame and
+Subject: [PATCH 09/14] extensions: answer webNavigation.getFrame and
  getAllFrames
 
 A password manager's worker registers its message listener inside

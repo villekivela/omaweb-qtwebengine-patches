@@ -1,0 +1,238 @@
+From 22e47eb5923a2ba7e11d62085a7fca2221b02b18 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Ville=20Kivela=CC=88?= <vkivela@hotmail.com>
+Date: Mon, 21 Sep 2026 18:34:17 +0300
+Subject: [PATCH 14/14] extensions: serve a web accessible resource to a page
+
+A page could not load a resource an extension declared web accessible.
+The request never reached the browser as itself: the renderer rewrote
+it to chrome-extension://invalid/, which is what the extensions code
+does when it decides a page may not ask.
+
+Two copies of the policy that makes that decision. The base
+ExtensionsRendererClient owns one and is told which extensions have
+loaded, through OnExtensionLoaded, and answers WillSendRequest from it.
+QtWebEngine kept a second one of its own, from before the base class
+had one, and overrode WillSendRequest to use it. Nothing ever told that
+copy about an extension, so its set of ids with web accessible
+resources was permanently empty and every request was refused.
+
+The copy is gone and the base class answers. Its WillSendRequest also
+takes the upstream URL, which Qt's caller already had and dropped, so a
+resource reached through a redirect is now allowed by the extension
+that redirected to it.
+
+It stops a whole class of extension working rather than one API. A
+content script small enough to declare statically imports the bundle
+that does the work; that import is a subresource, so the bundle never
+arrived and nothing the extension meant to do in the page happened.
+1Password fills this way; Bitwarden declares its scripts statically,
+which is why it was unaffected and this went unseen.
+---
+ .../renderer/content_renderer_client_qt.cpp   |  6 ++-
+ .../extensions_renderer_client_qt.cpp         | 17 --------
+ .../extensions_renderer_client_qt.h           |  8 ----
+ .../web_accessible_ext/manifest.json          | 14 +++++++
+ .../web_accessible_ext/service_worker.js      |  1 +
+ .../resources/web_accessible_ext/shared.js    |  1 +
+ .../resources/web_accessible_ext/shared.txt   |  1 +
+ .../extensions/tst_qwebengineextension.cpp    | 40 +++++++++++++++++++
+ 8 files changed, 62 insertions(+), 26 deletions(-)
+ create mode 100644 tests/auto/widgets/extensions/resources/web_accessible_ext/manifest.json
+ create mode 100644 tests/auto/widgets/extensions/resources/web_accessible_ext/service_worker.js
+ create mode 100644 tests/auto/widgets/extensions/resources/web_accessible_ext/shared.js
+ create mode 100644 tests/auto/widgets/extensions/resources/web_accessible_ext/shared.txt
+
+diff --git a/src/core/renderer/content_renderer_client_qt.cpp b/src/core/renderer/content_renderer_client_qt.cpp
+index 3c837650e1..9f90d77d79 100644
+--- a/src/core/renderer/content_renderer_client_qt.cpp
++++ b/src/core/renderer/content_renderer_client_qt.cpp
+@@ -537,7 +537,11 @@ void ContentRendererClientQt::WillSendRequest(blink::WebLocalFrame *frame,
+                                               GURL *new_url)
+ {
+ #if BUILDFLAG(ENABLE_EXTENSIONS)
+-    ExtensionsRendererClientQt::GetInstance()->WillSendRequest(frame, transition_type, target_url, site_for_cookies,
++    // The base class answers this, because it is the one holding the policy that is told which
++    // extensions have loaded. `upstream_url` is passed on rather than dropped: a resource reached
++    // through a redirect is allowed by the extension that redirected to it.
++    ExtensionsRendererClientQt::GetInstance()->WillSendRequest(frame, transition_type, upstream_url,
++                                                               target_url, site_for_cookies,
+                                                                initiator_origin, new_url);
+     if (!new_url->is_empty())
+         return;
+diff --git a/src/core/renderer/extensions/extensions_renderer_client_qt.cpp b/src/core/renderer/extensions/extensions_renderer_client_qt.cpp
+index 254ba256d2..b24d13b02c 100644
+--- a/src/core/renderer/extensions/extensions_renderer_client_qt.cpp
++++ b/src/core/renderer/extensions/extensions_renderer_client_qt.cpp
+@@ -10,7 +10,6 @@
+ #include "extensions_renderer_client_qt.h"
+ 
+ #include "renderer/render_configuration.h"
+-#include "resource_request_policy_qt.h"
+ 
+ #include "base/command_line.h"
+ #include "base/lazy_instance.h"
+@@ -72,7 +71,6 @@ ExtensionsRendererClientQt *ExtensionsRendererClientQt::GetInstance()
+ 
+ void ExtensionsRendererClientQt::FinishInitialization()
+ {
+-    resource_request_policy_.reset(new extensions::ResourceRequestPolicyQt(dispatcher()));
+ }
+ 
+ void ExtensionsRendererClientQt::WebViewCreated(blink::WebView *web_view, const url::Origin *outermost_origin)
+@@ -89,21 +87,6 @@ bool ExtensionsRendererClientQt::OverrideCreatePlugin(content::RenderFrame *rend
+     return !guest_view_api_available;
+ }
+ 
+-void ExtensionsRendererClientQt::WillSendRequest(blink::WebLocalFrame *frame,
+-                                                 ui::PageTransition transition_type,
+-                                                 const blink::WebURL &url,
+-                                                 const net::SiteForCookies &site_for_cookies,
+-                                                 const url::Origin *initiator_origin,
+-                                                 GURL *new_url)
+-{
+-    if (url.ProtocolIs(extensions::kExtensionScheme) &&
+-            !resource_request_policy_->CanRequestResource(url, frame,
+-                                                          transition_type,
+-                                                          initiator_origin)) {
+-        *new_url = GURL(chrome::kExtensionInvalidRequestURL);
+-    }
+-}
+-
+ void ExtensionsRendererClientQt::RunScriptsAtDocumentStart(content::RenderFrame *render_frame)
+ {
+     dispatcher()->RunScriptsAtDocumentStart(render_frame);
+diff --git a/src/core/renderer/extensions/extensions_renderer_client_qt.h b/src/core/renderer/extensions/extensions_renderer_client_qt.h
+index b6711b07fe..fc450f6c7a 100644
+--- a/src/core/renderer/extensions/extensions_renderer_client_qt.h
++++ b/src/core/renderer/extensions/extensions_renderer_client_qt.h
+@@ -33,7 +33,6 @@ class Origin;
+ }
+ 
+ namespace extensions {
+-class ResourceRequestPolicyQt;
+ }
+ 
+ namespace QtWebEngineCore {
+@@ -54,12 +53,6 @@ public:
+                         const url::Origin *outermost_origin);
+     bool OverrideCreatePlugin(content::RenderFrame *render_frame,
+                               const blink::WebPluginParams &params);
+-    void WillSendRequest(blink::WebLocalFrame *frame,
+-                         ui::PageTransition transition_type,
+-                         const blink::WebURL &url,
+-                         const net::SiteForCookies &site_for_cookies,
+-                         const url::Origin *initiator_origin,
+-                         GURL *new_url);
+ 
+     void RunScriptsAtDocumentStart(content::RenderFrame *render_frame);
+     void RunScriptsAtDocumentEnd(content::RenderFrame *render_frame);
+@@ -68,7 +61,6 @@ public:
+     static ExtensionsRendererClientQt *GetInstance();
+ 
+ private:
+-    std::unique_ptr<extensions::ResourceRequestPolicyQt> resource_request_policy_;
+ };
+ 
+ } // namespace QtWebEngineCore
+diff --git a/tests/auto/widgets/extensions/resources/web_accessible_ext/manifest.json b/tests/auto/widgets/extensions/resources/web_accessible_ext/manifest.json
+new file mode 100644
+index 0000000000..d0db1d8a55
+--- /dev/null
++++ b/tests/auto/widgets/extensions/resources/web_accessible_ext/manifest.json
+@@ -0,0 +1,14 @@
++{
++    "name": "web accessible",
++    "version": "1.0",
++    "manifest_version": 3,
++    "background": {
++        "service_worker": "service_worker.js"
++    },
++    "web_accessible_resources": [
++        {
++            "resources": ["shared.js", "shared.txt"],
++            "matches": ["<all_urls>"]
++        }
++    ]
++}
+diff --git a/tests/auto/widgets/extensions/resources/web_accessible_ext/service_worker.js b/tests/auto/widgets/extensions/resources/web_accessible_ext/service_worker.js
+new file mode 100644
+index 0000000000..e9b6a44cfe
+--- /dev/null
++++ b/tests/auto/widgets/extensions/resources/web_accessible_ext/service_worker.js
+@@ -0,0 +1 @@
++// nothing
+diff --git a/tests/auto/widgets/extensions/resources/web_accessible_ext/shared.js b/tests/auto/widgets/extensions/resources/web_accessible_ext/shared.js
+new file mode 100644
+index 0000000000..5e1aea0874
+--- /dev/null
++++ b/tests/auto/widgets/extensions/resources/web_accessible_ext/shared.js
+@@ -0,0 +1 @@
++globalThis.sharedLoaded = true
+diff --git a/tests/auto/widgets/extensions/resources/web_accessible_ext/shared.txt b/tests/auto/widgets/extensions/resources/web_accessible_ext/shared.txt
+new file mode 100644
+index 0000000000..8a205e8dc3
+--- /dev/null
++++ b/tests/auto/widgets/extensions/resources/web_accessible_ext/shared.txt
+@@ -0,0 +1 @@
++shared
+diff --git a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
+index 3500fb0dbd..b8dc7764a8 100644
+--- a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
++++ b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
+@@ -59,6 +59,7 @@ private Q_SLOTS:
+     void anExtensionKeepsTrackOfTheNotificationsItIsShowing();
+     void theReadersAnswerToANotificationReachesTheExtension();
+     void everyFunctionTheNamespaceDeclaresCanBeCalled();
++    void aPageCanLoadAWebAccessibleResource();
+     void enableAfterStoragePathChange();
+     void tabsWindowsAndScripting();
+     void nativeMessaging();
+@@ -830,6 +831,45 @@ void tst_QWebEngineExtension::everyFunctionTheNamespaceDeclaresCanBeCalled()
+     }
+ }
+ 
++void tst_QWebEngineExtension::aPageCanLoadAWebAccessibleResource()
++{
++    // A resource an extension declares web accessible is one an ordinary page may ask for, by
++    // fetch or as a script. Extensions rely on it to get their real work into a document: a
++    // content script small enough to be declared statically imports the bundle that does the job.
++    // An extension whose scripts are all declared in the manifest never notices; one that imports
++    // reaches nothing, and nothing it was meant to do in the page happens.
++    HttpServer server;
++    server.setResourceDirs({ resourcesPath() });
++    QVERIFY(server.start());
++
++    QWebEngineExtensionInfo extension =
++            loadExtensionSync(resourcesPath() + "web_accessible_ext"_L1);
++    QVERIFY2(extension.isLoaded(), qPrintable(extension.error()));
++    m_manager->setExtensionEnabled(extension, true);
++
++    QSignalSpy loadSpy(m_page, SIGNAL(loadFinished(bool)));
++    m_page->load(server.url("/index.html"_L1));
++    QTRY_COMPARE(loadSpy.size(), 1);
++
++    const QString resource = "chrome-extension://"_L1 + extension.id() + "/shared.txt"_L1;
++    evaluateJavaScriptSync(m_page, "fetch(\"" + resource + "\")"
++                                   ".then(async r => window.fetched = r.ok ? await r.text() : "
++                                   "\"status \" + r.status)"
++                                   ".catch(e => window.fetched = \"threw: \" + e.message)");
++    QTRY_VERIFY(evaluateJavaScriptSync(m_page, "window.fetched !== undefined").toBool());
++    QCOMPARE(evaluateJavaScriptSync(m_page, "window.fetched.trim()"), "shared"_L1);
++
++    // And as a script element, which is the shape an injected bundle arrives in.
++    const QString script = "chrome-extension://"_L1 + extension.id() + "/shared.js"_L1;
++    evaluateJavaScriptSync(m_page,
++                           "const el = document.createElement('script');"
++                           "el.onload = () => window.scriptRan = globalThis.sharedLoaded === true;"
++                           "el.onerror = () => window.scriptRan = false;"
++                           "el.src = \"" + script + "\"; document.head.appendChild(el)");
++    QTRY_VERIFY(evaluateJavaScriptSync(m_page, "window.scriptRan !== undefined").toBool());
++    QCOMPARE(evaluateJavaScriptSync(m_page, "window.scriptRan").toBool(), true);
++}
++
+ void tst_QWebEngineExtension::enableAfterStoragePathChange()
+ {
+     // Changing the storage path after construction rebuilds the profile's PrefService. The
+-- 
+2.54.0 (Apple Git-157)
+

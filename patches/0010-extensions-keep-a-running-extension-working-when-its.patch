@@ -1,7 +1,7 @@
 From dd97947c802844b8a3d594b9d5194024ce7867fa Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivela=CC=88?= <vkivela@hotmail.com>
 Date: Mon, 21 Sep 2026 12:35:01 +0300
-Subject: [PATCH 10/13] extensions: keep a running extension working when its
+Subject: [PATCH 10/14] extensions: keep a running extension working when its
  path is loaded again
 
 Loading a path that was already loaded sent the extension round as a
