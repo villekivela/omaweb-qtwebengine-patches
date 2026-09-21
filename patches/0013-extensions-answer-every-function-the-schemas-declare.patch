@@ -1,0 +1,1209 @@
+From 22891517d9f142721feda5e48837dad5f3d9d6b6 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Ville=20Kivela=CC=88?= <vkivela@hotmail.com>
+Date: Mon, 21 Sep 2026 15:18:27 +0300
+Subject: [PATCH 13/13] extensions: answer every function the schemas declare
+
+A function a schema declares and nothing registers is not inert. The
+dispatcher reports it as an unknown API and it throws where the
+extension called it. The series had marked twenty-one functions
+nocompile "so the namespace and its events exist", and the namespaces
+did exist, with every function in them throwing: 1Password's first pass
+alone took 225 refusals across contextMenus, action, commands, privacy
+and notifications.getPermissionLevel, which this series had called
+deliberately inert.
+
+So they are answered. The action's title, icon, popup and badge, and the
+items an extension wants in a context menu, are kept per extension and
+per tab in a registry and read back truthfully; a browser that wants to
+draw any of it has it in one place. commands.getAll reports what the
+manifest declares, with no shortcut, because the application has bound
+none. openPopup is refused with a message the extension can read, which
+is what Chrome does when there is no window to open it in.
+
+Their schemas generate no C++ types, action.json being uncompiled in
+Chrome as well, so the functions read the values they arrive as and are
+registered by hand rather than through the generated registry.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+---
+ .../browser/extensions/api/BUILD.gn           |  20 +++
+ .../extensions/api/action/action_api.cc       | 152 ++++++++++++++++++
+ .../extensions/api/action/action_api.h        |  47 ++++++
+ .../extensions/api/commands/commands_api.cc   |  30 ++++
+ .../extensions/api/commands/commands_api.h    |  22 +++
+ .../api/context_menus/context_menus_api.cc    | 108 +++++++++++++
+ .../api/context_menus/context_menus_api.h     |  41 +++++
+ .../api/notifications/notifications_api.cc    |   5 +
+ .../api/notifications/notifications_api.h     |   9 ++
+ .../extensions/extension_ui_registry_qt.cc    |  58 +++++++
+ .../extensions/extension_ui_registry_qt.h     |  82 ++++++++++
+ .../common/extensions/api/action.json         |  54 +++----
+ .../common/extensions/api/commands.json       |   9 +-
+ .../common/extensions/api/context_menus.json  |  18 +--
+ .../common/extensions/api/notifications.idl   |   6 +-
+ src/core/extensions/extension_system_qt.cpp   |   2 +
+ .../extensions_browser_client_qt.cpp          |  32 ++++
+ .../resources/notifications_ext/manifest.json |  17 +-
+ .../notifications_ext/service_worker.js       |   4 +
+ .../extensions/tst_qwebengineextension.cpp    |  74 +++++++++
+ 20 files changed, 735 insertions(+), 55 deletions(-)
+ create mode 100644 src/3rdparty/chromium/qtwebengine/browser/extensions/api/action/action_api.cc
+ create mode 100644 src/3rdparty/chromium/qtwebengine/browser/extensions/api/action/action_api.h
+ create mode 100644 src/3rdparty/chromium/qtwebengine/browser/extensions/api/commands/commands_api.cc
+ create mode 100644 src/3rdparty/chromium/qtwebengine/browser/extensions/api/commands/commands_api.h
+ create mode 100644 src/3rdparty/chromium/qtwebengine/browser/extensions/api/context_menus/context_menus_api.cc
+ create mode 100644 src/3rdparty/chromium/qtwebengine/browser/extensions/api/context_menus/context_menus_api.h
+ create mode 100644 src/3rdparty/chromium/qtwebengine/browser/extensions/extension_ui_registry_qt.cc
+ create mode 100644 src/3rdparty/chromium/qtwebengine/browser/extensions/extension_ui_registry_qt.h
+
+diff --git a/src/3rdparty/chromium/qtwebengine/browser/extensions/api/BUILD.gn b/src/3rdparty/chromium/qtwebengine/browser/extensions/api/BUILD.gn
+index eac7bceaef..bef0e30199 100644
+--- a/src/3rdparty/chromium/qtwebengine/browser/extensions/api/BUILD.gn
++++ b/src/3rdparty/chromium/qtwebengine/browser/extensions/api/BUILD.gn
+@@ -21,6 +21,19 @@ source_set("resources_private") {
+   }
+ }
+ 
++source_set("ui_registry") {
++  sources = [
++    "../extension_ui_registry_qt.cc",
++    "../extension_ui_registry_qt.h",
++  ]
++
++  deps = [
++    "//content/public/browser",
++    "//extensions/browser",
++    "//extensions/common",
++  ]
++}
++
+ source_set("notification_registry") {
+   sources = [
+     "../notification_registry_qt.cc",
+@@ -53,6 +66,12 @@ source_set("tabs") {
+   sources = [
+     "tabs/tabs_api.cc",
+     "tabs/tabs_api.h",
++    "action/action_api.cc",
++    "action/action_api.h",
++    "commands/commands_api.cc",
++    "commands/commands_api.h",
++    "context_menus/context_menus_api.cc",
++    "context_menus/context_menus_api.h",
+     "notifications/notifications_api.cc",
+     "notifications/notifications_api.h",
+     "web_navigation/web_navigation_api.cc",
+@@ -63,6 +82,7 @@ source_set("tabs") {
+ 
+   deps = [
+     ":notification_registry",
++    ":ui_registry",
+     ":tab_registry",
+     "//chrome/common:buildflags",
+     "//content/public/browser",
+diff --git a/src/3rdparty/chromium/qtwebengine/browser/extensions/api/action/action_api.cc b/src/3rdparty/chromium/qtwebengine/browser/extensions/api/action/action_api.cc
+new file mode 100644
+index 0000000000..966a4a5849
+--- /dev/null
++++ b/src/3rdparty/chromium/qtwebengine/browser/extensions/api/action/action_api.cc
+@@ -0,0 +1,152 @@
++// Copyright (C) 2026 The Qt Company Ltd.
++// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
++
++#include "qtwebengine/browser/extensions/api/action/action_api.h"
++
++#include "extensions/common/api/extension_action/action_info.h"
++#include "extensions/common/extension.h"
++#include "qtwebengine/browser/extensions/extension_ui_registry_qt.h"
++
++namespace extensions {
++
++namespace {
++
++// Every action function takes one details object, and the only field that changes which state is
++// read or written is `tabId`. The schema is not compiled, here or in Chrome, so the details are
++// read as the values they arrive as.
++const base::Value::Dict* Details(const base::Value::List& args) {
++  return args.empty() || !args.front().is_dict() ? nullptr : &args.front().GetDict();
++}
++
++int TabIdFrom(const base::Value::List& args) {
++  const base::Value::Dict* details = Details(args);
++  const std::optional<int> tab_id = details ? details->FindInt("tabId") : std::nullopt;
++  return tab_id.value_or(ExtensionUiRegistryQt::kEveryTab);
++}
++
++std::string StringFrom(const base::Value::List& args, const char* field) {
++  const base::Value::Dict* details = Details(args);
++  const std::string* value = details ? details->FindString(field) : nullptr;
++  return value ? *value : std::string();
++}
++
++ActionStateQt& StateFor(ExtensionFunction* function, const base::Value::List& args) {
++  return ExtensionUiRegistryQt::Get()->MutableAction(function->browser_context(),
++                                                     function->extension()->id(),
++                                                     TabIdFrom(args));
++}
++
++const ActionStateQt& ReadStateFor(ExtensionFunction* function, const base::Value::List& args) {
++  return ExtensionUiRegistryQt::Get()->Action(function->browser_context(),
++                                              function->extension()->id(), TabIdFrom(args));
++}
++
++}  // namespace
++
++ExtensionFunction::ResponseAction ActionSetTitleFunction::Run() {
++  StateFor(this, args()).title = StringFrom(args(), "title");
++  return RespondNow(NoArguments());
++}
++
++ExtensionFunction::ResponseAction ActionGetTitleFunction::Run() {
++  const std::string& title = ReadStateFor(this, args()).title;
++  // An extension that has set no title is told the one a reader would see, which is its name.
++  return RespondNow(WithArguments(title.empty() ? extension()->name() : title));
++}
++
++ExtensionFunction::ResponseAction ActionSetIconFunction::Run() {
++  // The icon arrives as a path, a set of paths by size, or decoded image data. What is kept is
++  // whichever the extension gave, unread: nothing draws it yet, and re-encoding what was never
++  // shown would be work in aid of nothing.
++  StateFor(this, args()).icon = StringFrom(args(), "path");
++  return RespondNow(NoArguments());
++}
++
++ExtensionFunction::ResponseAction ActionSetPopupFunction::Run() {
++  const std::string popup = StringFrom(args(), "popup");
++  // Resolved against the extension, because that is the form the extension is answered with and
++  // the form anything opening it would need.
++  StateFor(this, args()).popup = popup.empty() ? std::string() : extension()->GetResourceURL(popup).spec();
++  return RespondNow(NoArguments());
++}
++
++ExtensionFunction::ResponseAction ActionGetPopupFunction::Run() {
++  const ActionStateQt& state = ReadStateFor(this, args());
++  if (!state.popup.empty()) {
++    return RespondNow(WithArguments(state.popup));
++  }
++  // The manifest's popup, which is what the reader would be shown if nothing had set one.
++  const ActionInfo* info = ActionInfo::GetExtensionActionInfo(extension());
++  return RespondNow(
++      WithArguments(info && !info->default_popup_url.is_empty() ? info->default_popup_url.spec()
++                                                               : std::string()));
++}
++
++ExtensionFunction::ResponseAction ActionSetBadgeTextFunction::Run() {
++  StateFor(this, args()).badge_text = StringFrom(args(), "text");
++  return RespondNow(NoArguments());
++}
++
++ExtensionFunction::ResponseAction ActionGetBadgeTextFunction::Run() {
++  return RespondNow(WithArguments(ReadStateFor(this, args()).badge_text));
++}
++
++ExtensionFunction::ResponseAction ActionSetBadgeBackgroundColorFunction::Run() {
++  StateFor(this, args()).badge_background_color = StringFrom(args(), "color");
++  return RespondNow(NoArguments());
++}
++
++ExtensionFunction::ResponseAction ActionGetBadgeBackgroundColorFunction::Run() {
++  // Chrome answers a colour as four numbers. An extension that never set one is told the
++  // transparent it would be drawn with.
++  const std::string& colour = ReadStateFor(this, args()).badge_background_color;
++  base::Value::List rgba;
++  for (int index = 0; index < 4; ++index) {
++    rgba.Append(0);
++  }
++  return RespondNow(colour.empty() ? WithArguments(std::move(rgba)) : WithArguments(colour));
++}
++
++ExtensionFunction::ResponseAction ActionSetBadgeTextColorFunction::Run() {
++  StateFor(this, args()).badge_text_color = StringFrom(args(), "color");
++  return RespondNow(NoArguments());
++}
++
++ExtensionFunction::ResponseAction ActionGetBadgeTextColorFunction::Run() {
++  const std::string& colour = ReadStateFor(this, args()).badge_text_color;
++  base::Value::List rgba;
++  for (int index = 0; index < 4; ++index) {
++    rgba.Append(0);
++  }
++  return RespondNow(colour.empty() ? WithArguments(std::move(rgba)) : WithArguments(colour));
++}
++
++ExtensionFunction::ResponseAction ActionEnableFunction::Run() {
++  StateFor(this, args()).enabled = true;
++  return RespondNow(NoArguments());
++}
++
++ExtensionFunction::ResponseAction ActionDisableFunction::Run() {
++  StateFor(this, args()).enabled = false;
++  return RespondNow(NoArguments());
++}
++
++ExtensionFunction::ResponseAction ActionIsEnabledFunction::Run() {
++  return RespondNow(WithArguments(ReadStateFor(this, args()).enabled));
++}
++
++ExtensionFunction::ResponseAction ActionGetUserSettingsFunction::Run() {
++  base::Value::Dict settings;
++  // There is no toolbar to have pinned it to.
++  settings.Set("isOnToolbar", false);
++  return RespondNow(WithArguments(std::move(settings)));
++}
++
++ExtensionFunction::ResponseAction ActionOpenPopupFunction::Run() {
++  // Opening the popup is the application's to do and it has not been asked for one. This is a
++  // refusal the extension can read, not an unknown API: Chrome refuses this too, whenever there is
++  // no window to open it in.
++  return RespondNow(Error("The application did not open the extension's popup."));
++}
++
++}  // namespace extensions
+diff --git a/src/3rdparty/chromium/qtwebengine/browser/extensions/api/action/action_api.h b/src/3rdparty/chromium/qtwebengine/browser/extensions/api/action/action_api.h
+new file mode 100644
+index 0000000000..6e98da1db2
+--- /dev/null
++++ b/src/3rdparty/chromium/qtwebengine/browser/extensions/api/action/action_api.h
+@@ -0,0 +1,47 @@
++// Copyright (C) 2026 The Qt Company Ltd.
++// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
++
++#ifndef QTWEBENGINE_BROWSER_EXTENSIONS_API_ACTION_ACTION_API_H_
++#define QTWEBENGINE_BROWSER_EXTENSIONS_API_ACTION_ACTION_API_H_
++
++#include "extensions/browser/extension_function.h"
++
++namespace extensions {
++
++// The extension's own button: its title, icon, popup and badge. QtWebEngine draws no button, so
++// these keep what was asked for and answer with it. See ExtensionUiRegistryQt for why they are
++// answered at all rather than left to throw.
++#define QTWEBENGINE_ACTION_FUNCTION(ClassName, name, histogram)      \
++  class ClassName : public ExtensionFunction {                       \
++    ~ClassName() override {}                                         \
++    ResponseAction Run() override;                                   \
++    DECLARE_EXTENSION_FUNCTION(name, histogram)                      \
++  }
++
++QTWEBENGINE_ACTION_FUNCTION(ActionSetTitleFunction, "action.setTitle", ACTION_SETTITLE);
++QTWEBENGINE_ACTION_FUNCTION(ActionGetTitleFunction, "action.getTitle", ACTION_GETTITLE);
++QTWEBENGINE_ACTION_FUNCTION(ActionSetIconFunction, "action.setIcon", ACTION_SETICON);
++QTWEBENGINE_ACTION_FUNCTION(ActionSetPopupFunction, "action.setPopup", ACTION_SETPOPUP);
++QTWEBENGINE_ACTION_FUNCTION(ActionGetPopupFunction, "action.getPopup", ACTION_GETPOPUP);
++QTWEBENGINE_ACTION_FUNCTION(ActionSetBadgeTextFunction, "action.setBadgeText", ACTION_SETBADGETEXT);
++QTWEBENGINE_ACTION_FUNCTION(ActionGetBadgeTextFunction, "action.getBadgeText", ACTION_GETBADGETEXT);
++QTWEBENGINE_ACTION_FUNCTION(ActionSetBadgeBackgroundColorFunction, "action.setBadgeBackgroundColor",
++                            ACTION_SETBADGEBACKGROUNDCOLOR);
++QTWEBENGINE_ACTION_FUNCTION(ActionGetBadgeBackgroundColorFunction, "action.getBadgeBackgroundColor",
++                            ACTION_GETBADGEBACKGROUNDCOLOR);
++QTWEBENGINE_ACTION_FUNCTION(ActionSetBadgeTextColorFunction, "action.setBadgeTextColor",
++                            ACTION_SETBADGETEXTCOLOR);
++QTWEBENGINE_ACTION_FUNCTION(ActionGetBadgeTextColorFunction, "action.getBadgeTextColor",
++                            ACTION_GETBADGETEXTCOLOR);
++QTWEBENGINE_ACTION_FUNCTION(ActionEnableFunction, "action.enable", ACTION_ENABLE);
++QTWEBENGINE_ACTION_FUNCTION(ActionDisableFunction, "action.disable", ACTION_DISABLE);
++QTWEBENGINE_ACTION_FUNCTION(ActionIsEnabledFunction, "action.isEnabled", ACTION_ISENABLED);
++QTWEBENGINE_ACTION_FUNCTION(ActionGetUserSettingsFunction, "action.getUserSettings",
++                            ACTION_GETUSERSETTINGS);
++QTWEBENGINE_ACTION_FUNCTION(ActionOpenPopupFunction, "action.openPopup", ACTION_OPENPOPUP);
++
++#undef QTWEBENGINE_ACTION_FUNCTION
++
++}  // namespace extensions
++
++#endif  // QTWEBENGINE_BROWSER_EXTENSIONS_API_ACTION_ACTION_API_H_
+diff --git a/src/3rdparty/chromium/qtwebengine/browser/extensions/api/commands/commands_api.cc b/src/3rdparty/chromium/qtwebengine/browser/extensions/api/commands/commands_api.cc
+new file mode 100644
+index 0000000000..7f49f2223f
+--- /dev/null
++++ b/src/3rdparty/chromium/qtwebengine/browser/extensions/api/commands/commands_api.cc
+@@ -0,0 +1,30 @@
++// Copyright (C) 2026 The Qt Company Ltd.
++// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
++
++#include "qtwebengine/browser/extensions/api/commands/commands_api.h"
++
++#include "extensions/common/extension.h"
++#include "extensions/common/manifest.h"
++
++namespace extensions {
++
++ExtensionFunction::ResponseAction CommandsGetAllFunction::Run() {
++  base::Value::List commands;
++  const base::Value::Dict* declared = extension()->manifest()->available_values().FindDict(
++      "commands");
++  if (declared) {
++    for (const auto [name, properties] : *declared) {
++      base::Value::Dict command;
++      command.Set("name", name);
++      const std::string* description =
++          properties.is_dict() ? properties.GetDict().FindString("description") : nullptr;
++      command.Set("description", description ? *description : std::string());
++      // No shortcut: nothing in the application has bound one.
++      command.Set("shortcut", std::string());
++      commands.Append(std::move(command));
++    }
++  }
++  return RespondNow(WithArguments(std::move(commands)));
++}
++
++}  // namespace extensions
+diff --git a/src/3rdparty/chromium/qtwebengine/browser/extensions/api/commands/commands_api.h b/src/3rdparty/chromium/qtwebengine/browser/extensions/api/commands/commands_api.h
+new file mode 100644
+index 0000000000..5d4b7c89c3
+--- /dev/null
++++ b/src/3rdparty/chromium/qtwebengine/browser/extensions/api/commands/commands_api.h
+@@ -0,0 +1,22 @@
++// Copyright (C) 2026 The Qt Company Ltd.
++// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
++
++#ifndef QTWEBENGINE_BROWSER_EXTENSIONS_API_COMMANDS_COMMANDS_API_H_
++#define QTWEBENGINE_BROWSER_EXTENSIONS_API_COMMANDS_COMMANDS_API_H_
++
++#include "extensions/browser/extension_function.h"
++
++namespace extensions {
++
++// The keyboard commands an extension declared. Read from its manifest, with no shortcut reported:
++// the application owns the keyboard and has not been asked to give any of it away, so every
++// command is listed as declared and unbound.
++class CommandsGetAllFunction : public ExtensionFunction {
++  ~CommandsGetAllFunction() override {}
++  ResponseAction Run() override;
++  DECLARE_EXTENSION_FUNCTION("commands.getAll", COMMANDS_GETALL)
++};
++
++}  // namespace extensions
++
++#endif  // QTWEBENGINE_BROWSER_EXTENSIONS_API_COMMANDS_COMMANDS_API_H_
+diff --git a/src/3rdparty/chromium/qtwebengine/browser/extensions/api/context_menus/context_menus_api.cc b/src/3rdparty/chromium/qtwebengine/browser/extensions/api/context_menus/context_menus_api.cc
+new file mode 100644
+index 0000000000..293013b138
+--- /dev/null
++++ b/src/3rdparty/chromium/qtwebengine/browser/extensions/api/context_menus/context_menus_api.cc
+@@ -0,0 +1,108 @@
++// Copyright (C) 2026 The Qt Company Ltd.
++// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
++
++#include "qtwebengine/browser/extensions/api/context_menus/context_menus_api.h"
++
++#include <algorithm>
++
++#include "base/strings/string_number_conversions.h"
++#include "extensions/common/extension.h"
++#include "qtwebengine/browser/extensions/extension_ui_registry_qt.h"
++
++namespace extensions {
++
++namespace {
++
++// An id is a string or a number, and an extension that gave neither gets one.
++std::string IdFrom(const base::Value& value) {
++  if (value.is_string()) {
++    return value.GetString();
++  }
++  if (value.is_int()) {
++    return base::NumberToString(value.GetInt());
++  }
++  return std::string();
++}
++
++std::string IdOfArgument(const base::Value::List& args, size_t at) {
++  return args.size() > at ? IdFrom(args[at]) : std::string();
++}
++
++}  // namespace
++
++ExtensionFunction::ResponseAction ContextMenusCreateFunction::Run() {
++  if (args().empty() || !args().front().is_dict()) {
++    return RespondNow(Error("A menu item needs its properties."));
++  }
++  const base::Value::Dict& properties = args().front().GetDict();
++
++  ContextMenuItemQt item;
++  if (const base::Value* id = properties.Find("id")) {
++    item.id = IdFrom(*id);
++  }
++  if (item.id.empty()) {
++    static int next = 0;
++    item.id = "qtwebengine-" + base::NumberToString(++next);
++  }
++  if (const std::string* title = properties.FindString("title")) {
++    item.title = *title;
++  }
++  if (const base::Value* parent = properties.Find("parentId")) {
++    item.parent_id = IdFrom(*parent);
++  }
++  item.enabled = properties.FindBool("enabled").value_or(true);
++  item.visible = properties.FindBool("visible").value_or(true);
++
++  std::vector<ContextMenuItemQt>& menu =
++      ExtensionUiRegistryQt::Get()->Menu(browser_context(), extension()->id());
++  auto existing = std::find_if(menu.begin(), menu.end(),
++                               [&item](const ContextMenuItemQt& in) { return in.id == item.id; });
++  if (existing != menu.end()) {
++    return RespondNow(Error("Cannot create item with duplicate id " + item.id));
++  }
++  menu.push_back(std::move(item));
++  return RespondNow(NoArguments());
++}
++
++ExtensionFunction::ResponseAction ContextMenusUpdateFunction::Run() {
++  const std::string id = IdOfArgument(args(), 0);
++  std::vector<ContextMenuItemQt>& menu =
++      ExtensionUiRegistryQt::Get()->Menu(browser_context(), extension()->id());
++  auto item = std::find_if(menu.begin(), menu.end(),
++                           [&id](const ContextMenuItemQt& in) { return in.id == id; });
++  if (item == menu.end()) {
++    return RespondNow(Error("Cannot find menu item with id " + id));
++  }
++  if (args().size() > 1 && args()[1].is_dict()) {
++    const base::Value::Dict& properties = args()[1].GetDict();
++    if (const std::string* title = properties.FindString("title")) {
++      item->title = *title;
++    }
++    if (std::optional<bool> enabled = properties.FindBool("enabled")) {
++      item->enabled = *enabled;
++    }
++    if (std::optional<bool> visible = properties.FindBool("visible")) {
++      item->visible = *visible;
++    }
++  }
++  return RespondNow(NoArguments());
++}
++
++ExtensionFunction::ResponseAction ContextMenusRemoveFunction::Run() {
++  const std::string id = IdOfArgument(args(), 0);
++  std::vector<ContextMenuItemQt>& menu =
++      ExtensionUiRegistryQt::Get()->Menu(browser_context(), extension()->id());
++  const size_t before = menu.size();
++  std::erase_if(menu, [&id](const ContextMenuItemQt& in) { return in.id == id; });
++  if (menu.size() == before) {
++    return RespondNow(Error("Cannot find menu item with id " + id));
++  }
++  return RespondNow(NoArguments());
++}
++
++ExtensionFunction::ResponseAction ContextMenusRemoveAllFunction::Run() {
++  ExtensionUiRegistryQt::Get()->Menu(browser_context(), extension()->id()).clear();
++  return RespondNow(NoArguments());
++}
++
++}  // namespace extensions
+diff --git a/src/3rdparty/chromium/qtwebengine/browser/extensions/api/context_menus/context_menus_api.h b/src/3rdparty/chromium/qtwebengine/browser/extensions/api/context_menus/context_menus_api.h
+new file mode 100644
+index 0000000000..b168690e59
+--- /dev/null
++++ b/src/3rdparty/chromium/qtwebengine/browser/extensions/api/context_menus/context_menus_api.h
+@@ -0,0 +1,41 @@
++// Copyright (C) 2026 The Qt Company Ltd.
++// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
++
++#ifndef QTWEBENGINE_BROWSER_EXTENSIONS_API_CONTEXT_MENUS_CONTEXT_MENUS_API_H_
++#define QTWEBENGINE_BROWSER_EXTENSIONS_API_CONTEXT_MENUS_CONTEXT_MENUS_API_H_
++
++#include "extensions/browser/extension_function.h"
++
++namespace extensions {
++
++// The items an extension wants in a context menu. QtWebEngine draws no menu, so these are kept and
++// answered; an application that draws its own reads them from ExtensionUiRegistryQt. A password
++// manager builds its menu on its first pass, so refusing the calls would throw in its worker
++// before a reader has asked it for anything.
++class ContextMenusCreateFunction : public ExtensionFunction {
++  ~ContextMenusCreateFunction() override {}
++  ResponseAction Run() override;
++  DECLARE_EXTENSION_FUNCTION("contextMenus.create", CONTEXTMENUS_CREATE)
++};
++
++class ContextMenusUpdateFunction : public ExtensionFunction {
++  ~ContextMenusUpdateFunction() override {}
++  ResponseAction Run() override;
++  DECLARE_EXTENSION_FUNCTION("contextMenus.update", CONTEXTMENUS_UPDATE)
++};
++
++class ContextMenusRemoveFunction : public ExtensionFunction {
++  ~ContextMenusRemoveFunction() override {}
++  ResponseAction Run() override;
++  DECLARE_EXTENSION_FUNCTION("contextMenus.remove", CONTEXTMENUS_REMOVE)
++};
++
++class ContextMenusRemoveAllFunction : public ExtensionFunction {
++  ~ContextMenusRemoveAllFunction() override {}
++  ResponseAction Run() override;
++  DECLARE_EXTENSION_FUNCTION("contextMenus.removeAll", CONTEXTMENUS_REMOVEALL)
++};
++
++}  // namespace extensions
++
++#endif  // QTWEBENGINE_BROWSER_EXTENSIONS_API_CONTEXT_MENUS_CONTEXT_MENUS_API_H_
+diff --git a/src/3rdparty/chromium/qtwebengine/browser/extensions/api/notifications/notifications_api.cc b/src/3rdparty/chromium/qtwebengine/browser/extensions/api/notifications/notifications_api.cc
+index cc93e2a50c..7f7d03c8f8 100644
+--- a/src/3rdparty/chromium/qtwebengine/browser/extensions/api/notifications/notifications_api.cc
++++ b/src/3rdparty/chromium/qtwebengine/browser/extensions/api/notifications/notifications_api.cc
+@@ -77,4 +77,9 @@ ExtensionFunction::ResponseAction NotificationsGetAllFunction::Run() {
+   return RespondNow(WithArguments(std::move(ids)));
+ }
+ 
++ExtensionFunction::ResponseAction NotificationsGetPermissionLevelFunction::Run() {
++  return RespondNow(ArgumentList(notifications::GetPermissionLevel::Results::Create(
++      notifications::PermissionLevel::kGranted)));
++}
++
+ }  // namespace extensions
+diff --git a/src/3rdparty/chromium/qtwebengine/browser/extensions/api/notifications/notifications_api.h b/src/3rdparty/chromium/qtwebengine/browser/extensions/api/notifications/notifications_api.h
+index 273f22f554..4228869d77 100644
+--- a/src/3rdparty/chromium/qtwebengine/browser/extensions/api/notifications/notifications_api.h
++++ b/src/3rdparty/chromium/qtwebengine/browser/extensions/api/notifications/notifications_api.h
+@@ -35,6 +35,15 @@ class NotificationsGetAllFunction : public ExtensionFunction {
+   DECLARE_EXTENSION_FUNCTION("notifications.getAll", NOTIFICATIONS_GET_ALL)
+ };
+ 
++// An application that is handed a notification shows it or does not; there is no level for the
++// reader to have set, and nothing here can be refused. Answering "granted" says that.
++class NotificationsGetPermissionLevelFunction : public ExtensionFunction {
++  ~NotificationsGetPermissionLevelFunction() override {}
++  ResponseAction Run() override;
++  DECLARE_EXTENSION_FUNCTION("notifications.getPermissionLevel",
++                             NOTIFICATIONS_GETPERMISSIONLEVEL)
++};
++
+ }  // namespace extensions
+ 
+ #endif  // QTWEBENGINE_BROWSER_EXTENSIONS_API_NOTIFICATIONS_NOTIFICATIONS_API_H_
+diff --git a/src/3rdparty/chromium/qtwebengine/browser/extensions/extension_ui_registry_qt.cc b/src/3rdparty/chromium/qtwebengine/browser/extensions/extension_ui_registry_qt.cc
+new file mode 100644
+index 0000000000..8bb9a0fd2b
+--- /dev/null
++++ b/src/3rdparty/chromium/qtwebengine/browser/extensions/extension_ui_registry_qt.cc
+@@ -0,0 +1,58 @@
++// Copyright (C) 2026 The Qt Company Ltd.
++// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
++
++#include "qtwebengine/browser/extensions/extension_ui_registry_qt.h"
++
++#include <tuple>
++
++#include "base/no_destructor.h"
++
++namespace extensions {
++
++// static
++ExtensionUiRegistryQt* ExtensionUiRegistryQt::Get() {
++  static base::NoDestructor<ExtensionUiRegistryQt> registry;
++  return registry.get();
++}
++
++const ActionStateQt& ExtensionUiRegistryQt::Action(content::BrowserContext* context,
++                                                   const ExtensionId& extension_id,
++                                                   int tab_id) const {
++  auto state = actions_.find(Key{context, extension_id, tab_id});
++  if (state == actions_.end() && tab_id != kEveryTab) {
++    state = actions_.find(Key{context, extension_id, kEveryTab});
++  }
++  if (state != actions_.end()) {
++    return state->second;
++  }
++  static const base::NoDestructor<ActionStateQt> unset;
++  return *unset;
++}
++
++ActionStateQt& ExtensionUiRegistryQt::MutableAction(content::BrowserContext* context,
++                                                    const ExtensionId& extension_id, int tab_id) {
++  const Key key{context, extension_id, tab_id};
++  auto state = actions_.find(key);
++  if (state != actions_.end()) {
++    return state->second;
++  }
++  // A tab that has never been written to starts from what the extension set for every tab, so
++  // setting a badge for one tab does not silently clear the title it set for all of them.
++  return actions_[key] = Action(context, extension_id, kEveryTab);
++}
++
++std::vector<ContextMenuItemQt>& ExtensionUiRegistryQt::Menu(content::BrowserContext* context,
++                                                            const ExtensionId& extension_id) {
++  return menus_[Key{context, extension_id, kEveryTab}];
++}
++
++void ExtensionUiRegistryQt::ForgetContext(content::BrowserContext* context) {
++  for (auto it = actions_.begin(); it != actions_.end();) {
++    it = it->first.context == context ? actions_.erase(it) : std::next(it);
++  }
++  for (auto it = menus_.begin(); it != menus_.end();) {
++    it = it->first.context == context ? menus_.erase(it) : std::next(it);
++  }
++}
++
++}  // namespace extensions
+diff --git a/src/3rdparty/chromium/qtwebengine/browser/extensions/extension_ui_registry_qt.h b/src/3rdparty/chromium/qtwebengine/browser/extensions/extension_ui_registry_qt.h
+new file mode 100644
+index 0000000000..cd3c2f7fe1
+--- /dev/null
++++ b/src/3rdparty/chromium/qtwebengine/browser/extensions/extension_ui_registry_qt.h
+@@ -0,0 +1,82 @@
++// Copyright (C) 2026 The Qt Company Ltd.
++// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
++
++#ifndef QTWEBENGINE_BROWSER_EXTENSIONS_EXTENSION_UI_REGISTRY_QT_H_
++#define QTWEBENGINE_BROWSER_EXTENSIONS_EXTENSION_UI_REGISTRY_QT_H_
++
++#include <map>
++#include <string>
++#include <vector>
++
++#include "base/memory/raw_ptr.h"
++#include "extensions/common/extension_id.h"
++
++namespace content {
++class BrowserContext;
++}
++
++namespace extensions {
++
++// What an extension asks the browser's own chrome to show: its action's title, icon, popup and
++// badge, and the items it wants in a context menu.
++//
++// QtWebEngine has no chrome to draw them in. What it must not do is refuse the calls: a function a
++// schema declares and nothing registers is reported as an unknown API and throws where the
++// extension made the call, and a password manager sets a badge and builds a menu on its first
++// pass, before it has done anything a reader asked for. So what is asked for is kept and answered
++// truthfully, and an application that wants to draw any of it reads it here.
++struct ActionStateQt {
++  std::string title;
++  std::string icon;
++  std::string popup;
++  std::string badge_text;
++  std::string badge_background_color;
++  std::string badge_text_color;
++  bool enabled = true;
++};
++
++struct ContextMenuItemQt {
++  std::string id;
++  std::string title;
++  std::string parent_id;
++  bool enabled = true;
++  bool visible = true;
++};
++
++class ExtensionUiRegistryQt {
++ public:
++  static ExtensionUiRegistryQt* Get();
++
++  // An extension's action state for |tab_id|, falling back to the one it set for every tab.
++  // kEveryTab is what a call that named no tab means.
++  static constexpr int kEveryTab = 0;
++  const ActionStateQt& Action(content::BrowserContext* context, const ExtensionId& extension_id,
++                              int tab_id) const;
++  // The state to write into. A call that names a tab starts from what every tab has.
++  ActionStateQt& MutableAction(content::BrowserContext* context, const ExtensionId& extension_id,
++                               int tab_id);
++
++  std::vector<ContextMenuItemQt>& Menu(content::BrowserContext* context,
++                                       const ExtensionId& extension_id);
++
++  void ForgetContext(content::BrowserContext* context);
++
++ private:
++  struct Key {
++    raw_ptr<content::BrowserContext> context;
++    ExtensionId extension_id;
++    int tab_id = kEveryTab;
++
++    bool operator<(const Key& other) const {
++      return std::tie(context, extension_id, tab_id) <
++             std::tie(other.context, other.extension_id, other.tab_id);
++    }
++  };
++
++  std::map<Key, ActionStateQt> actions_;
++  std::map<Key, std::vector<ContextMenuItemQt>> menus_;
++};
++
++}  // namespace extensions
++
++#endif  // QTWEBENGINE_BROWSER_EXTENSIONS_EXTENSION_UI_REGISTRY_QT_H_
+diff --git a/src/3rdparty/chromium/qtwebengine/common/extensions/api/action.json b/src/3rdparty/chromium/qtwebengine/common/extensions/api/action.json
+index b55e25be5e..f81f411342 100644
+--- a/src/3rdparty/chromium/qtwebengine/common/extensions/api/action.json
++++ b/src/3rdparty/chromium/qtwebengine/common/extensions/api/action.json
+@@ -1,5 +1,7 @@
+-// Copied from //chrome/common/extensions/api/action.json for QtWebEngine. Functions without a
+-// QtWebEngine implementation are marked nocompile so the namespace and its events exist.
++// Copied from //chrome/common/extensions/api/action.json for QtWebEngine. Every function it
++// declares is registered by hand in ExtensionsBrowserClientQt: a function a schema declares and
++// nothing registers is reported to the extension as an unknown API and throws where it was
++// called, which is not the same as being absent.
+ [
+   {
+     "namespace": "action",
+@@ -81,8 +83,7 @@
+           "name": "callback",
+           "parameters": [],
+           "optional": true
+-        },
+-        "nocompile": true
++        }
+       },
+       {
+         "name": "getTitle",
+@@ -102,8 +103,7 @@
+               "type": "string"
+             }
+           ]
+-        },
+-        "nocompile": true
++        }
+       },
+       {
+         "name": "setIcon",
+@@ -157,8 +157,7 @@
+           "name": "callback",
+           "optional": true,
+           "parameters": []
+-        },
+-        "nocompile": true
++        }
+       },
+       {
+         "name": "setPopup",
+@@ -186,8 +185,7 @@
+           "name": "callback",
+           "parameters": [],
+           "optional": true
+-        },
+-        "nocompile": true
++        }
+       },
+       {
+         "name": "getPopup",
+@@ -207,8 +205,7 @@
+               "type": "string"
+             }
+           ]
+-        },
+-        "nocompile": true
++        }
+       },
+       {
+         "name": "setBadgeText",
+@@ -237,8 +234,7 @@
+           "name": "callback",
+           "parameters": [],
+           "optional": true
+-        },
+-        "nocompile": true
++        }
+       },
+       {
+         "name": "getBadgeText",
+@@ -258,8 +254,7 @@
+               "type": "string"
+             }
+           ]
+-        },
+-        "nocompile": true
++        }
+       },
+       {
+         "name": "setBadgeBackgroundColor",
+@@ -294,8 +289,7 @@
+           "name": "callback",
+           "parameters": [],
+           "optional": true
+-        },
+-        "nocompile": true
++        }
+       },
+       {
+         "name": "getBadgeBackgroundColor",
+@@ -315,8 +309,7 @@
+               "$ref": "extensionTypes.ColorArray"
+             }
+           ]
+-        },
+-        "nocompile": true
++        }
+       },
+       {
+         "name": "setBadgeTextColor",
+@@ -351,8 +344,7 @@
+           "name": "callback",
+           "parameters": [],
+           "optional": true
+-        },
+-        "nocompile": true
++        }
+       },
+       {
+         "name": "getBadgeTextColor",
+@@ -372,8 +364,7 @@
+               "$ref": "extensionTypes.ColorArray"
+             }
+           ]
+-        },
+-        "nocompile": true
++        }
+       },
+       {
+         "name": "enable",
+@@ -392,8 +383,7 @@
+           "name": "callback",
+           "parameters": [],
+           "optional": true
+-        },
+-        "nocompile": true
++        }
+       },
+       {
+         "name": "disable",
+@@ -412,8 +402,7 @@
+           "name": "callback",
+           "parameters": [],
+           "optional": true
+-        },
+-        "nocompile": true
++        }
+       },
+       {
+         "name": "isEnabled",
+@@ -437,8 +426,7 @@
+               "description": "True if the extension action is enabled."
+             }
+           ]
+-        },
+-        "nocompile": true
++        }
+       },
+       {
+         "name": "getUserSettings",
+@@ -453,8 +441,7 @@
+               "$ref": "UserSettings"
+             }
+           ]
+-        },
+-        "nocompile": true
++        }
+       },
+       {
+         "name": "openPopup",
+@@ -471,8 +458,7 @@
+         "returns_async": {
+           "name": "callback",
+           "parameters": []
+-        },
+-        "nocompile": true
++        }
+       }
+     ],
+     "events": [
+diff --git a/src/3rdparty/chromium/qtwebengine/common/extensions/api/commands.json b/src/3rdparty/chromium/qtwebengine/common/extensions/api/commands.json
+index d22a7b828b..4725533442 100644
+--- a/src/3rdparty/chromium/qtwebengine/common/extensions/api/commands.json
++++ b/src/3rdparty/chromium/qtwebengine/common/extensions/api/commands.json
+@@ -1,5 +1,7 @@
+-// Copied from //chrome/common/extensions/api/commands.json for QtWebEngine. Functions without a
+-// QtWebEngine implementation are marked nocompile so the namespace and its events exist.
++// Copied from //chrome/common/extensions/api/commands.json for QtWebEngine. Every function it
++// declares is registered by hand in ExtensionsBrowserClientQt: a function a schema declares and
++// nothing registers is reported to the extension as an unknown API and throws where it was
++// called, which is not the same as being absent.
+ [
+   {
+     "namespace": "commands",
+@@ -64,8 +66,7 @@
+               }
+             }
+           ]
+-        },
+-        "nocompile": true
++        }
+       }
+     ]
+   }
+diff --git a/src/3rdparty/chromium/qtwebengine/common/extensions/api/context_menus.json b/src/3rdparty/chromium/qtwebengine/common/extensions/api/context_menus.json
+index 726e4fb402..e220ef8abb 100644
+--- a/src/3rdparty/chromium/qtwebengine/common/extensions/api/context_menus.json
++++ b/src/3rdparty/chromium/qtwebengine/common/extensions/api/context_menus.json
+@@ -1,5 +1,7 @@
+-// Copied from //chrome/common/extensions/api/context_menus.json for QtWebEngine. Functions without a
+-// QtWebEngine implementation are marked nocompile so the namespace and its events exist.
++// Copied from //chrome/common/extensions/api/context_menus.json for QtWebEngine. Every function it
++// declares is registered by hand in ExtensionsBrowserClientQt: a function a schema declares and
++// nothing registers is reported to the extension as an unknown API and throws where it was
++// called, which is not the same as being absent.
+ [
+   {
+     "namespace": "contextMenus",
+@@ -241,8 +243,7 @@
+           "description": "Called when the item has been created in the browser. If an error occurs during creation, details will be available in $(ref:runtime.lastError).",
+           "parameters": [],
+           "does_not_support_promises": "Synchronous return and callback crbug.com/1143032"
+-        },
+-        "nocompile": true
++        }
+       },
+       {
+         "name": "update",
+@@ -345,8 +346,7 @@
+           "optional": true,
+           "parameters": [],
+           "description": "Called when the context menu has been updated."
+-        },
+-        "nocompile": true
++        }
+       },
+       {
+         "name": "remove",
+@@ -371,8 +371,7 @@
+           "optional": true,
+           "parameters": [],
+           "description": "Called when the context menu has been removed."
+-        },
+-        "nocompile": true
++        }
+       },
+       {
+         "name": "removeAll",
+@@ -384,8 +383,7 @@
+           "optional": true,
+           "parameters": [],
+           "description": "Called when removal is complete."
+-        },
+-        "nocompile": true
++        }
+       }
+     ],
+     "events": [
+diff --git a/src/3rdparty/chromium/qtwebengine/common/extensions/api/notifications.idl b/src/3rdparty/chromium/qtwebengine/common/extensions/api/notifications.idl
+index d28dd7ad4a..41db4d4dfe 100644
+--- a/src/3rdparty/chromium/qtwebengine/common/extensions/api/notifications.idl
++++ b/src/3rdparty/chromium/qtwebengine/common/extensions/api/notifications.idl
+@@ -192,10 +192,8 @@ namespace notifications {
+     static void getAll(GetAllCallback callback);
+ 
+     // Retrieves whether the user has enabled notifications from this app
+-    // or extension. Not implemented here: an application that shows the
+-    // notifications it is handed has no level to report, and the extensions
+-    // layer has no place to record the call.
+-    [nocompile] static void getPermissionLevel(
++    // or extension.
++    static void getPermissionLevel(
+         PermissionLevelCallback callback);
+   };
+ 
+diff --git a/src/core/extensions/extension_system_qt.cpp b/src/core/extensions/extension_system_qt.cpp
+index 9dce104f63..14187f2a87 100644
+--- a/src/core/extensions/extension_system_qt.cpp
++++ b/src/core/extensions/extension_system_qt.cpp
+@@ -8,6 +8,7 @@
+ 
+ #include "extension_system_qt.h"
+ 
++#include "qtwebengine/browser/extensions/extension_ui_registry_qt.h"
+ #include "qtwebengine/browser/extensions/notification_registry_qt.h"
+ 
+ #include "extension_manager.h"
+@@ -214,6 +215,7 @@ void ExtensionSystemQt::Shutdown()
+     // The notifications this context's extensions were showing outlive nothing: the registry
+     // holds pointers to it, and it is going away.
+     NotificationRegistryQt::Get()->ForgetContext(browser_context_);
++    ExtensionUiRegistryQt::Get()->ForgetContext(browser_context_);
+ 
+     if (content_verifier_.get())
+         content_verifier_->Shutdown();
+diff --git a/src/core/extensions/extensions_browser_client_qt.cpp b/src/core/extensions/extensions_browser_client_qt.cpp
+index f4a5176d5a..3de7934ac9 100644
+--- a/src/core/extensions/extensions_browser_client_qt.cpp
++++ b/src/core/extensions/extensions_browser_client_qt.cpp
+@@ -38,7 +38,12 @@
+ #include "extensions/common/constants.h"
+ #include "extensions/common/file_util.h"
+ #include "net/base/mime_util.h"
++#include "extensions/browser/extension_function_registry.h"
++#include "qtwebengine/browser/extensions/api/action/action_api.h"
++#include "qtwebengine/browser/extensions/api/commands/commands_api.h"
++#include "qtwebengine/browser/extensions/api/context_menus/context_menus_api.h"
+ #include "qtwebengine/browser/extensions/api/generated_api_registration.h"
++#include "qtwebengine/browser/extensions/extension_ui_registry_qt.h"
+ #include "services/network/public/cpp/resource_request.h"
+ #include "services/network/public/mojom/url_loader.mojom.h"
+ #include "services/network/public/mojom/url_response_head.mojom.h"
+@@ -256,6 +261,33 @@ public:
+     {
+         // Generated APIs from QtWebEngine.
+         api::QtWebEngineGeneratedFunctionRegistry::RegisterAll(registry);
++
++        // By hand, because their schemas generate no C++ types. `action.json` is uncompiled in
++        // Chrome too, and these are read as the values they arrive as rather than as generated
++        // parameters. A function a schema declares and nothing registers is reported to the
++        // extension as an unknown API and throws where it was called, so everything declared is
++        // registered.
++        registry->RegisterFunction<ActionSetTitleFunction>();
++        registry->RegisterFunction<ActionGetTitleFunction>();
++        registry->RegisterFunction<ActionSetIconFunction>();
++        registry->RegisterFunction<ActionSetPopupFunction>();
++        registry->RegisterFunction<ActionGetPopupFunction>();
++        registry->RegisterFunction<ActionSetBadgeTextFunction>();
++        registry->RegisterFunction<ActionGetBadgeTextFunction>();
++        registry->RegisterFunction<ActionSetBadgeBackgroundColorFunction>();
++        registry->RegisterFunction<ActionGetBadgeBackgroundColorFunction>();
++        registry->RegisterFunction<ActionSetBadgeTextColorFunction>();
++        registry->RegisterFunction<ActionGetBadgeTextColorFunction>();
++        registry->RegisterFunction<ActionEnableFunction>();
++        registry->RegisterFunction<ActionDisableFunction>();
++        registry->RegisterFunction<ActionIsEnabledFunction>();
++        registry->RegisterFunction<ActionGetUserSettingsFunction>();
++        registry->RegisterFunction<ActionOpenPopupFunction>();
++        registry->RegisterFunction<ContextMenusCreateFunction>();
++        registry->RegisterFunction<ContextMenusUpdateFunction>();
++        registry->RegisterFunction<ContextMenusRemoveFunction>();
++        registry->RegisterFunction<ContextMenusRemoveAllFunction>();
++        registry->RegisterFunction<CommandsGetAllFunction>();
+     }
+ };
+ 
+diff --git a/tests/auto/widgets/extensions/resources/notifications_ext/manifest.json b/tests/auto/widgets/extensions/resources/notifications_ext/manifest.json
+index 9adf72be3a..b2d010dca4 100644
+--- a/tests/auto/widgets/extensions/resources/notifications_ext/manifest.json
++++ b/tests/auto/widgets/extensions/resources/notifications_ext/manifest.json
+@@ -1,8 +1,11 @@
+ {
+-    "name": "notifier",
++    "name": "first pass",
+     "version": "1.0",
+     "manifest_version": 3,
+-    "permissions": ["notifications"],
++    "permissions": [
++        "notifications",
++        "contextMenus"
++    ],
+     "background": {
+         "service_worker": "service_worker.js"
+     },
+@@ -11,5 +14,13 @@
+     },
+     "icons": {
+         "16": "icon.png"
++    },
++    "commands": {
++        "open-vault": {
++            "suggested_key": {
++                "default": "Ctrl+Shift+Y"
++            },
++            "description": "Open the vault"
++        }
+     }
+-}
++}
+\ No newline at end of file
+diff --git a/tests/auto/widgets/extensions/resources/notifications_ext/service_worker.js b/tests/auto/widgets/extensions/resources/notifications_ext/service_worker.js
+index 4343325e20..6946998b6e 100644
+--- a/tests/auto/widgets/extensions/resources/notifications_ext/service_worker.js
++++ b/tests/auto/widgets/extensions/resources/notifications_ext/service_worker.js
+@@ -10,6 +10,10 @@ chrome.runtime.onMessage.addListener((message, _, sendResponse) => {
+         sendResponse(seen)
+         return true
+     }
++    if (message === "level") {
++        chrome.notifications.getPermissionLevel(level => sendResponse(level))
++        return true
++    }
+     if (message === "notify") {
+         chrome.notifications.create("first", {
+             type: "basic",
+diff --git a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
+index f0d60b31be..3500fb0dbd 100644
+--- a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
++++ b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
+@@ -58,6 +58,7 @@ private Q_SLOTS:
+     void anExtensionNotificationReachesTheProfilesPresenter();
+     void anExtensionKeepsTrackOfTheNotificationsItIsShowing();
+     void theReadersAnswerToANotificationReachesTheExtension();
++    void everyFunctionTheNamespaceDeclaresCanBeCalled();
+     void enableAfterStoragePathChange();
+     void tabsWindowsAndScripting();
+     void nativeMessaging();
+@@ -756,6 +757,79 @@ void tst_QWebEngineExtension::theReadersAnswerToANotificationReachesTheExtension
+     QTRY_COMPARE(events(), R"([["clicked","first"],["closed","first",true]])"_L1);
+ }
+ 
++void tst_QWebEngineExtension::everyFunctionTheNamespaceDeclaresCanBeCalled()
++{
++    // A function a namespace declares but nothing registers is not inert: the dispatcher refuses
++    // it as an unknown API and the call throws where the extension made it. An extension reads the
++    // namespace, sees the function and calls it, so anything declared has to answer, even if the
++    // answer is that there is nothing to report.
++    QWebEngineExtensionInfo extension =
++            loadExtensionSync(resourcesPath() + "notifications_ext"_L1);
++    QVERIFY2(extension.isLoaded(), qPrintable(extension.error()));
++    m_manager->setExtensionEnabled(extension, true);
++
++    QWebEnginePage popup(m_profile);
++    QSignalSpy popupSpy(&popup, SIGNAL(loadFinished(bool)));
++    popup.load(extension.actionPopupUrl());
++    QTRY_COMPARE(popupSpy.size(), 1);
++
++    // Everything a password manager reaches for while it is starting up, in one pass. Each call is
++    // recorded as its answer or as the message it threw, so a failure names the function.
++    evaluateJavaScriptSync(&popup, R"((async () => {
++        const answers = {};
++        const ask = async (name, call) => {
++            try {
++                answers[name] = await call();
++            } catch (error) {
++                answers[name] = "threw: " + error.message;
++            }
++        };
++        await ask("level", () => chrome.notifications.getPermissionLevel());
++        await ask("commands", async () =>
++            (await chrome.commands.getAll()).map(c => c.name).join(","));
++        await ask("setPopup", () => chrome.action.setPopup({ popup: "popup_page.html" }));
++        await ask("getPopup", () => chrome.action.getPopup({}));
++        await ask("setBadgeText", () => chrome.action.setBadgeText({ text: "7" }));
++        await ask("getBadgeText", () => chrome.action.getBadgeText({}));
++        await ask("setBadgeBackgroundColor",
++                  () => chrome.action.setBadgeBackgroundColor({ color: "#112233" }));
++        await ask("setTitle", () => chrome.action.setTitle({ title: "Vault" }));
++        await ask("getTitle", () => chrome.action.getTitle({}));
++        await ask("setIcon", () => chrome.action.setIcon({ path: "icon.png" }));
++        await ask("isEnabled", () => chrome.action.isEnabled({}));
++        await ask("menuCreated", () => new Promise(resolve => {
++            const id = chrome.contextMenus.create({ id: "fill", title: "Fill" }, () => resolve(id));
++        }));
++        await ask("menuUpdated", () => chrome.contextMenus.update("fill", { title: "Fill login" }));
++        await ask("menuRemoved", () => chrome.contextMenus.remove("fill"));
++        await ask("menusCleared", () => chrome.contextMenus.removeAll());
++        window.answers = answers;
++    })())");
++    QTRY_VERIFY(evaluateJavaScriptSync(&popup, "window.answers !== undefined").toBool());
++
++    const auto answer = [this, &popup](const QString &name) {
++        return evaluateJavaScriptSync(&popup, "window.answers." + name);
++    };
++    QCOMPARE(answer("level"_L1), "granted"_L1);
++    QCOMPARE(answer("commands"_L1), "open-vault"_L1);
++    // The setters are accepted and the getters answer with what was set, so an extension that
++    // writes a badge and reads it back is told the truth. Nothing draws it yet.
++    QCOMPARE(answer("getPopup"_L1).toString().endsWith("popup_page.html"_L1), true);
++    QCOMPARE(answer("getBadgeText"_L1), "7"_L1);
++    QCOMPARE(answer("getTitle"_L1), "Vault"_L1);
++    QCOMPARE(answer("isEnabled"_L1).toBool(), true);
++    for (const QString &name : { "setPopup"_L1, "setBadgeText"_L1, "setBadgeBackgroundColor"_L1,
++                                 "setTitle"_L1, "setIcon"_L1 }) {
++        QVERIFY2(!answer(name).toString().startsWith("threw:"_L1),
++                 qPrintable(name + ": " + answer(name).toString()));
++    }
++    QCOMPARE(answer("menuCreated"_L1), "fill"_L1);
++    for (const QString &name : { "menuUpdated"_L1, "menuRemoved"_L1, "menusCleared"_L1 }) {
++        QVERIFY2(!answer(name).toString().startsWith("threw:"_L1),
++                 qPrintable(name + ": " + answer(name).toString()));
++    }
++}
++
+ void tst_QWebEngineExtension::enableAfterStoragePathChange()
+ {
+     // Changing the storage path after construction rebuilds the profile's PrefService. The
+-- 
+2.54.0 (Apple Git-157)
+

@@ -1,7 +1,7 @@
 From 4dc9d4c251059f95b29fda39e76e56ccde4f28e3 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivela=CC=88?= <vkivela@hotmail.com>
 Date: Mon, 21 Sep 2026 12:53:01 +0300
-Subject: [PATCH 11/12] extensions: let an extension document close its own
+Subject: [PATCH 11/13] extensions: let an extension document close its own
  window
 
 A page may not close a window it did not open once its history is longer
