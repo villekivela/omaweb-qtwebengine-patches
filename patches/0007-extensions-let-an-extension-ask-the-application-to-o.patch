@@ -1,8 +1,8 @@
 From 182cd61fc0dcc75cbb21983e8be983bc39818f36 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivela=CC=88?= <vkivela@hotmail.com>
 Date: Sat, 19 Sep 2026 23:02:38 +0300
-Subject: [PATCH 7/9] extensions: let an extension ask the application to open
- a page
+Subject: [PATCH 07/11] extensions: let an extension ask the application to
+ open a page
 
 tabs.create and windows.create arrive where a page's own window.open()
 arrives, through AddNewContents and adoptNewWindow, so the application

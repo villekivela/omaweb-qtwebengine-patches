@@ -1,13 +1,13 @@
 # QtWebEngine extension patches
 
-Nine patches that let QtWebEngine host a password manager's Chromium extension. Base is the
+Eleven patches that let QtWebEngine host a password manager's Chromium extension. Base is the
 released `qtwebengine-everywhere-src-6.11.2` tarball.
 
 Built for [omaweb#344](https://github.com/villekivela/omaweb/issues/344), which asks whether Omaweb
 can host Bitwarden and 1Password. The findings live in `docs/research/password-manager-extensions.md`
 in that repository.
 
-Two of the nine are ordinary bug fixes headed for Gerrit. The rest wait on one question to Qt, in
+Two of the eleven are ordinary bug fixes headed for Gerrit. The rest wait on one question to Qt, in
 `upstream/QTBUG-draft.md`. If Qt takes the work, this repository is deleted rather than maintained.
 
 ## Running it
@@ -62,6 +62,14 @@ worker then reaches back into every frame of every open tab, and that needs `get
 off the tab registry and the frame's own state, without Chrome's tab-strip observer. The events stay
 declared and unraised. _Follows 0004._
 
+**0010, keep a running extension working when its path is loaded again.** Loading a loaded path sent
+the extension round as a reload, which disabled it and handed the reload to an empty delegate: the
+worker went and never came back. _A bug fix with a test. Submit as is._
+
+**0011, let an extension document close its own window.** A popup that routes by hash cannot close
+itself, because Blink only lets a page close a window it opened. Chrome exempts extension documents
+in a file QtWebEngine does not build. _A bug fix with a test. Submit as is._
+
 ## The open question
 
 `TabsDelegateQt` is internal, and `ExtensionsBrowserClientQt` fills it by treating every page of the
@@ -73,7 +81,7 @@ one is active. That is what the QTBUG draft asks for. Ask before writing the API
 
 ## Tests
 
-28 tests pass with the series applied. Five of them fail on a stock build, which is why they are
+30 tests pass with the series applied. Five of them fail on a stock build, which is why they are
 worth having:
 
 - `serviceWorkerLocalization` fails

@@ -1,0 +1,171 @@
+From dd97947c802844b8a3d594b9d5194024ce7867fa Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Ville=20Kivela=CC=88?= <vkivela@hotmail.com>
+Date: Mon, 21 Sep 2026 12:35:01 +0300
+Subject: [PATCH 10/11] extensions: keep a running extension working when its
+ path is loaded again
+
+Loading a path that was already loaded sent the extension round as a
+reload: the registrar disabled it with DISABLE_RELOAD and handed the
+reload to a delegate whose body was empty. The extension stayed disabled
+with its worker gone, while the manager reported it loaded. An
+application that asked twice, which Omaweb did, got a popup with no
+`chrome` and a worker that had never started.
+
+The same path loaded again is the same extension, updated in place. A
+running one goes through the registrar's AddExtension, which swaps the
+copy and activates it as Chrome does for an update; one the application
+never enabled is swapped and stays disabled, so loading twice does not
+enable. The reload delegate reads the path again and hands the copy
+back, so reloadExtension() finishes what it starts too.
+
+The existing reload test counted extensions and checked isLoaded, and
+so never noticed. The new one asks the worker afterwards.
+---
+ src/core/extensions/extension_loader.cpp      | 45 +++++++++++++++++--
+ src/core/extensions/extension_loader.h        |  9 +++-
+ .../extensions/tst_qwebengineextension.cpp    | 43 ++++++++++++++++++
+ 3 files changed, 92 insertions(+), 5 deletions(-)
+
+diff --git a/src/core/extensions/extension_loader.cpp b/src/core/extensions/extension_loader.cpp
+index eafb641225..a40ab37fd3 100644
+--- a/src/core/extensions/extension_loader.cpp
++++ b/src/core/extensions/extension_loader.cpp
+@@ -82,10 +82,49 @@ void ExtensionLoader::loadExtension(const base::FilePath &path)
+ 
+ void ExtensionLoader::addExtension(scoped_refptr<const Extension> extension)
+ {
+-    if (extensions().Contains(extension->id()))
+-        m_extensionRegistrar->ReloadExtensionWithQuietFailure(extension->id());
+-    else
++    // The same path loaded again is the same extension, updated in place. The
++    // registrar swaps a running one for the new copy and activates it, which is
++    // what Chrome does for an update; one the application never enabled is
++    // swapped and stays disabled, so loading twice does not enable. Sending it
++    // round as a reload instead disabled it and waited on a reload delegate
++    // that did nothing, and the second load of a running extension left it
++    // with no worker.
++    const std::string &id = extension->id();
++    if (m_extensionRegistry->enabled_extensions().Contains(id)) {
++        m_extensionRegistrar->AddExtension(extension);
++    } else if (extensions().Contains(id)) {
++        m_extensionRegistrar->RemoveExtension(id, UnloadedExtensionReason::UPDATE);
+         m_extensionRegistry->AddDisabled(extension);
++    } else {
++        m_extensionRegistry->AddDisabled(extension);
++    }
++}
++
++void ExtensionLoader::LoadExtensionForReload(const ExtensionId &extension_id,
++                                             const base::FilePath &path)
++{
++    Q_UNUSED(extension_id);
++    GetExtensionFileTaskRunner()->PostTaskAndReplyWithResult(
++            FROM_HERE, base::BindOnce(&loadExtensionOnFileThread, path),
++            base::BindOnce(&ExtensionLoader::reloadFinished, m_weakFactory.GetWeakPtr()));
++}
++
++void ExtensionLoader::LoadExtensionForReloadWithQuietFailure(const ExtensionId &extension_id,
++                                                             const base::FilePath &path)
++{
++    LoadExtensionForReload(extension_id, path);
++}
++
++void ExtensionLoader::reloadFinished(const LoadingInfo &loadingInfo)
++{
++    if (!loadingInfo.error.empty()) {
++        m_manager->onExtensionLoadError(toQt(loadingInfo.path), loadingInfo.error);
++        return;
++    }
++    // The registrar knows this id is reloading and puts the copy back in the
++    // state it took it from.
++    m_extensionRegistrar->AddExtension(loadingInfo.extension);
++    m_manager->onExtensionLoaded(loadingInfo.extension.get());
+ }
+ 
+ void ExtensionLoader::reloadExtension(const std::string &id)
+diff --git a/src/core/extensions/extension_loader.h b/src/core/extensions/extension_loader.h
+index 34d3c5c39c..320321b476 100644
+--- a/src/core/extensions/extension_loader.h
++++ b/src/core/extensions/extension_loader.h
+@@ -66,10 +66,15 @@ private:
+     void PreUninstallExtension(scoped_refptr<const extensions::Extension> extension) override { }
+     void PostUninstallExtension(scoped_refptr<const extensions::Extension> extension, base::OnceClosure done_callback) override
+     { std::move(done_callback).Run(); }
++    // A reload the registrar started: it has disabled the extension and now
++    // needs it read from disk again and handed back. Left empty, the extension
++    // stays disabled with DISABLE_RELOAD, its worker gone, while the manager
++    // goes on reporting it loaded.
+     void LoadExtensionForReload(const extensions::ExtensionId &extension_id,
+-                                const base::FilePath &path) override { }
++                                const base::FilePath &path) override;
+     void LoadExtensionForReloadWithQuietFailure(const extensions::ExtensionId &extension_id,
+-                                                const base::FilePath &path) override { }
++                                                const base::FilePath &path) override;
++    void reloadFinished(const LoadingInfo &loadingInfo);
+     void ShowExtensionDisabledError(const extensions::Extension *extension, bool is_remote_install) override { }
+     bool CanEnableExtension(const extensions::Extension *extension) override { return true; }
+     bool CanDisableExtension(const extensions::Extension *extension) override { return true; }
+diff --git a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
+index 2ab235bfee..04cac13c4e 100644
+--- a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
++++ b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
+@@ -52,6 +52,7 @@ private Q_SLOTS:
+     void aPopupOnAProfileWithItsOwnStorageHasItsApis();
+     void aMessageSentWhileTheWorkerIsStartingIsDelivered();
+     void aWorkerThatListensLateCanReachThePageThatAlreadyAsked();
++    void loadingTheSamePathTwiceLeavesOneWorkingExtension();
+     void enableAfterStoragePathChange();
+     void tabsWindowsAndScripting();
+     void nativeMessaging();
+@@ -557,6 +558,48 @@ void tst_QWebEngineExtension::aWorkerThatListensLateCanReachThePageThatAlreadyAs
+             "reached by the worker"_L1, 10000);
+ }
+ 
++void tst_QWebEngineExtension::loadingTheSamePathTwiceLeavesOneWorkingExtension()
++{
++    // An application that asks for the same package twice in a row, which Omaweb did until it
++    // learnt not to, is asking for one extension, not a broken one. The Omarchy VM found that a
++    // second load of a running extension left its worker and popup with no `chrome` at all.
++    // A page first, so the second load lands in a profile with a renderer running, which is the
++    // state the VM was in.
++    QSignalSpy loadSpy(m_page, SIGNAL(loadFinished(bool)));
++    m_page->load(QUrl("qrc:///resources/index.html"));
++    QTRY_COMPARE(loadSpy.size(), 1);
++
++    // Loaded, enabled and running, and then asked for again: the second ask comes a tick after
++    // the first was answered, which is how a signal answered twice asks.
++    QWebEngineExtensionInfo extension =
++            loadExtensionSync(resourcesPath() + "localized_worker_ext"_L1);
++    QVERIFY(extension.isLoaded());
++    m_manager->setExtensionEnabled(extension, true);
++    m_page->load(QUrl("qrc:///resources/index.html"));
++    QTRY_COMPARE(loadSpy.size(), 2);
++    QTRY_COMPARE(evaluateJavaScriptSync(m_page, "document.getElementById('testNode')?.textContent"),
++                 "hello from the worker"_L1);
++
++    QSignalSpy spy(m_manager, SIGNAL(loadFinished(QWebEngineExtensionInfo)));
++    m_manager->loadExtension(resourcesPath() + "localized_worker_ext"_L1);
++    QTRY_COMPARE(spy.size(), 1);
++    QWebEngineExtensionInfo again = spy.takeFirst().value(0).value<QWebEngineExtensionInfo>();
++    QCOMPARE(again.id(), extension.id());
++    m_manager->setExtensionEnabled(again, true);
++    // However the second ask was answered, the list has one of it.
++    int count = 0;
++    for (const QWebEngineExtensionInfo &info : m_manager->extensions()) {
++        if (info.id() == extension.id())
++            ++count;
++    }
++    QCOMPARE(count, 1);
++
++    m_page->load(QUrl("qrc:///resources/index.html"));
++    QTRY_COMPARE(loadSpy.size(), 3);
++    QTRY_COMPARE(evaluateJavaScriptSync(m_page, "document.getElementById('testNode')?.textContent"),
++                 "hello from the worker"_L1);
++}
++
+ void tst_QWebEngineExtension::enableAfterStoragePathChange()
+ {
+     // Changing the storage path after construction rebuilds the profile's PrefService. The
+-- 
+2.54.0 (Apple Git-157)
+

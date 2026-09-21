@@ -1,0 +1,108 @@
+From 4dc9d4c251059f95b29fda39e76e56ccde4f28e3 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Ville=20Kivela=CC=88?= <vkivela@hotmail.com>
+Date: Mon, 21 Sep 2026 12:53:01 +0300
+Subject: [PATCH 11/11] extensions: let an extension document close its own
+ window
+
+A page may not close a window it did not open once its history is longer
+than one entry, and Blink counts a hash route as history. A password
+manager's popup routes by hash and closes itself when it is done, so the
+call was refused and the popup stayed up over the form it had just
+filled.
+
+Chrome exempts extension documents in
+extensions/browser/extension_webkit_preferences.cc: "Tabs aren't
+typically allowed to close windows. But extensions shouldn't be subject
+to that." That file is not among the extensions sources QtWebEngine
+builds, so the same rule is applied in OverrideWebPreferences, for
+documents served from an enabled extension that is not a hosted app, and
+no others.
+
+The test pushes three hash entries before asking, which is the state the
+refusal needed. With the preference left alone it fails on Blink's own
+"Scripts may close only the windows that were opened by them."
+---
+ src/core/content_browser_client_qt.cpp        | 21 +++++++++++++++
+ .../extensions/tst_qwebengineextension.cpp    | 27 +++++++++++++++++++
+ 2 files changed, 48 insertions(+)
+
+diff --git a/src/core/content_browser_client_qt.cpp b/src/core/content_browser_client_qt.cpp
+index ae77f889f8..ed29e37461 100644
+--- a/src/core/content_browser_client_qt.cpp
++++ b/src/core/content_browser_client_qt.cpp
+@@ -291,6 +291,27 @@ void ContentBrowserClientQt::OverrideWebPreferences(content::WebContents *webCon
+     if (guest_view::GuestViewBase::IsGuest(webContents))
+         return;
+ 
++    // A page is not allowed to close a window it did not open, and Blink counts
++    // a hash route as history, so an extension popup that routes by hash cannot
++    // close itself after it has done its work. Chrome exempts extension
++    // documents in extensions/browser/extension_webkit_preferences.cc, with
++    // "Tabs aren't typically allowed to close windows. But extensions shouldn't
++    // be subject to that." That file is not part of the extensions sources
++    // QtWebEngine builds, so the rule is applied here, for the same documents
++    // and no others.
++    const GURL &documentUrl = webContents->GetPrimaryMainFrame()->GetLastCommittedURL();
++    if (documentUrl.SchemeIs(extensions::kExtensionScheme)) {
++        extensions::ExtensionRegistry *registry =
++                extensions::ExtensionRegistry::Get(webContents->GetBrowserContext());
++        const extensions::Extension *extension =
++                registry ? registry->enabled_extensions().GetExtensionOrAppByURL(documentUrl)
++                         : nullptr;
++        // A hosted app is an ordinary web page wearing an extension's name, and
++        // Chrome leaves it under the ordinary rule.
++        if (extension && !extension->is_hosted_app())
++            webPrefs->allow_scripts_to_close_windows = true;
++    }
++
+     WebContentsViewQt *view = WebContentsViewQt::from(static_cast<content::WebContentsImpl *>(webContents)->GetView());
+     if (!view->client())
+         return;
+diff --git a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
+index 04cac13c4e..27a65d420c 100644
+--- a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
++++ b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
+@@ -53,6 +53,7 @@ private Q_SLOTS:
+     void aMessageSentWhileTheWorkerIsStartingIsDelivered();
+     void aWorkerThatListensLateCanReachThePageThatAlreadyAsked();
+     void loadingTheSamePathTwiceLeavesOneWorkingExtension();
++    void aPopupMayCloseItselfAfterRoutingByHash();
+     void enableAfterStoragePathChange();
+     void tabsWindowsAndScripting();
+     void nativeMessaging();
+@@ -600,6 +601,32 @@ void tst_QWebEngineExtension::loadingTheSamePathTwiceLeavesOneWorkingExtension()
+                  "hello from the worker"_L1);
+ }
+ 
++void tst_QWebEngineExtension::aPopupMayCloseItselfAfterRoutingByHash()
++{
++    // A password manager's popup closes itself when it is done: Bitwarden calls window.close()
++    // shortly after a fill. Blink lets a page close a window it did not open only while its
++    // history is one entry long, and a popup that routes by hash is past that within a click or
++    // two, so the call was refused and the popup stayed up over the filled form. Chrome exempts
++    // extension documents; so does the engine now.
++    QWebEngineExtensionInfo extension = loadExtensionSync(resourcesPath() + "action_popup_ext"_L1);
++    QVERIFY(extension.isLoaded());
++    m_manager->setExtensionEnabled(extension, true);
++
++    QWebEnginePage popup(m_profile);
++    QSignalSpy popupSpy(&popup, SIGNAL(loadFinished(bool)));
++    popup.load(extension.actionPopupUrl());
++    QTRY_COMPARE(popupSpy.size(), 1);
++
++    evaluateJavaScriptSync(&popup, "history.pushState({}, '', '#one');"
++                                   "history.pushState({}, '', '#two');"
++                                   "history.pushState({}, '', '#three')");
++    QTRY_COMPARE(evaluateJavaScriptSync(&popup, "history.length").toInt(), 4);
++
++    QSignalSpy closeSpy(&popup, SIGNAL(windowCloseRequested()));
++    evaluateJavaScriptSync(&popup, "window.close()");
++    QTRY_COMPARE(closeSpy.size(), 1);
++}
++
+ void tst_QWebEngineExtension::enableAfterStoragePathChange()
+ {
+     // Changing the storage path after construction rebuilds the profile's PrefService. The
+-- 
+2.54.0 (Apple Git-157)
+
