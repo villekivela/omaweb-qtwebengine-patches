@@ -54,12 +54,22 @@ fi
 # gate failed, or after a build was interrupted, should pick the tree up rather
 # than refuse it: the hours are in the tree, and `git am` on an applied series
 # fails in a way that reads like a conflict when nothing has conflicted.
-if git rev-parse -q --verify "v$version-tarball" > /dev/null 2>&1 \
-    && [ "$(git rev-list --count "v$version-tarball"..HEAD)" -gt 0 ]
-then
-    echo "SERIES ALREADY APPLIED: $(git rev-list --count "v$version-tarball"..HEAD) commits on the tarball"
-elif git am "$series"/*.patch; then
-    echo "SERIES APPLIED: $(ls "$series"/*.patch | wc -l | tr -d ' ') patches, no conflicts"
+applied=0
+if git rev-parse -q --verify "v$version-tarball" > /dev/null 2>&1; then
+    applied="$(git rev-list --count "v$version-tarball"..HEAD)"
+fi
+total="$(ls "$series"/*.patch | wc -l | tr -d ' ')"
+# A tree that carries the first N patches gets the rest, so a series that grew
+# since the tree was built is applied from where it stopped. Anything left
+# uncommitted in the tree is discarded first: it is a leftover of a build, not
+# work, and `git am` refuses a dirty tree.
+git checkout -q -- . && git clean -qfd
+if [ "$applied" -ge "$total" ]; then
+    echo "SERIES ALREADY APPLIED: $applied commits on the tarball"
+elif [ "$applied" -gt 0 ] && git am $(ls "$series"/*.patch | tail -n +"$((applied + 1))"); then
+    echo "SERIES EXTENDED: $applied already applied, $((total - applied)) more, no conflicts"
+elif [ "$applied" -eq 0 ] && git am "$series"/*.patch; then
+    echo "SERIES APPLIED: $total patches, no conflicts"
 else
     echo
     echo "CONFLICT. The patch that stopped is above. Resolve it, then:"
