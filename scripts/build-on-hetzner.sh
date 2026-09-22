@@ -19,6 +19,14 @@ keep="${3:-}"
 command -v hcloud > /dev/null 2>&1 || { echo "install hcloud first"; exit 1; }
 
 ssh_key="${OMAWEB_SSH_KEY:-omaweb-builder}"
+# The key by name where there is one, because a machine with more than one key
+# does not offer this one by default and every ssh below then fails.
+builder_key="${OMAWEB_BUILDER_KEY:-$HOME/.ssh/omaweb-builder}"
+if [ -f "$builder_key" ]; then
+    export GIT_SSH_COMMAND="ssh -i $builder_key"
+    ssh() { command ssh -i "$builder_key" "$@"; }
+    scp() { command scp -i "$builder_key" "$@"; }
+fi
 location="${HCLOUD_LOCATION:-hel1}"
 here="$(cd "$(dirname "$0")/.." && pwd)"
 out="$here/out"

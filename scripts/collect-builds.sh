@@ -42,7 +42,16 @@ if [ -z "$servers" ]; then
     exit 0
 fi
 
+# The builder key by name where there is one. A runner writes it to the default
+# identity, but a machine with more than one key does not, and ssh then fails
+# with "Permission denied" — which this used to read as a machine that is still
+# building. That mistake is expensive in one direction: a finished build is
+# never collected and its machine bills until the age limit.
+key="${OMAWEB_BUILDER_KEY:-$HOME/.ssh/omaweb-builder}"
 ssh_opts="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -o BatchMode=yes"
+if [ -f "$key" ]; then
+    ssh_opts="$ssh_opts -i $key"
+fi
 
 echo "$servers" | while read -r server; do
     [ -n "$server" ] || continue
@@ -62,12 +71,24 @@ echo "$servers" | while read -r server; do
 
     echo "== $server, ${age_hours}h old, $ip"
 
+    # Reachable and finished are different questions, and answering them
+    # together is how an unreachable machine gets reported as a busy one.
+    reachable=no
     finished=no
-    if [ -n "$ip" ] && ssh $ssh_opts "root@$ip" "test -f /root/build.status" 2>/dev/null; then
-        finished=yes
+    if [ -n "$ip" ] && ssh $ssh_opts "root@$ip" true 2>/dev/null; then
+        reachable=yes
+        if ssh $ssh_opts "root@$ip" "test -f /root/build.status" 2>/dev/null; then
+            finished=yes
+        fi
     fi
 
-    if [ "$finished" = no ] && [ "$age_hours" -lt "$max_hours" ]; then
+    if [ "$reachable" = no ]; then
+        echo "   cannot be reached, so nothing can be collected from it"
+        if [ "$age_hours" -lt "$max_hours" ]; then
+            echo "   under ${max_hours}h, so leaving it in case that is temporary"
+            continue
+        fi
+    elif [ "$finished" = no ] && [ "$age_hours" -lt "$max_hours" ]; then
         echo "   still building, leaving it"
         continue
     fi
