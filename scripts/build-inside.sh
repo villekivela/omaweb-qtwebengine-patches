@@ -70,7 +70,10 @@ tar caf "$tarball" .
 # signing key is not on a build machine (ADR 0049), and the workflow that
 # publishes holds it.
 pacman -S --noconfirm --needed pacman-contrib > /dev/null 2>&1 || true
-stage=/root/work/package
+# Not under /root: that directory is 0700, so the packaging user cannot
+# traverse into it however the stage directory itself is owned, and makepkg
+# dies with "Permission denied" after the engine has already been built.
+stage=/tmp/omaweb-package
 rm -rf "$stage"
 mkdir -p "$stage"
 cp /root/series/packaging/PKGBUILD /root/series/packaging/MODIFICATIONS.md \

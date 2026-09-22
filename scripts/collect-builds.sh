@@ -96,10 +96,16 @@ echo "$servers" | while read -r server; do
     if [ "$finished" = yes ]; then
         status="$(ssh $ssh_opts "root@$ip" "cat /root/build.status" 2>/dev/null || echo 1)"
         echo "   finished, exit $status"
-        if [ "$status" -eq 0 ]; then
+
+        # Whatever it left behind, whether it succeeded or not. A run can fail
+        # after the engine is built and the gate has passed: packaging is the
+        # last step and it has its own ways to die. Taking the artifacts only
+        # from a clean run threw away a good engine and hours of machine time,
+        # which is what this used to do.
+        if ssh $ssh_opts "root@$ip" "ls /root/out/* > /dev/null 2>&1"; then
             # The artifacts first, and only then the deletion, so a transfer
             # that fails leaves the machine for the next run rather than
-            # throwing away eight hours.
+            # discarding what it holds.
             if scp $ssh_opts "root@$ip:/root/out/*" "$out/" 2>/dev/null; then
                 echo "   collected into $out"
             else
@@ -107,7 +113,11 @@ echo "$servers" | while read -r server; do
                 continue
             fi
         else
-            # A failed build's log is the only thing worth keeping off it.
+            echo "   nothing in /root/out to collect"
+        fi
+
+        if [ "$status" -ne 0 ]; then
+            # What went wrong is worth keeping off a machine about to go.
             scp $ssh_opts "root@$ip:/root/build.log" \
                 "$out/$server-build.log" 2>/dev/null \
                 && echo "   kept the log as $out/$server-build.log"
