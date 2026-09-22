@@ -34,5 +34,7 @@ podman run --rm \
     "$image" sh /root/series/scripts/build-inside.sh "$version"
 
 cd /root/out
-sha256sum ./*.tar.zst > SHA256SUMS
+# The package as well as the tarball. The tarball is what a later manual
+# packaging run verifies against; the package is what travels to be signed.
+sha256sum ./*.tar.zst ./*.pkg.tar.* > SHA256SUMS
 cat SHA256SUMS

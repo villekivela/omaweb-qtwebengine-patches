@@ -52,4 +52,34 @@ fi
 
 DESTDIR=/root/work/staging cmake --install "$tree/build" > /dev/null
 cd /root/work/staging
-tar caf "/root/out/omaweb-qtwebengine-$version-$(uname -m).tar.zst" .
+tarball="/root/out/omaweb-qtwebengine-$version-$(uname -m).tar.zst"
+tar caf "$tarball" .
+
+# And the package, here rather than on somebody's laptop, because this container
+# is already Arch and already the right architecture. It is left unsigned: the
+# signing key is not on a build machine (ADR 0049), and the workflow that
+# publishes holds it.
+pacman -S --noconfirm --needed pacman-contrib > /dev/null 2>&1 || true
+stage=/root/work/package
+rm -rf "$stage"
+mkdir -p "$stage"
+cp /root/series/packaging/PKGBUILD /root/series/packaging/MODIFICATIONS.md \
+    /root/series/packaging/LGPL-3.0-only.txt \
+    /root/series/packaging/chromium-LICENSE.txt "$stage/"
+cp "$tarball" "$stage/"
+
+# makepkg refuses to run as root, and a container has nobody else until it is
+# told. `-d` because this copies files into a package rather than compiling
+# against anything, and the engine's dependencies are the running system's Qt.
+id packager > /dev/null 2>&1 || useradd -m packager
+chown -R packager "$stage"
+su packager -c "cd $stage && makepkg -f -d --noconfirm"
+
+package="$(find "$stage" -maxdepth 1 -name '*.pkg.tar.*' ! -name '*.sig' -print)"
+if [ -z "$package" ] || [ "$(printf '%s\n' "$package" | wc -l)" -ne 1 ]; then
+    echo "packaging produced no single package:"
+    printf '%s\n' "$package"
+    exit 3
+fi
+cp "$package" /root/out/
+echo "packaged $(basename "$package")"

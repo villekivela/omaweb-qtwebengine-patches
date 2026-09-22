@@ -6,7 +6,8 @@
 # Needs HCLOUD_TOKEN in the environment and an SSH key already uploaded to the
 # Hetzner project (OMAWEB_SSH_KEY names it, default "omaweb-builder").
 #
-# What comes back is an unsigned tarball of the install tree and its checksum.
+# What comes back is an unsigned tarball of the install tree, the unsigned
+# package made from it, and their checksums.
 # Packaging and signing happen where the key is, which is not here.
 set -eu
 
@@ -64,7 +65,10 @@ do
 done
 
 echo "sending the series"
-tar cf - -C "$here" patches scripts | ssh "root@$ip" "mkdir -p /root/series && tar xf - -C /root/series"
+# `packaging` as well as the series: the build packages what it built, on a
+# machine of the right architecture, so nothing has to be repackaged by hand.
+tar cf - -C "$here" patches scripts packaging \
+    | ssh "root@$ip" "mkdir -p /root/series && tar xf - -C /root/series"
 
 echo "building, which takes hours"
 ssh "root@$ip" "sh /root/series/scripts/remote-build.sh $version" 2>&1 | sed 's/^/  /'

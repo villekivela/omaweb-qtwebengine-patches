@@ -43,8 +43,8 @@ docker run --rm \
     "$image" sh /root/series/scripts/build-inside.sh "$version"
 
 cd "$out"
-sha256sum ./*.tar.zst > SHA256SUMS
+sha256sum ./*.tar.zst ./*.pkg.tar.* > SHA256SUMS
 cat SHA256SUMS
 echo
-echo "unsigned. Package and sign where the key is."
+echo "unsigned, tarball and package both. Signing happens where the key is."
 echo "the work space is kept: docker volume rm omaweb-engine-work"

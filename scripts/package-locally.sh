@@ -40,6 +40,20 @@ esac
 tarball="${2:-$out/omaweb-qtwebengine-$version-$arch.tar.zst}"
 [ -f "$tarball" ] || { echo "no tarball at $tarball"; exit 1; }
 
+# The PKGBUILD carries no hash for the tarball, because a hash of one build
+# refuses every later build of the same version. This is the check that
+# replaces it: SHA256SUMS is written beside the tarball by the build that made
+# it, so a tarball that travelled and arrived damaged stops here.
+sums="$(dirname "$tarball")/SHA256SUMS"
+if [ -f "$sums" ]; then
+    echo "==> Checking $(basename "$tarball") against SHA256SUMS"
+    ( cd "$(dirname "$tarball")" \
+        && grep -F "$(basename "$tarball")" SHA256SUMS | shasum -a 256 -c - ) \
+        || { echo "the tarball does not match SHA256SUMS"; exit 1; }
+else
+    echo "==> No SHA256SUMS beside the tarball, so nothing checks it"
+fi
+
 command -v docker > /dev/null 2>&1 || { echo "install docker first"; exit 1; }
 
 # Checked before the build rather than after it, so a keyring that cannot sign

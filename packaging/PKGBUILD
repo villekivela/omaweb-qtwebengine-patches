@@ -34,10 +34,14 @@ sha256sums=('e6e952e37a01f6e0330749aa8ce06d7c6fa75b8127d450dea588854d79d2c732'
 # claim and is wrong the first time anything cross-builds.
 source_x86_64=("omaweb-qtwebengine-${pkgver}-x86_64.tar.zst")
 source_aarch64=("omaweb-qtwebengine-${pkgver}-aarch64.tar.zst")
-sha256sums_aarch64=('729564b4a90384a6a17bc7b8a61e552eeb711d40e8184c4f3c96ab31973fd434')
-# No x86_64 engine has been built yet, so there is no hash to record. The first
-# x86_64 build replaces this with the line from its SHA256SUMS.
+# SKIP, and not because nobody got round to recording a hash. The tarball is
+# not a download: it is an artifact a builder produced minutes earlier, and any
+# rebuild of the same Qt version produces a different one, so a recorded hash
+# would refuse every build after the one it was taken from. What checks the
+# tarball is `SHA256SUMS`, written beside it by the build that made it and
+# verified by `package-locally.sh` where the two have been apart.
 sha256sums_x86_64=('SKIP')
+sha256sums_aarch64=('SKIP')
 
 # The tarball is a finished release install tree. Stripping it again would cost
 # minutes and change nothing, and a debug package split out of someone else's
