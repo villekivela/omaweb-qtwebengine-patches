@@ -149,12 +149,28 @@ returns an unsigned tarball of the install tree and a checksum, then deletes the
 server. Deleting is what stops the billing; a stopped server still bills for its
 disk.
 
-Package and sign on your own machine, with `packaging/PKGBUILD` and the tarball
-in the same directory:
+Package and sign on your own machine. `makepkg` needs Arch, and the signature
+must not be made anywhere the key is not, so the script splits the two: the
+package is built in the same container the engine was, and the detached
+signature is made on the host.
 
 ```sh
-cd packaging && makepkg --sign
+export OMAWEB_REPO_KEY=<the repository signing key's fingerprint>
+scripts/package-locally.sh 6.11.2
 ```
+
+It leaves `out/omaweb-qtwebengine-<version>-<arch>.pkg.tar.*` and its `.sig`.
+Publishing is the Omaweb repository's script, into a clone of its `gh-pages`
+branch:
+
+```sh
+scripts/publish_repo.sh --package <the package> --repo-dir <gh-pages clone> \
+    --key "$OMAWEB_REPO_KEY"
+```
+
+That repository serves the browser and the engine together, so a reader's
+`pacman -S omaweb` installs both and an engine update reaches them through an
+ordinary `pacman -Syu` without an Omaweb release.
 
 The engine installs into `/usr/lib/omaweb`, so the distribution's
 `qt6-webengine` is untouched and every other Qt application on the machine keeps
