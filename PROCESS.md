@@ -120,6 +120,34 @@ reader installs one:
 - State how long after a Qt release the rebuild may take. From then on that lag is the security lag
   for every reader.
 
+## Coming back to a tree you already built
+
+`build-locally.sh` keeps its work in the `omaweb-engine-work` volume, so the tree survives and a
+later question can be answered in seconds rather than hours. Three things about that are invisible
+until you hit them, and each costs an hour.
+
+**Mount the volume at `/root/work`.** CMake records absolute paths in `CMakeCache.txt`, so a tree
+built at `/root/work/...` and mounted anywhere else is refused with "does not match the source used
+to generate cache". The error names a missing `CMakeLists.txt`, which is not the problem.
+
+**Install the whole package list from `build-inside.sh`.** The tree links against libraries the build
+pulled in, so a container with only the obvious ones fails at run time on whichever it is missing:
+`libsnappy`, then `libxslt`, one at a time. Take the list from that script rather than typing one.
+
+**Rebuild a single test with the tree's own script**, which is what `verify.sh` does when the binary
+is missing:
+
+```sh
+<tree>/build.sh tst_qwebengineextension
+```
+
+`cmake --build <tree>/build --target tst_qwebengineextension` looks equivalent and is not: it pulls
+`QtWebEngineCore` into the graph and starts rebuilding Chromium. The tree's script rebuilt one test
+in eight steps.
+
+With those three right, `verify.sh <tree>` runs the gate in about seven seconds. That is what makes
+re-qualifying an engine cheap, which is what the two-day window in ADR 0049 assumes.
+
 ## Setting the builders up, once
 
 ```sh
