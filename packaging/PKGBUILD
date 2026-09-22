@@ -7,7 +7,8 @@
 #
 # This packages a tarball a builder already produced, because the build takes
 # hours on a machine rented for it and signing happens where the key is. Run
-# scripts/build-on-hetzner.sh to produce the tarball.
+# scripts/build-on-hetzner.sh, or scripts/build-locally.sh, to produce the
+# tarball, then run makepkg from a directory holding both it and this file.
 
 pkgname=omaweb-qtwebengine
 pkgver=6.11.2
@@ -20,13 +21,44 @@ url="https://github.com/villekivela/omaweb-qtwebengine-patches"
 # relinked. Chromium's own code is BSD-3-Clause.
 license=('LGPL-3.0-only' 'BSD-3-Clause')
 depends=('qt6-base' 'qt6-declarative' 'qt6-positioning' 'qt6-webchannel' 'nss' 'libxkbcommon')
-source=("omaweb-qtwebengine-${pkgver}-$(uname -m).tar.zst")
-sha256sums=('SKIP')
+
+# The notices travel with this file rather than with the tarball, so correcting
+# one does not cost a rebuild.
+source=('MODIFICATIONS.md' 'LGPL-3.0-only.txt' 'chromium-LICENSE.txt')
+sha256sums=('e6e952e37a01f6e0330749aa8ce06d7c6fa75b8127d450dea588854d79d2c732'
+            'da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768'
+            '368cca1106be99d39ecd32a38d8305585d802a475effb66380b91ffc9bcf709b')
+
+# Per architecture, because the tarball names the architecture it was built
+# for. `uname -m` would name the machine running makepkg, which is not the same
+# claim and is wrong the first time anything cross-builds.
+source_x86_64=("omaweb-qtwebengine-${pkgver}-x86_64.tar.zst")
+source_aarch64=("omaweb-qtwebengine-${pkgver}-aarch64.tar.zst")
+sha256sums_aarch64=('729564b4a90384a6a17bc7b8a61e552eeb711d40e8184c4f3c96ab31973fd434')
+# No x86_64 engine has been built yet, so there is no hash to record. The first
+# x86_64 build replaces this with the line from its SHA256SUMS.
+sha256sums_x86_64=('SKIP')
+
+# The tarball is a finished release install tree. Stripping it again would cost
+# minutes and change nothing, and a debug package split out of someone else's
+# build output is not a debug package.
+options=('!strip')
 
 package() {
     # The tarball is already an install tree rooted at /usr/lib/omaweb.
     cp -a "${srcdir}/usr" "${pkgdir}/usr"
 
-    install -Dm644 "${srcdir}/usr/lib/omaweb/LICENSES/LGPL-3.0-only.txt" \
-        "${pkgdir}/usr/share/licenses/${pkgname}/LGPL-3.0-only.txt" 2> /dev/null || true
+    # Object files from compiling the test mock delegates' resources. Qt's
+    # install step copies them beside the plugin and nothing loads them.
+    rm -rf "${pkgdir}/usr/lib/omaweb/lib/qt6/qml/QtWebEngine/TestMockDelegates/objects-Release"
+
+    # A reader who has this binary is entitled to know it is a modified
+    # QtWebEngine and to find the changes. No `|| true`: a package that
+    # silently ships without its notices is the failure this guards against.
+    install -Dm644 "${srcdir}/MODIFICATIONS.md" \
+        "${pkgdir}/usr/share/licenses/${pkgname}/MODIFICATIONS.md"
+    install -Dm644 "${srcdir}/LGPL-3.0-only.txt" \
+        "${pkgdir}/usr/share/licenses/${pkgname}/LGPL-3.0-only.txt"
+    install -Dm644 "${srcdir}/chromium-LICENSE.txt" \
+        "${pkgdir}/usr/share/licenses/${pkgname}/chromium-LICENSE.txt"
 }
