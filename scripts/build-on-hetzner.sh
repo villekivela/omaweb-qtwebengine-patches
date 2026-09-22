@@ -27,12 +27,15 @@ case "$arch" in
     # Dedicated cores. A shared-vCPU instance throttles under hours of full
     # load, and Hetzner's terms ask that sustained full load not run on one.
     #
-    # ccx33 rather than the ccx43 this used to name: a new project's dedicated
-    # core limit is under sixteen, and Hetzner's support form has no way to ask
-    # for it to be raised. Eight cores and 32 GB build the engine in about eight
-    # hours for roughly two euros, and the memory per core is better than the
-    # ccx43's, which is the constraint that matters here because linking is what
-    # runs out of memory rather than compiling.
+    # ccx33, eight dedicated cores and 32 GB, which builds the engine in about
+    # eight hours for roughly two euros. It is here because a new project's
+    # dedicated core limit was under sixteen and a ccx43 was refused.
+    #
+    # Hetzner is raising that limit. When sixteen cores are available a ccx43
+    # costs about the same for the whole build and takes half the time, which
+    # also brings it under the six hours a CI job gets, so the build no longer
+    # has to outlive its driver. Set HCLOUD_TYPE_X86=ccx43 to try it, and change
+    # this default once one has actually built.
     x86) type="${HCLOUD_TYPE_X86:-ccx33}" ;;
     # Ampere. 32 GB is tight for parallel links, so the remote script caps them.
     arm) type="${HCLOUD_TYPE_ARM:-cax41}" ;;
