@@ -95,7 +95,7 @@ release there and run the workflow:
     gh workflow run "Publish the engine" --repo villekivela/omaweb \\
         -f tag=engine-$version
 
-A release that already exists takes `gh release upload` instead, which is how
+A release that already exists takes "gh release upload" instead, which is how
 the second architecture joins the first.
 NEXT
     exit 0
