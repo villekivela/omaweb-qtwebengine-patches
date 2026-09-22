@@ -25,8 +25,15 @@ out="$here/out"
 
 case "$arch" in
     # Dedicated cores. A shared-vCPU instance throttles under hours of full
-    # load, which is exactly what this is.
-    x86) type="${HCLOUD_TYPE_X86:-ccx43}" ;;
+    # load, and Hetzner's terms ask that sustained full load not run on one.
+    #
+    # ccx33 rather than the ccx43 this used to name: a new project's dedicated
+    # core limit is under sixteen, and Hetzner's support form has no way to ask
+    # for it to be raised. Eight cores and 32 GB build the engine in about eight
+    # hours for roughly two euros, and the memory per core is better than the
+    # ccx43's, which is the constraint that matters here because linking is what
+    # runs out of memory rather than compiling.
+    x86) type="${HCLOUD_TYPE_X86:-ccx33}" ;;
     # Ampere. 32 GB is tight for parallel links, so the remote script caps them.
     arm) type="${HCLOUD_TYPE_ARM:-cax41}" ;;
     *)   echo "arch must be x86 or arm"; exit 1 ;;
@@ -70,8 +77,35 @@ echo "sending the series"
 tar cf - -C "$here" patches scripts packaging \
     | ssh "root@$ip" "mkdir -p /root/series && tar xf - -C /root/series"
 
+# Detached, and polled rather than watched. The build outlives any connection
+# to it: a laptop that sleeps, a network that drops, a CI runner that hits
+# GitHub's six-hour ceiling. Run in the foreground over ssh, any of those kills
+# the build as well as the watching, and leaves a rented machine billing for
+# nothing.
 echo "building, which takes hours"
-ssh "root@$ip" "sh /root/series/scripts/remote-build.sh $version" 2>&1 | sed 's/^/  /'
+ssh "root@$ip" \
+    "setsid nohup sh /root/series/scripts/remote-build.sh $version \
+        > /root/build.log 2>&1 < /dev/null & echo started"
+
+# The last line of the log every minute, so a run can be followed, and the
+# status file is what says it is over.
+while true; do
+    if ssh -o ConnectTimeout=10 "root@$ip" "test -f /root/build.status" 2>/dev/null; then
+        break
+    fi
+    ssh -o ConnectTimeout=10 "root@$ip" "tail -n 1 /root/build.log" 2>/dev/null \
+        | sed 's/^/  /'
+    sleep 60
+done
+
+status="$(ssh "root@$ip" "cat /root/build.status" 2>/dev/null || echo 1)"
+ssh "root@$ip" "tail -n 20 /root/build.log" 2>/dev/null | sed 's/^/  /'
+if [ "$status" -ne 0 ]; then
+    echo "the build failed, exit $status"
+    echo "the machine is kept so the log can be read: ssh root@$ip"
+    keep=--keep
+    exit "$status"
+fi
 
 echo "fetching the artifact"
 scp "root@$ip:/root/out/*" "$out/"

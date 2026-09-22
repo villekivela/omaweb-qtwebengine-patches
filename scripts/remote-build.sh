@@ -10,6 +10,15 @@ set -eu
 
 version="${1:?usage: remote-build.sh <qt-version>}"
 
+# Written on the way out whatever happened, because the machine that started
+# this build may not be the one that comes back for it: an hours-long build
+# outlives ssh connections, laptops and a CI runner's six-hour ceiling. A driver
+# polls for this file to tell a finished build from a running one.
+finish() {
+    echo "$?" > /root/build.status
+}
+trap finish EXIT
+
 # Arch publishes no official ARM image, so aarch64 uses Arch Linux ARM through a
 # community image. That is the same source ADR 0044 already builds on.
 case "$(uname -m)" in

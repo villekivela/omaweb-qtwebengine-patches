@@ -23,7 +23,12 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 600
+    # GitHub stops a hosted runner's job at six hours whatever this says, so it
+    # says six. An engine build on eight dedicated cores takes longer than that,
+    # which is why `build-on-hetzner.sh` detaches the build on the rented
+    # machine and polls: the driver dying is then a lost connection rather than
+    # a lost build, and the run can be collected from a machine with no ceiling.
+    timeout-minutes: 360
     strategy:
       fail-fast: false
       matrix:
@@ -56,6 +61,24 @@ jobs:
           HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
           OMAWEB_SSH_KEY: ${{ vars.BUILDER_SSH_KEY_NAME || 'omaweb-builder' }}
         run: scripts/build-on-hetzner.sh "${{ inputs.version }}" "${{ matrix.arch }}"
+
+      # Whatever happened, including this job being stopped at the ceiling: a
+      # rented machine nobody deletes goes on billing. The script deletes its own
+      # on a clean exit, so this is the case it cannot cover, and it names the
+      # servers rather than deleting anything that happens to be in the project.
+      - name: Leave no machine running
+        if: always()
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+        run: |
+          hcloud server list --output noheader --output columns=name \
+            | grep "^omaweb-engine-" || exit 0
+          hcloud server list --output noheader --output columns=name \
+            | grep "^omaweb-engine-" \
+            | while read -r name; do
+                echo "deleting $name"
+                hcloud server delete "$name" || true
+              done
 
       - name: Keep the artifact
         uses: actions/upload-artifact@v4
