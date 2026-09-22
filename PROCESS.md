@@ -161,10 +161,16 @@ signing key is in the Omaweb repository, so signing and publishing happen there:
 
 ```sh
 gh release create engine-6.11.2 --repo villekivela/omaweb \
-    --title "Engine 6.11.2" out/*.pkg.tar.zst
+    --title "Engine 6.11.2" out/*.pkg.tar.zst out/SHA256SUMS out/verify.txt
 gh workflow run "Publish the engine" --repo villekivela/omaweb \
     -f tag=engine-6.11.2
 ```
+
+`verify.txt` is what `verify.sh` printed on the machine that built the package,
+and it goes up with the release so a reader can see what the gate said for the
+build they are installing rather than taking the row in `README.md` on trust. It
+is a release asset and not a package file: nothing under `/usr/lib/omaweb`
+carries it and `pacman` never sees it.
 
 The split follows what each repository owns. The PKGBUILD and the notices are
 here, so packaging is here. The key and the pacman repository are there, so
