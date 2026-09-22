@@ -56,8 +56,15 @@ mkdir -p "$out"
 # build finished after the driver went away or never finished at all. Nothing
 # depends on this process staying alive.
 collected=""
+created=""
 
 destroy() {
+    # Nothing was rented, so there is nothing to say about it. A create that
+    # failed used to print advice about deleting a machine that does not exist,
+    # which reads as a leak when there is none.
+    if [ -z "$created" ]; then
+        return
+    fi
     if [ "$keep" = "--keep" ]; then
         echo "keeping $server, delete it yourself: hcloud server delete $server"
         return
@@ -83,6 +90,7 @@ hcloud server create \
     --ssh-key "$ssh_key" \
     > /dev/null
 
+created=yes
 ip="$(hcloud server ip "$server")"
 echo "waiting for ssh on $ip"
 until ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 \
