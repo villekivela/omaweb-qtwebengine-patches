@@ -33,7 +33,17 @@ git config --global user.name "Engine build"
 git config --global --add safe.directory '*'
 
 cd /root/work
-OMAWEB_ENGINE_PREFIX=/usr/lib/omaweb sh /root/series/scripts/refresh.sh "$version" /root/work
+# Kept, because what the series did is half of what maintaining it costs and
+# `release-row.sh` reads it out of here rather than anyone remembering. Through
+# `tee` so a run can still be watched, and the status comes back out of a file
+# because a pipeline's status is the last command's and `/bin/sh` has no
+# pipefail.
+( OMAWEB_ENGINE_PREFIX=/usr/lib/omaweb sh /root/series/scripts/refresh.sh \
+    "$version" /root/work; echo "$?" > /root/out/apply.status ) \
+    | tee /root/out/apply.txt
+applied="$(cat /root/out/apply.status)"
+rm -f /root/out/apply.status
+[ "$applied" -eq 0 ] || exit "$applied"
 tree="/root/work/qtwebengine-everywhere-src-$version"
 
 # Comfortable for compiling and not for linking at this much memory per core,
@@ -83,3 +93,17 @@ if [ -z "$package" ] || [ "$(printf '%s\n' "$package" | wc -l)" -ne 1 ]; then
 fi
 cp "$package" /root/out/
 echo "packaged $(basename "$package")"
+
+# What was built, in the two numbers Omaweb's security baseline records. Read
+# out of the tree rather than restated, because a baseline that disagrees with
+# the engine it names marks every reader's build an unsupported preview.
+#
+# The third field the baseline carries, the Chromium release whose security
+# fixes this engine includes, is not in the tree: Qt says it in prose in the
+# release notes. So it is not guessed here, and whoever reads those notes fills
+# it in.
+chromium="$(awk -F= '/^MAJOR=/{a=$2} /^MINOR=/{b=$2} /^BUILD=/{c=$2} /^PATCH=/{d=$2}
+    END {print a"."b"."c"."d}' "$tree/src/3rdparty/chromium/chrome/VERSION")"
+printf '{\n  "qtwebengine": "%s",\n  "chromium": "%s"\n}\n' "$version" "$chromium" \
+    > /root/out/engine.json
+cat /root/out/engine.json
