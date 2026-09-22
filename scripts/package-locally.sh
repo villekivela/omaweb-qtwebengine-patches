@@ -1,17 +1,19 @@
 #!/bin/sh
-# Turn an engine tarball into a signed pacman package, on the machine you are
-# sitting at.
+# Turn an engine tarball into a pacman package, on the machine you are sitting
+# at.
 #
 # Usage: scripts/package-locally.sh <qt-version> [tarball]
 #
 # The build hands back an unsigned tarball, from a rented machine or from
 # scripts/build-locally.sh. This is the other half: makepkg in the same
-# container the engine was built in, then a detached signature made here, where
-# the key is. The signature is never made in the container, so the key never
-# leaves this machine (ADR 0049).
+# container the engine was built in. The PKGBUILD and the notices are here, so
+# this is the only place that knows how to package the engine.
 #
-# What comes out is out/<name>.pkg.tar.* and its .sig, which is what
-# scripts/publish_repo.sh in the Omaweb repository takes.
+# Signing is not here. Set OMAWEB_REPO_KEY and this makes the detached
+# signature too, on the host rather than in the container, so the key never
+# enters one. Leave it unset and what comes out is an unsigned package for the
+# `Publish the engine` workflow in the Omaweb repository to sign, which is
+# where the signing key already is.
 set -eu
 
 version="${1:?usage: package-locally.sh <qt-version> [tarball]}"
@@ -39,11 +41,15 @@ tarball="${2:-$out/omaweb-qtwebengine-$version-$arch.tar.zst}"
 [ -f "$tarball" ] || { echo "no tarball at $tarball"; exit 1; }
 
 command -v docker > /dev/null 2>&1 || { echo "install docker first"; exit 1; }
-command -v gpg > /dev/null 2>&1 || { echo "install gnupg first"; exit 1; }
 
-: "${OMAWEB_REPO_KEY:?export OMAWEB_REPO_KEY with the signing key fingerprint}"
-gpg --list-secret-keys "$OMAWEB_REPO_KEY" > /dev/null \
-    || { echo "no secret key for $OMAWEB_REPO_KEY in this keyring"; exit 1; }
+# Checked before the build rather than after it, so a keyring that cannot sign
+# is not discovered at the end of a package.
+key="${OMAWEB_REPO_KEY:-}"
+if [ -n "$key" ]; then
+    command -v gpg > /dev/null 2>&1 || { echo "install gnupg first"; exit 1; }
+    gpg --list-secret-keys "$key" > /dev/null \
+        || { echo "no secret key for $key in this keyring"; exit 1; }
+fi
 
 # A directory holding only what makepkg reads, so the container sees the
 # tarball, the PKGBUILD and the notices and nothing else of this repository.
@@ -75,8 +81,28 @@ name="$(basename "$package")"
 mkdir -p "$out"
 cp -f "$package" "$out/$name"
 
+if [ -z "$key" ]; then
+    cat <<NEXT
+
+Built, unsigned: $out/$name
+
+Signing happens in the Omaweb repository, which holds the key. Attach this to a
+release there and run the workflow:
+
+    gh release create engine-$version --repo villekivela/omaweb \\
+        --title "Engine $version" --notes "QtWebEngine $version with the series" \\
+        $out/$name
+    gh workflow run "Publish the engine" --repo villekivela/omaweb \\
+        -f tag=engine-$version
+
+A release that already exists takes `gh release upload` instead, which is how
+the second architecture joins the first.
+NEXT
+    exit 0
+fi
+
 echo "==> Signing $name on this machine"
-gpg --detach-sign --no-armor --yes --local-user "$OMAWEB_REPO_KEY" \
+gpg --detach-sign --no-armor --yes --local-user "$key" \
     --output "$out/$name.sig" "$out/$name"
 gpg --verify "$out/$name.sig" "$out/$name"
 
@@ -88,5 +114,5 @@ Publish it from a checkout of the Omaweb repository, into a clone of its
 gh-pages branch:
 
     scripts/publish_repo.sh --package $out/$name \\
-        --repo-dir <gh-pages clone> --key $OMAWEB_REPO_KEY
+        --repo-dir <gh-pages clone> --key $key
 NEXT

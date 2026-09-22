@@ -149,28 +149,36 @@ returns an unsigned tarball of the install tree and a checksum, then deletes the
 server. Deleting is what stops the billing; a stopped server still bills for its
 disk.
 
-Package and sign on your own machine. `makepkg` needs Arch, and the signature
-must not be made anywhere the key is not, so the script splits the two: the
-package is built in the same container the engine was, and the detached
-signature is made on the host.
+Package here, publish there. `makepkg` needs Arch, so the package is built in
+the same container the engine was:
 
 ```sh
-export OMAWEB_REPO_KEY=<the repository signing key's fingerprint>
 scripts/package-locally.sh 6.11.2
 ```
 
-It leaves `out/omaweb-qtwebengine-<version>-<arch>.pkg.tar.*` and its `.sig`.
-Publishing is the Omaweb repository's script, into a clone of its `gh-pages`
-branch:
+That leaves `out/omaweb-qtwebengine-<version>-<arch>.pkg.tar.*`, unsigned. The
+signing key is in the Omaweb repository, so signing and publishing happen there:
 
 ```sh
-scripts/publish_repo.sh --package <the package> --repo-dir <gh-pages clone> \
-    --key "$OMAWEB_REPO_KEY"
+gh release create engine-6.11.2 --repo villekivela/omaweb \
+    --title "Engine 6.11.2" out/*.pkg.tar.zst
+gh workflow run "Publish the engine" --repo villekivela/omaweb \
+    -f tag=engine-6.11.2
 ```
 
-That repository serves the browser and the engine together, so a reader's
-`pacman -S omaweb` installs both and an engine update reaches them through an
-ordinary `pacman -Syu` without an Omaweb release.
+The split follows what each repository owns. The PKGBUILD and the notices are
+here, so packaging is here. The key and the pacman repository are there, so
+signing is there. One file crosses, and the workflow refuses anything that is
+not this engine built for the architecture its name claims.
+
+Where a key that can sign is on the machine, `OMAWEB_REPO_KEY` names it and
+`package-locally.sh` makes the detached signature on the host as well, never in
+the container. Then `publish_repo.sh` in the Omaweb repository takes the signed
+package directly and the workflow is not needed.
+
+Either way that repository serves the browser and the engine together, so a
+reader's `pacman -S omaweb` installs both and an engine update reaches them
+through an ordinary `pacman -Syu` without an Omaweb release.
 
 The engine installs into `/usr/lib/omaweb`, so the distribution's
 `qt6-webengine` is untouched and every other Qt application on the machine keeps
