@@ -20,19 +20,32 @@ version="${1:?usage: package-locally.sh <qt-version> [tarball]}"
 here="$(cd "$(dirname "$0")/.." && pwd)"
 out="$here/out"
 
-case "$(uname -m)" in
-    x86_64|amd64)
-        arch=x86_64
+# The architecture of the package, which is the architecture of the tarball
+# rather than of this machine. A build comes back from a machine rented for it,
+# so the two are routinely different: an x86_64 engine is packaged on whatever
+# is to hand. Set OMAWEB_PACKAGE_ARCH to say which, and the container runs that
+# architecture, emulated if it has to be. makepkg here copies files into a
+# package rather than compiling, so emulation costs minutes and not hours.
+arch="${OMAWEB_PACKAGE_ARCH:-}"
+if [ -z "$arch" ]; then
+    case "$(uname -m)" in
+        x86_64|amd64)  arch=x86_64 ;;
+        aarch64|arm64) arch=aarch64 ;;
+        *)             echo "unsupported architecture"; exit 1 ;;
+    esac
+fi
+
+case "$arch" in
+    x86_64)
         platform=linux/amd64
         image="docker.io/library/archlinux:base-devel"
         ;;
-    aarch64|arm64)
-        arch=aarch64
+    aarch64)
         platform=linux/arm64
         image="docker.io/lopsided/archlinux:devel"
         ;;
     *)
-        echo "unsupported architecture"
+        echo "OMAWEB_PACKAGE_ARCH must be x86_64 or aarch64, not $arch"
         exit 1
         ;;
 esac
@@ -77,7 +90,24 @@ cp "$tarball" "$stage/"
 # on, and this container has no reason to fetch them to copy files.
 cat > "$stage/inside.sh" <<'INSIDE'
 set -e
-pacman -Syu --noconfirm --needed --overwrite "*" base-devel > /dev/null 2>&1
+
+# The image is named for base-devel and already carries makepkg, so this is an
+# update rather than an install and a failure is not fatal. It is allowed to
+# fail loudly: sending it to /dev/null turned pacman refusing to run into a
+# script that stopped with no output at all.
+#
+# `--disable-sandbox` because pacman 7 restricts its download helper with
+# seccomp, which it cannot do inside an emulated container: "error restricting
+# syscalls via seccomp: 22". An x86_64 package built on an Arm machine is
+# exactly that case.
+pacman -Syu --noconfirm --needed --disable-sandbox --overwrite "*" base-devel || \
+    echo "the package database could not be updated, carrying on with the image as it is"
+
+command -v makepkg > /dev/null 2>&1 || {
+    echo "no makepkg in this image, so nothing can be packaged"
+    exit 1
+}
+
 id builder > /dev/null 2>&1 || useradd -m builder
 chown -R builder /pkg
 su builder -c "cd /pkg && makepkg -f -d --noconfirm"
