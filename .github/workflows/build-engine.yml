@@ -62,23 +62,12 @@ jobs:
           OMAWEB_SSH_KEY: ${{ vars.BUILDER_SSH_KEY_NAME || 'omaweb-builder' }}
         run: scripts/build-on-hetzner.sh "${{ inputs.version }}" "${{ matrix.arch }}"
 
-      # Whatever happened, including this job being stopped at the ceiling: a
-      # rented machine nobody deletes goes on billing. The script deletes its own
-      # on a clean exit, so this is the case it cannot cover, and it names the
-      # servers rather than deleting anything that happens to be in the project.
-      - name: Leave no machine running
-        if: always()
-        env:
-          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
-        run: |
-          hcloud server list --output noheader --output columns=name \
-            | grep "^omaweb-engine-" || exit 0
-          hcloud server list --output noheader --output columns=name \
-            | grep "^omaweb-engine-" \
-            | while read -r name; do
-                echo "deleting $name"
-                hcloud server delete "$name" || true
-              done
+      # No cleanup step here on purpose. This job being stopped at the ceiling
+      # is the ordinary case for an eight-hour build, and the machine is still
+      # building when it happens. Deleting it then would throw the build away.
+      # `collect-builds.yml` runs every twenty minutes, takes the artifacts off
+      # a machine whose build has finished, and deletes any machine that has
+      # been up too long to still be building.
 
       - name: Keep the artifact
         uses: actions/upload-artifact@v4

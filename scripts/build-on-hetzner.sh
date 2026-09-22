@@ -42,9 +42,26 @@ esac
 server="omaweb-engine-$(echo "$version" | tr . -)-$arch-$$"
 mkdir -p "$out"
 
+# Deleted when the build is finished with, and not merely when this script is.
+# The two used to be the same thing, and that made losing the driver expensive
+# in both directions: a trap that fired on any exit destroyed a machine still
+# building, and a `--keep` that avoided it left the machine billing until
+# somebody remembered.
+#
+# So this deletes a machine it has collected, and leaves one it has not.
+# `collect-builds.sh` runs on a schedule and deletes the rest, whether the
+# build finished after the driver went away or never finished at all. Nothing
+# depends on this process staying alive.
+collected=""
+
 destroy() {
     if [ "$keep" = "--keep" ]; then
         echo "keeping $server, delete it yourself: hcloud server delete $server"
+        return
+    fi
+    if [ -z "$collected" ]; then
+        echo "leaving $server, because this build has not been collected"
+        echo "the scheduled collector will take it, or: hcloud server delete $server"
         return
     fi
     echo "destroying $server"
@@ -109,6 +126,8 @@ fi
 
 echo "fetching the artifact"
 scp "root@$ip:/root/out/*" "$out/"
+# Down safely, so the machine has nothing left on it that matters.
+collected=yes
 
 destroy
 trap - EXIT INT TERM

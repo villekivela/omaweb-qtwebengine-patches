@@ -1,0 +1,69 @@
+name: Collect engine builds
+
+# An engine build takes about eight hours, which outlives an ssh session, a
+# laptop and this runner's six-hour ceiling. So the build detaches on the
+# rented machine and whoever started it may never come back for it.
+#
+# This is what comes back. Every twenty minutes it takes the artifacts off any
+# machine whose build has finished and deletes the machine, and after fourteen
+# hours it deletes one whose build has not finished, because by then it is not
+# going to. Destroying a rented machine is then something that happens rather
+# than something somebody remembers.
+on:
+  schedule:
+    - cron: "*/20 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One at a time. Two runs collecting the same machine would race on the
+# transfer and on the deletion.
+concurrency:
+  group: collect-engine-builds
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install hcloud
+        run: |
+          curl -fsSL https://github.com/hetznercloud/cli/releases/latest/download/hcloud-linux-amd64.tar.gz \
+            | tar xz -C /usr/local/bin hcloud
+          hcloud version
+
+      - name: Add the builder key
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.BUILDER_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+
+      - name: Collect and destroy
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+        run: scripts/collect-builds.sh
+
+      # Only when something was collected. A run that found no finished build
+      # has nothing to attach, and an empty artifact every twenty minutes is
+      # noise.
+      - name: Keep what came back
+        id: kept
+        run: |
+          if [ -n "$(find out -maxdepth 1 -type f 2>/dev/null)" ]; then
+            echo "any=true" >> "$GITHUB_OUTPUT"
+            find out -maxdepth 1 -type f -printf '%f  %s bytes\n' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "any=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: steps.kept.outputs.any == 'true'
+        with:
+          name: engine-collected-${{ github.run_id }}
+          path: out/*
+          if-no-files-found: error
+          retention-days: 14
