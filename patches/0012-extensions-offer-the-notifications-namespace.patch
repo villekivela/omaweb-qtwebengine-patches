@@ -1,7 +1,7 @@
 From 69628c3257fd72abc3060e534f8001f0264acaaa Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivela=CC=88?= <vkivela@hotmail.com>
 Date: Mon, 21 Sep 2026 13:39:54 +0300
-Subject: [PATCH 12/14] extensions: offer the notifications namespace
+Subject: [PATCH 12/15] extensions: offer the notifications namespace
 
 1Password registers notifications.onClicked and onButtonClicked at the
 top level of its worker. The namespace was absent, so the worker threw

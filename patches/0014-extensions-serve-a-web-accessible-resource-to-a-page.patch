@@ -1,7 +1,7 @@
 From 22e47eb5923a2ba7e11d62085a7fca2221b02b18 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivela=CC=88?= <vkivela@hotmail.com>
 Date: Mon, 21 Sep 2026 18:34:17 +0300
-Subject: [PATCH 14/14] extensions: serve a web accessible resource to a page
+Subject: [PATCH 14/15] extensions: serve a web accessible resource to a page
 
 A page could not load a resource an extension declared web accessible.
 The request never reached the browser as itself: the renderer rewrote
