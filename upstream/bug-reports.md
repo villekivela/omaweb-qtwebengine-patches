@@ -22,6 +22,14 @@ All five are filed. Four are on Gerrit; the fifth waits on an answer about where
 
 Each change carries `Fixes: QTBUG-…` and `Pick-to: 6.11 6.10`.
 
+Patch 0015 answers a report someone else had already filed, so it went there as a comment rather
+than a sixth report. [QTBUG-149450](https://qt-project.atlassian.net/browse/QTBUG-149450) measures
+the same Speedometer 3.1 gap on Windows, and the comment names qtwebengine-chromium `baf701b9fb74`
+as the cause, with the macOS numbers. Its fix goes to `qtwebengine-chromium`, not `qtwebengine`.
+The report is on Windows, where the removed line was an MSVC workaround, so what MSVC accepts has
+to be settled before a change is proposed. The Linux numbers from
+[omaweb#355](https://github.com/villekivela/omaweb/issues/355) go on the report once measured.
+
 Qt builds nothing until a change has a +2 and someone stages it. The Sanity Bot runs on upload and
 checks style only; it caught a missing trailing newline in a fixture. So the first real build of
 these happens after a reviewer has already read them, which is the argument for the changes being

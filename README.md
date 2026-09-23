@@ -93,8 +93,9 @@ imports its real bundle. _A bug fix with a test. Submit as is._
 clang left the lookup to run on every call: a string search through 275 categories, with tracing
 off, behind every `TRACE_EVENT`. Blink puts one on each canvas 2D call, and Speedometer 3.1 in a
 bare `WebEngineView` went from 25.5 to 33.9. The header is Chromium 140's, unchanged. See
-[omaweb#355](https://github.com/villekivela/omaweb/issues/355). _A bug fix. Submit as is, once GCC
-is known to take it._
+[omaweb#355](https://github.com/villekivela/omaweb/issues/355). _A bug fix, for
+[QTBUG-149450](https://qt-project.atlassian.net/browse/QTBUG-149450). The Windows build needs a
+form MSVC accepts._
 
 ## The open question
 
