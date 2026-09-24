@@ -22,6 +22,23 @@ All five are filed. Four are on Gerrit; the fifth waits on an answer about where
 
 Each change carries `Fixes: QTBUG-…` and `Pick-to: 6.11 6.10`.
 
+Patch 0015 answers a report someone else had already filed, so it went there as a comment rather
+than a sixth report. [QTBUG-149450](https://qt-project.atlassian.net/browse/QTBUG-149450) measures
+the same Speedometer 3.1 gap on Windows, and the comment names qtwebengine-chromium `baf701b9fb74`
+as the cause, with the macOS numbers. Its fix goes to `qtwebengine-chromium`, not `qtwebengine`.
+The report is on Windows, where the removed line was an MSVC workaround, so what MSVC accepts has
+to be settled before a change is proposed.
+
+GCC folds the lookup without the patch, which the disassembly of this repository's own package
+shows, so the engine it ships gains nothing from 0015. A second comment on the report said so, with
+a Speedometer before and after from the Omarchy VM. That before and after ran on Arch's engine, not
+this one, because the released Omaweb did not load `/usr/lib/omaweb` yet, so it measured nothing
+about 0015. A third comment corrects it. With the host idle, this repository's engine scores 22.7,
+Arch's 22.5, and Chromium 153 24.5 on the same machine. The details are on
+[omaweb#355](https://github.com/villekivela/omaweb/issues/355) and
+[omaweb#356](https://github.com/villekivela/omaweb/issues/356). The patch stays, because it is the
+code Chromium ships and it keeps a clang build of the engine off the slow path.
+
 Qt builds nothing until a change has a +2 and someone stages it. The Sanity Bot runs on upload and
 checks style only; it caught a missing trailing newline in a fixture. So the first real build of
 these happens after a reviewer has already read them, which is the argument for the changes being

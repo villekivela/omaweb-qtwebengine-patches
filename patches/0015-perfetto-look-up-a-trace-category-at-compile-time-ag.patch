@@ -1,0 +1,65 @@
+From b9a3022193e82f2909eadfec92a5182843813f7c Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Ville=20Kivela=CC=88?= <vkivela@hotmail.com>
+Date: Thu, 24 Sep 2026 10:37:11 +0300
+Subject: [PATCH 15/15] perfetto: look up a trace category at compile time
+ again
+
+Perfetto at the revision Chromium 140 pins turns a trace point's
+category into an index in a constexpr variable, which forces the lookup
+to happen while compiling. This tree passes PERFETTO_GET_CATEGORY_INDEX
+straight into CallIfCategoryEnabled instead, where folding the constexpr
+call is up to the optimizer. Clang did not fold it, so every trace
+point, with tracing off, called IsDynamicCategory and walked the 275
+built-in categories comparing strings a character at a time.
+
+That macro is behind every TRACE_EVENT, so the cost is everywhere, and
+worst where a trace point sits on a hot call. Blink wraps each
+[HighEntropy] binding, most of the canvas 2D API among them, in
+Dactyloscoper::HighEntropyTracer, and in Speedometer's Chart.js suite
+its constructor and destructor took 54% of the renderer's busy time.
+
+The header is restored to Perfetto 4ab725613a8e as Chromium ships it.
+Speedometer 3.1 in a bare WebEngineView on macOS went from 25.5 to 33.9;
+Chrome for Testing 140 scored 39.2 on the same machine.
+
+omaweb#355
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+---
+ .../perfetto/tracing/internal/track_event_macros.h     | 10 ++++++++--
+ 1 file changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/src/3rdparty/chromium/third_party/perfetto/include/perfetto/tracing/internal/track_event_macros.h b/src/3rdparty/chromium/third_party/perfetto/include/perfetto/tracing/internal/track_event_macros.h
+index 32abfec1cb..ac4b8b0146 100644
+--- a/src/3rdparty/chromium/third_party/perfetto/include/perfetto/tracing/internal/track_event_macros.h
++++ b/src/3rdparty/chromium/third_party/perfetto/include/perfetto/tracing/internal/track_event_macros.h
+@@ -133,6 +133,11 @@
+   do {                                                                         \
+     ::perfetto::internal::ValidateEventNameType<decltype(name)>();             \
+     namespace tns = PERFETTO_TRACK_EVENT_NAMESPACE;                            \
++    /* Compute the category index outside the lambda to work around a */       \
++    /* GCC 7 bug */                                                            \
++    PERFETTO_INTERNAL_STATIC_FOR_MSVC constexpr auto PERFETTO_UID(             \
++        kCatIndex_ADD_TO_PERFETTO_DEFINE_CATEGORIES_IF_FAILS_) =               \
++        PERFETTO_GET_CATEGORY_INDEX(category);                                 \
+     if (::PERFETTO_TRACK_EVENT_NAMESPACE::internal::IsDynamicCategory(         \
+             category)) {                                                       \
+       tns::TrackEvent::CallIfEnabled(                                          \
+@@ -144,11 +149,12 @@
+           });                                                                  \
+     } else {                                                                   \
+       tns::TrackEvent::CallIfCategoryEnabled(                                  \
+-          PERFETTO_GET_CATEGORY_INDEX(category),                               \
++          PERFETTO_UID(kCatIndex_ADD_TO_PERFETTO_DEFINE_CATEGORIES_IF_FAILS_), \
+           [&](uint32_t instances) PERFETTO_NO_THREAD_SAFETY_ANALYSIS {         \
+             tns::TrackEvent::method(                                           \
+                 instances,                                                     \
+-                PERFETTO_GET_CATEGORY_INDEX(category),                         \
++                PERFETTO_UID(                                                  \
++                    kCatIndex_ADD_TO_PERFETTO_DEFINE_CATEGORIES_IF_FAILS_),    \
+                 ::perfetto::internal::DecayEventNameType(name),                \
+                 ##__VA_ARGS__);                                                \
+           });                                                                  \
+-- 
+2.54.0 (Apple Git-157)
+

@@ -1,13 +1,14 @@
 # QtWebEngine extension patches
 
-Fourteen patches that let QtWebEngine host a password manager's Chromium extension. Base is the
-released `qtwebengine-everywhere-src-6.11.2` tarball.
+Fifteen patches to QtWebEngine. Fourteen let it host a password manager's Chromium extension, and
+one restores a trace macro that slowed every page. Base is the released
+`qtwebengine-everywhere-src-6.11.2` tarball.
 
 Built for [omaweb#344](https://github.com/villekivela/omaweb/issues/344), which asks whether Omaweb
 can host Bitwarden and 1Password. The findings live in `docs/research/password-manager-extensions.md`
 in that repository.
 
-Five of the fourteen are ordinary bug fixes headed for Gerrit. The rest wait on one question to Qt, in
+Six of the fifteen are ordinary bug fixes headed for Gerrit. The rest wait on one question to Qt, in
 `upstream/QTBUG-draft.md`. If Qt takes the work, this repository is deleted rather than maintained.
 
 ## Running it
@@ -85,7 +86,17 @@ reports the manifest's. _A feature. Follows 0004._
 resource policy, from before the base class had one, and nothing ever told that copy which
 extensions had loaded. Every request for a web accessible resource was rewritten to
 `chrome-extension://invalid/`. It stops any extension that declares a small content script and
-imports its real bundle. _A bug fix with a test. Submit as is._
+imports its real bundle. A second test holds the other half: a resource declared with
+`use_dynamic_url` stays unreachable at its fixed URL. _A bug fix with a test. Submit as is._
+
+**0015, look up a trace category at compile time again.** Qt's copy of Perfetto drops the
+`constexpr` variable that forces a trace point's category index to be computed while compiling, so
+clang left the lookup to run on every call: a string search through 275 categories, with tracing
+off, behind every `TRACE_EVENT`. Blink puts one on each canvas 2D call, and Speedometer 3.1 in a
+bare `WebEngineView` went from 25.5 to 33.9. The header is Chromium 140's, unchanged. See
+[omaweb#355](https://github.com/villekivela/omaweb/issues/355). _A bug fix, for
+[QTBUG-149450](https://qt-project.atlassian.net/browse/QTBUG-149450). The Windows build needs a
+form MSVC accepts._
 
 ## The open question
 
@@ -98,7 +109,7 @@ one is active. That is what the QTBUG draft asks for. Ask before writing the API
 
 ## Tests
 
-35 tests pass with the series applied. Five of them fail on a stock build, which is why they are
+36 tests pass with the series applied. Five of them fail on a stock build, which is why they are
 worth having:
 
 - `serviceWorkerLocalization` fails

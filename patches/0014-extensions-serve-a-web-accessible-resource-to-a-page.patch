@@ -1,7 +1,7 @@
-From 22e47eb5923a2ba7e11d62085a7fca2221b02b18 Mon Sep 17 00:00:00 2001
-From: =?UTF-8?q?Ville=20Kivela=CC=88?= <vkivela@hotmail.com>
+From 934964590afa3abb6976062635f660adb4d2c06a Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Ville=20Kivel=C3=A4?= <vkivela@hotmail.com>
 Date: Mon, 21 Sep 2026 18:34:17 +0300
-Subject: [PATCH 14/14] extensions: serve a web accessible resource to a page
+Subject: [PATCH 14/15] extensions: serve a web accessible resource to a page
 
 A page could not load a resource an extension declared web accessible.
 The request never reached the browser as itself: the renderer rewrote
@@ -27,17 +27,29 @@ that does the work; that import is a subresource, so the bundle never
 arrived and nothing the extension meant to do in the page happened.
 1Password fills this way; Bitwarden declares its scripts statically,
 which is why it was unaffected and this went unseen.
+
+The fix must not overcorrect. A resource declared with use_dynamic_url
+is reachable only under an id the extension is given at runtime, so a
+page cannot tell from a fixed URL which extensions are installed.
+Bitwarden declares its resources that way, which is why refusing its
+fixed URLs is correct and was briefly read as this bug. The test asserts
+both halves, because passing one while failing the other is the shape
+of both the bug and the overcorrection.
 ---
- .../renderer/content_renderer_client_qt.cpp   |  6 ++-
- .../extensions_renderer_client_qt.cpp         | 17 --------
- .../extensions_renderer_client_qt.h           |  8 ----
- .../web_accessible_ext/manifest.json          | 14 +++++++
+ .../renderer/content_renderer_client_qt.cpp   |  6 +-
+ .../extensions_renderer_client_qt.cpp         | 17 ----
+ .../extensions_renderer_client_qt.h           |  8 --
+ .../resources/web_accessible_ext/dynamic.txt  |  1 +
+ .../web_accessible_ext/manifest.json          | 39 ++++++++
+ .../resources/web_accessible_ext/report.js    |  6 ++
  .../web_accessible_ext/service_worker.js      |  1 +
  .../resources/web_accessible_ext/shared.js    |  1 +
  .../resources/web_accessible_ext/shared.txt   |  1 +
- .../extensions/tst_qwebengineextension.cpp    | 40 +++++++++++++++++++
- 8 files changed, 62 insertions(+), 26 deletions(-)
+ .../extensions/tst_qwebengineextension.cpp    | 88 +++++++++++++++++++
+ 10 files changed, 142 insertions(+), 26 deletions(-)
+ create mode 100644 tests/auto/widgets/extensions/resources/web_accessible_ext/dynamic.txt
  create mode 100644 tests/auto/widgets/extensions/resources/web_accessible_ext/manifest.json
+ create mode 100644 tests/auto/widgets/extensions/resources/web_accessible_ext/report.js
  create mode 100644 tests/auto/widgets/extensions/resources/web_accessible_ext/service_worker.js
  create mode 100644 tests/auto/widgets/extensions/resources/web_accessible_ext/shared.js
  create mode 100644 tests/auto/widgets/extensions/resources/web_accessible_ext/shared.txt
@@ -134,12 +146,19 @@ index b6711b07fe..fc450f6c7a 100644
  };
  
  } // namespace QtWebEngineCore
+diff --git a/tests/auto/widgets/extensions/resources/web_accessible_ext/dynamic.txt b/tests/auto/widgets/extensions/resources/web_accessible_ext/dynamic.txt
+new file mode 100644
+index 0000000000..380a834a99
+--- /dev/null
++++ b/tests/auto/widgets/extensions/resources/web_accessible_ext/dynamic.txt
+@@ -0,0 +1 @@
++dynamic
 diff --git a/tests/auto/widgets/extensions/resources/web_accessible_ext/manifest.json b/tests/auto/widgets/extensions/resources/web_accessible_ext/manifest.json
 new file mode 100644
-index 0000000000..d0db1d8a55
+index 0000000000..0d6a052811
 --- /dev/null
 +++ b/tests/auto/widgets/extensions/resources/web_accessible_ext/manifest.json
-@@ -0,0 +1,14 @@
+@@ -0,0 +1,39 @@
 +{
 +    "name": "web accessible",
 +    "version": "1.0",
@@ -149,11 +168,49 @@ index 0000000000..d0db1d8a55
 +    },
 +    "web_accessible_resources": [
 +        {
-+            "resources": ["shared.js", "shared.txt"],
-+            "matches": ["<all_urls>"]
++            "resources": [
++                "shared.js",
++                "shared.txt"
++            ],
++            "matches": [
++                "<all_urls>"
++            ]
++        },
++        {
++            "resources": [
++                "dynamic.txt"
++            ],
++            "matches": [
++                "<all_urls>"
++            ],
++            "use_dynamic_url": true
++        }
++    ],
++    "content_scripts": [
++        {
++            "matches": [
++                "<all_urls>"
++            ],
++            "run_at": "document_end",
++            "js": [
++                "report.js"
++            ]
 +        }
 +    ]
 +}
+\ No newline at end of file
+diff --git a/tests/auto/widgets/extensions/resources/web_accessible_ext/report.js b/tests/auto/widgets/extensions/resources/web_accessible_ext/report.js
+new file mode 100644
+index 0000000000..4a25480668
+--- /dev/null
++++ b/tests/auto/widgets/extensions/resources/web_accessible_ext/report.js
+@@ -0,0 +1,6 @@
++// The page cannot ask for its own dynamic URL, so the content script hands it over. A resource
++// declared with use_dynamic_url is reachable only under the id the extension is given at runtime,
++// which is the whole point of the flag.
++document.documentElement.dataset.dynamicUrl = chrome.runtime.getURL("dynamic.txt")
++document.documentElement.dataset.staticUrl =
++    "chrome-extension://" + chrome.runtime.id + "/dynamic.txt"
 diff --git a/tests/auto/widgets/extensions/resources/web_accessible_ext/service_worker.js b/tests/auto/widgets/extensions/resources/web_accessible_ext/service_worker.js
 new file mode 100644
 index 0000000000..e9b6a44cfe
@@ -176,18 +233,19 @@ index 0000000000..8a205e8dc3
 @@ -0,0 +1 @@
 +shared
 diff --git a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
-index 3500fb0dbd..b8dc7764a8 100644
+index 3500fb0dbd..28c6a16e3f 100644
 --- a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
 +++ b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
-@@ -59,6 +59,7 @@ private Q_SLOTS:
+@@ -59,6 +59,8 @@ private Q_SLOTS:
      void anExtensionKeepsTrackOfTheNotificationsItIsShowing();
      void theReadersAnswerToANotificationReachesTheExtension();
      void everyFunctionTheNamespaceDeclaresCanBeCalled();
 +    void aPageCanLoadAWebAccessibleResource();
++    void aResourceWithADynamicUrlIsReachableOnlyUnderIt();
      void enableAfterStoragePathChange();
      void tabsWindowsAndScripting();
      void nativeMessaging();
-@@ -830,6 +831,45 @@ void tst_QWebEngineExtension::everyFunctionTheNamespaceDeclaresCanBeCalled()
+@@ -830,6 +832,92 @@ void tst_QWebEngineExtension::everyFunctionTheNamespaceDeclaresCanBeCalled()
      }
  }
  
@@ -228,6 +286,53 @@ index 3500fb0dbd..b8dc7764a8 100644
 +                           "el.src = \"" + script + "\"; document.head.appendChild(el)");
 +    QTRY_VERIFY(evaluateJavaScriptSync(m_page, "window.scriptRan !== undefined").toBool());
 +    QCOMPARE(evaluateJavaScriptSync(m_page, "window.scriptRan").toBool(), true);
++}
++
++void tst_QWebEngineExtension::aResourceWithADynamicUrlIsReachableOnlyUnderIt()
++{
++    // An extension may declare a resource reachable only under an id given to it at runtime,
++    // rather than its own, so a page cannot tell from a fixed URL which extensions are installed.
++    // Bitwarden declares its resources this way, so a refusal of the static URL is correct and the
++    // dynamic one has to work. Both halves are asserted, because passing one while failing the
++    // other is the shape of both the bug and the overcorrection.
++    HttpServer server;
++    server.setResourceDirs({ resourcesPath() });
++    QVERIFY(server.start());
++
++    QWebEngineExtensionInfo extension =
++            loadExtensionSync(resourcesPath() + "web_accessible_ext"_L1);
++    QVERIFY2(extension.isLoaded(), qPrintable(extension.error()));
++    m_manager->setExtensionEnabled(extension, true);
++
++    QSignalSpy loadSpy(m_page, SIGNAL(loadFinished(bool)));
++    m_page->load(server.url("/index.html"_L1));
++    QTRY_COMPARE(loadSpy.size(), 1);
++
++    // The content script reports both URLs, because the page cannot ask for either itself.
++    QTRY_VERIFY(evaluateJavaScriptSync(
++                        m_page, "document.documentElement.dataset.dynamicUrl !== undefined")
++                        .toBool());
++    const QString dynamic =
++            evaluateJavaScriptSync(m_page, "document.documentElement.dataset.dynamicUrl").toString();
++    const QString fixed =
++            evaluateJavaScriptSync(m_page, "document.documentElement.dataset.staticUrl").toString();
++    QVERIFY(!dynamic.isEmpty());
++    QVERIFY2(dynamic != fixed, qPrintable(dynamic));
++
++    const auto fetched = [this](const QString &url, const QString &into) {
++        evaluateJavaScriptSync(m_page, "fetch(\"" + url + "\").then(async r => window." + into
++                                               + " = r.ok ? (await r.text()).trim() : \"status \" "
++                                                 "+ r.status).catch(e => window."
++                                               + into + " = \"threw\")");
++        QTest::qWait(0);
++    };
++    fetched(dynamic, "underDynamic"_L1);
++    fetched(fixed, "underFixed"_L1);
++    QTRY_VERIFY(evaluateJavaScriptSync(m_page, "window.underDynamic !== undefined").toBool());
++    QTRY_VERIFY(evaluateJavaScriptSync(m_page, "window.underFixed !== undefined").toBool());
++
++    QCOMPARE(evaluateJavaScriptSync(m_page, "window.underDynamic"), "dynamic"_L1);
++    QCOMPARE(evaluateJavaScriptSync(m_page, "window.underFixed"), "threw"_L1);
 +}
 +
  void tst_QWebEngineExtension::enableAfterStoragePathChange()
