@@ -4,11 +4,15 @@ name: Collect engine builds
 # laptop and this runner's six-hour ceiling. So the build detaches on the
 # rented machine and whoever started it may never come back for it.
 #
-# This is what comes back. Every twenty minutes it takes the artifacts off any
-# machine whose build has finished and deletes the machine, and after fourteen
-# hours it deletes one whose build has not finished, because by then it is not
-# going to. Destroying a rented machine is then something that happens rather
-# than something somebody remembers.
+# This is what comes back. It takes the artifacts off any machine whose build
+# has finished and deletes the machine, and after fourteen hours it deletes one
+# whose build has not finished, because by then it is not going to. Destroying
+# a rented machine is then something that happens rather than something
+# somebody remembers.
+#
+# The schedule asks for every twenty minutes. GitHub starts scheduled runs when
+# it has room, and in practice they have come two to five hours apart, so a
+# finished build can wait that long to be collected.
 on:
   schedule:
     - cron: "*/20 * * * *"
@@ -42,28 +46,42 @@ jobs:
           printf '%s\n' "${{ secrets.BUILDER_SSH_KEY }}" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
 
-      - name: Collect and destroy
+      # Collected here, deleted in the last step. A machine deleted before the
+      # artifact is uploaded took the only other copy with it, and an upload
+      # that failed then lost the build.
+      - name: Collect
         env:
           HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
-        run: scripts/collect-builds.sh
+        run: scripts/collect-builds.sh --defer-delete "$RUNNER_TEMP/delete"
 
       # Only when something was collected. A run that found no finished build
-      # has nothing to attach, and an empty artifact every twenty minutes is
-      # noise.
+      # has nothing to attach, and an empty artifact on every run is noise.
+      # Kept even when collecting failed, because that is one machine failing
+      # and another may have been collected.
       - name: Keep what came back
         id: kept
+        if: ${{ !cancelled() }}
         run: |
-          if [ -n "$(find out -maxdepth 1 -type f 2>/dev/null)" ]; then
+          if [ -n "$(find out -type f 2>/dev/null)" ]; then
             echo "any=true" >> "$GITHUB_OUTPUT"
-            find out -maxdepth 1 -type f -printf '%f  %s bytes\n' >> "$GITHUB_STEP_SUMMARY"
+            find out -type f -printf '%P  %s bytes\n' >> "$GITHUB_STEP_SUMMARY"
           else
             echo "any=false" >> "$GITHUB_OUTPUT"
           fi
 
       - uses: actions/upload-artifact@v4
-        if: steps.kept.outputs.any == 'true'
+        id: upload
+        if: ${{ !cancelled() && steps.kept.outputs.any == 'true' }}
         with:
           name: engine-collected-${{ github.run_id }}
-          path: out/*
+          path: out/
           if-no-files-found: error
           retention-days: 14
+
+      # Skipped only when the upload failed, which leaves the machines for the
+      # next run to collect again.
+      - name: Destroy what was collected
+        if: ${{ !cancelled() && steps.upload.outcome != 'failure' }}
+        env:
+          HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
+        run: scripts/collect-builds.sh --delete-listed "$RUNNER_TEMP/delete"
