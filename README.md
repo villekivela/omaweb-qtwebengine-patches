@@ -86,7 +86,8 @@ reports the manifest's. _A feature. Follows 0004._
 resource policy, from before the base class had one, and nothing ever told that copy which
 extensions had loaded. Every request for a web accessible resource was rewritten to
 `chrome-extension://invalid/`. It stops any extension that declares a small content script and
-imports its real bundle. _A bug fix with a test. Submit as is._
+imports its real bundle. A second test holds the other half: a resource declared with
+`use_dynamic_url` stays unreachable at its fixed URL. _A bug fix with a test. Submit as is._
 
 **0015, look up a trace category at compile time again.** Qt's copy of Perfetto drops the
 `constexpr` variable that forces a trace point's category index to be computed while compiling, so
@@ -108,7 +109,7 @@ one is active. That is what the QTBUG draft asks for. Ask before writing the API
 
 ## Tests
 
-35 tests pass with the series applied. Five of them fail on a stock build, which is why they are
+36 tests pass with the series applied. Five of them fail on a stock build, which is why they are
 worth having:
 
 - `serviceWorkerLocalization` fails

@@ -1,6 +1,6 @@
-From 1323e8fba1e5ca4d42b23114f3c56f1922d6b595 Mon Sep 17 00:00:00 2001
+From b9a3022193e82f2909eadfec92a5182843813f7c Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivela=CC=88?= <vkivela@hotmail.com>
-Date: Wed, 23 Sep 2026 17:07:05 +0300
+Date: Thu, 24 Sep 2026 10:37:11 +0300
 Subject: [PATCH 15/15] perfetto: look up a trace category at compile time
  again
 
