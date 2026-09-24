@@ -12,7 +12,7 @@
 
 pkgname=omaweb-qtwebengine
 pkgver=6.11.2
-pkgrel=2
+pkgrel=3
 pkgdesc="QtWebEngine with Omaweb's extension patches, installed beside Omaweb"
 arch=('x86_64' 'aarch64')
 url="https://github.com/villekivela/omaweb-qtwebengine-patches"
