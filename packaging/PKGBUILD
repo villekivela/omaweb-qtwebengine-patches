@@ -12,7 +12,7 @@
 
 pkgname=omaweb-qtwebengine
 pkgver=6.11.2
-pkgrel=1
+pkgrel=2
 pkgdesc="QtWebEngine with Omaweb's extension patches, installed beside Omaweb"
 arch=('x86_64' 'aarch64')
 url="https://github.com/villekivela/omaweb-qtwebengine-patches"
@@ -20,7 +20,16 @@ url="https://github.com/villekivela/omaweb-qtwebengine-patches"
 # published at the url above, and the library stays separate so it can be
 # relinked. Chromium's own code is BSD-3-Clause.
 license=('LGPL-3.0-only' 'BSD-3-Clause')
-depends=('qt6-base' 'qt6-declarative' 'qt6-positioning' 'qt6-webchannel' 'nss' 'libxkbcommon')
+# What the engine's own libraries and QtWebEngineProcess link against, from
+# their DT_NEEDED entries, less what glibc, gcc-libs and the Qt packages below
+# already bring. A clean Arch install has none of the media and image
+# libraries, so leaving one out fails at load time on the reader's machine.
+depends=('qt6-base' 'qt6-declarative' 'qt6-positioning' 'qt6-webchannel' 'nss' 'libxkbcommon'
+         'alsa-lib' 'dbus' 'expat' 'fontconfig' 'freetype2' 'harfbuzz' 'lcms2' 'libglvnd'
+         'libjpeg-turbo' 'libpng' 'libtiff' 'libwebp' 'libxml2' 'libxslt' 'mesa' 'minizip'
+         'openjpeg2' 'opus' 'snappy' 'systemd-libs' 'zlib')
+# Only Qt Designer loads the QWebEngineView plugin, and it links libQt6Designer.
+optdepends=('qt6-tools: the QWebEngineView plugin for Qt Designer')
 
 # The notices travel with this file rather than with the tarball, so correcting
 # one does not cost a rebuild.
