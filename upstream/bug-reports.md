@@ -4,23 +4,32 @@ All five reproduce on a stock build and each comes with a test that fails withou
 separately from the tab-delegate suggestion in `QTBUG-draft.md`, which asks for new API and is a
 different conversation.
 
-Fixes go to Gerrit against `dev` with `Pick-to: 6.11 6.10`.
+Fixes go to Gerrit against `dev` with `Pick-to: 6.140`, the release branch QtWebEngine cut after
+6.12 (`QT_REPO_MODULE_VERSION` 6.140.0, alpha1 in September 2026).
 
 Four touch `qtwebengine` alone and can go up in any order. The `ExtensionPrefs` crash also needs a
 change in `qtwebengine-chromium`, so it is two changes with a dependency and is worth sending last,
 once the others have shown the reviewers what this is about.
 
-All five are filed. Four are on Gerrit; the fifth waits on an answer about where its fix belongs.
+All five are filed. Four are on Gerrit, and two of those have merged into `dev` and been picked to
+`6.140`. The fifth waits on an answer about where its fix belongs. The patches whose change has
+merged stay in the series until Omaweb's engine is built on a Qt release that carries them.
 
-| Order | Patch | Report | Change | What it is |
-| ----- | ----- | ------ | ------ | ---------- |
-| 1 | 0014 | [QTBUG-150590](https://bugreports.qt.io/browse/QTBUG-150590) | [772845](https://codereview.qt-project.org/c/qt/qtwebengine/+/772845) | A page cannot load a web accessible resource |
-| 2 | 0001 | [QTBUG-150591](https://bugreports.qt.io/browse/QTBUG-150591) | [772848](https://codereview.qt-project.org/c/qt/qtwebengine/+/772848) | A localising service worker hangs forever |
-| 3 | 0010 | [QTBUG-150592](https://bugreports.qt.io/browse/QTBUG-150592) | [772849](https://codereview.qt-project.org/c/qt/qtwebengine/+/772849) | Loading a loaded extension leaves it dead |
-| 4 | 0011 | [QTBUG-150593](https://bugreports.qt.io/browse/QTBUG-150593) | [772850](https://codereview.qt-project.org/c/qt/qtwebengine/+/772850) | An extension document cannot close its own window |
-| 5 | 0003 | [QTBUG-150594](https://bugreports.qt.io/browse/QTBUG-150594) | waiting | `setExtensionEnabled` crashes after a storage path change |
+| Order | Patch | Report | Change | Status | What it is |
+| ----- | ----- | ------ | ------ | ------ | ---------- |
+| 1 | 0014 | [QTBUG-150590](https://bugreports.qt.io/browse/QTBUG-150590) | [772845](https://codereview.qt-project.org/c/qt/qtwebengine/+/772845) | merged | A page cannot load a web accessible resource |
+| 2 | 0001 | [QTBUG-150591](https://bugreports.qt.io/browse/QTBUG-150591) | [772848](https://codereview.qt-project.org/c/qt/qtwebengine/+/772848) | merged | A localising service worker hangs forever |
+| 3 | 0010 | [QTBUG-150592](https://bugreports.qt.io/browse/QTBUG-150592) | [772849](https://codereview.qt-project.org/c/qt/qtwebengine/+/772849) | in review | Loading a loaded extension leaves it dead |
+| 4 | 0011 | [QTBUG-150593](https://bugreports.qt.io/browse/QTBUG-150593) | [772850](https://codereview.qt-project.org/c/qt/qtwebengine/+/772850) | in review | An extension document cannot close its own window |
+| 5 | 0003 | [QTBUG-150594](https://bugreports.qt.io/browse/QTBUG-150594) | waiting | – | `setExtensionEnabled` crashes after a storage path change |
 
-Each change carries `Fixes: QTBUG-…` and `Pick-to: 6.11 6.10`.
+Each change carries `Fixes: QTBUG-…` and `Pick-to: 6.140`. Two more changes follow the first report:
+
+- [773048](https://codereview.qt-project.org/c/qt/qtwebengine/+/773048), merged, removes the renderer
+  resource policy that 772845 left with no users.
+- [773908](https://codereview.qt-project.org/c/qt/qtwebengine/+/773908), in review, is the test that
+  a `use_dynamic_url` resource stays unreachable at its fixed URL, which patch 0014 carries too. It
+  uses `Task-number: QTBUG-150590`, because it tests that fix rather than fixing anything.
 
 Patch 0015 answers a report someone else had already filed, so it went there as a comment rather
 than a sixth report. [QTBUG-149450](https://qt-project.atlassian.net/browse/QTBUG-149450) measures
