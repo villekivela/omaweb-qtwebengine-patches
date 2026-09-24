@@ -35,6 +35,14 @@ resources="$(dirname "$(find "$tree/build/src/core" -name qtwebengine_resources.
 locales="$(find "$tree/build/src/core" -type d -name qtwebengine_locales 2> /dev/null | head -1)"
 [ -d "$resources" ] 2> /dev/null || resources=""
 [ -d "$locales" ] 2> /dev/null || locales=""
+# A macOS build carries all of this inside QtWebEngineCore.framework, which is
+# where the engine looks first. Pointed at the Chromium output directory
+# instead, the renderer was never handed its ICU data and the test crashed on
+# its first page, so on macOS the framework is left to answer for itself.
+if [ "$(uname)" = Darwin ]; then
+    resources=""
+    locales=""
+fi
 
 # A build machine has no display. Widgets draw into nothing rather than
 # refusing to start.
