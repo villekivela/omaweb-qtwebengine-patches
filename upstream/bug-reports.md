@@ -29,10 +29,14 @@ as the cause, with the macOS numbers. Its fix goes to `qtwebengine-chromium`, no
 The report is on Windows, where the removed line was an MSVC workaround, so what MSVC accepts has
 to be settled before a change is proposed.
 
-The Linux numbers went on the report as a second comment. GCC folds the lookup without the patch,
-so the engine this repository ships gains nothing from 0015: Speedometer 3.1 on the Omarchy VM was
-18.0 before and 18.3 after, against 24.5 for Chromium 153 on the same machine. The details are on
-[omaweb#355](https://github.com/villekivela/omaweb/issues/355). The patch stays, because it is the
+GCC folds the lookup without the patch, which the disassembly of this repository's own package
+shows, so the engine it ships gains nothing from 0015. A second comment on the report said so, with
+a Speedometer before and after from the Omarchy VM. That before and after ran on Arch's engine, not
+this one, because the released Omaweb did not load `/usr/lib/omaweb` yet, so it measured nothing
+about 0015. A third comment corrects it. With the host idle, this repository's engine scores 22.7,
+Arch's 22.5, and Chromium 153 24.5 on the same machine. The details are on
+[omaweb#355](https://github.com/villekivela/omaweb/issues/355) and
+[omaweb#356](https://github.com/villekivela/omaweb/issues/356). The patch stays, because it is the
 code Chromium ships and it keeps a clang build of the engine off the slow path.
 
 Qt builds nothing until a change has a +2 and someone stages it. The Sanity Bot runs on upload and
