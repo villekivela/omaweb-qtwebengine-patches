@@ -9,11 +9,12 @@ this file is for.
 
 ## What changed
 
-Fourteen patches, applied in order to the released source. What they add is the part of Chromium's
+Fifteen patches, applied in order to the released source. Fourteen add the part of Chromium's
 extension runtime that QtWebEngine compiles out: renderer bindings, the `tabs`, `windows`,
 `permissions`, `scripting`, `notifications` and `webNavigation` namespaces behind an embedder
-delegate, native messaging, and web accessible resources. Five of them are bug fixes in Qt's own
-code rather than additions.
+delegate, native messaging, and web accessible resources. Five of those are bug fixes in Qt's own
+code rather than additions. The fifteenth restores Perfetto's `track_event_macros.h` to the version
+Chromium ships, which Qt's copy changes.
 
 Each patch is a single commit with its own message explaining what it changes and why. They are in
 `patches/` in the repository named as this package's URL, and `README.md` there lists them one by

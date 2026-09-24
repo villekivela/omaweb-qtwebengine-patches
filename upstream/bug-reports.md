@@ -27,8 +27,13 @@ than a sixth report. [QTBUG-149450](https://qt-project.atlassian.net/browse/QTBU
 the same Speedometer 3.1 gap on Windows, and the comment names qtwebengine-chromium `baf701b9fb74`
 as the cause, with the macOS numbers. Its fix goes to `qtwebengine-chromium`, not `qtwebengine`.
 The report is on Windows, where the removed line was an MSVC workaround, so what MSVC accepts has
-to be settled before a change is proposed. The Linux numbers from
-[omaweb#355](https://github.com/villekivela/omaweb/issues/355) go on the report once measured.
+to be settled before a change is proposed.
+
+The Linux numbers went on the report as a second comment. GCC folds the lookup without the patch,
+so the engine this repository ships gains nothing from 0015: Speedometer 3.1 on the Omarchy VM was
+18.0 before and 18.3 after, against 24.5 for Chromium 153 on the same machine. The details are on
+[omaweb#355](https://github.com/villekivela/omaweb/issues/355). The patch stays, because it is the
+code Chromium ships and it keeps a clang build of the engine off the slow path.
 
 Qt builds nothing until a change has a +2 and someone stages it. The Sanity Bot runs on upload and
 checks style only; it caught a missing trailing newline in a fixture. So the first real build of
