@@ -91,10 +91,21 @@ fi
 # building. That mistake is expensive in one direction: a finished build is
 # never collected and its machine bills until the age limit.
 key="${OMAWEB_BUILDER_KEY:-$HOME/.ssh/omaweb-builder}"
-ssh_opts="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -o BatchMode=yes"
-if [ -f "$key" ]; then
-    ssh_opts="$ssh_opts -i $key"
+if [ ! -f "$key" ]; then
+    key=""
 fi
+
+# Input from /dev/null. The loop below reads the machines' names from its
+# input, and an ssh that shares it swallows every name after the first, so a
+# second machine went unvisited.
+remote() {
+    ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -o BatchMode=yes \
+        ${key:+-i "$key"} "$@" < /dev/null
+}
+fetch() {
+    scp -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -o BatchMode=yes \
+        ${key:+-i "$key"} "$@" < /dev/null
+}
 
 # Deleted now, or listed for a later step to delete once the artifact is safe.
 done_with() {
@@ -131,9 +142,9 @@ while read -r server; do
     # together is how an unreachable machine gets reported as a busy one.
     reachable=no
     finished=no
-    if [ -n "$ip" ] && ssh $ssh_opts "root@$ip" true 2>/dev/null < /dev/null; then
+    if [ -n "$ip" ] && remote "root@$ip" true 2>/dev/null; then
         reachable=yes
-        if ssh $ssh_opts "root@$ip" "test -f /root/build.status" 2>/dev/null < /dev/null; then
+        if remote "root@$ip" "test -f /root/build.status" 2>/dev/null; then
             finished=yes
         fi
     fi
@@ -150,8 +161,7 @@ while read -r server; do
     fi
 
     if [ "$finished" = yes ]; then
-        status="$(ssh $ssh_opts "root@$ip" "cat /root/build.status" 2>/dev/null < /dev/null \
-            || echo 1)"
+        status="$(remote "root@$ip" "cat /root/build.status" 2>/dev/null || echo 1)"
         echo "   finished, exit $status"
 
         # Whatever it left behind, whether it succeeded or not. A run can fail
@@ -159,12 +169,12 @@ while read -r server; do
         # last step and it has its own ways to die. Taking the artifacts only
         # from a clean run threw away a good engine and hours of machine time,
         # which is what this used to do.
-        if ssh $ssh_opts "root@$ip" "ls /root/out/* > /dev/null 2>&1" < /dev/null; then
+        if remote "root@$ip" "ls /root/out/* > /dev/null 2>&1"; then
             mkdir -p "$dest"
             # The artifacts first, and only then the deletion, so a transfer
             # that fails leaves the machine for the next run rather than
             # discarding what it holds.
-            if scp $ssh_opts "root@$ip:/root/out/*" "$dest/" 2>/dev/null < /dev/null; then
+            if fetch "root@$ip:/root/out/*" "$dest/" 2>/dev/null; then
                 echo "   collected into $dest"
             else
                 trouble=1
@@ -184,13 +194,13 @@ while read -r server; do
         if [ "$status" -ne 0 ]; then
             # What went wrong is worth keeping off a machine about to go.
             mkdir -p "$dest"
-            scp $ssh_opts "root@$ip:/root/build.log" "$dest/build.log" 2>/dev/null < /dev/null \
+            fetch "root@$ip:/root/build.log" "$dest/build.log" 2>/dev/null \
                 && echo "   kept the log as $dest/build.log"
         fi
     else
         echo "   past ${max_hours}h and not finished, so it is not going to"
         mkdir -p "$dest"
-        scp $ssh_opts "root@$ip:/root/build.log" "$dest/build.log" 2>/dev/null < /dev/null \
+        fetch "root@$ip:/root/build.log" "$dest/build.log" 2>/dev/null \
             && echo "   kept the log as $dest/build.log"
     fi
 

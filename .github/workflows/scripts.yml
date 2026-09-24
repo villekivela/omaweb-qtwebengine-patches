@@ -1,0 +1,34 @@
+name: Scripts
+
+# The collector deletes rented machines, and the ways it can go wrong take a
+# real build hours to reach. Its test rehearses them against stand-ins in
+# seconds, so it runs on every change that could break it.
+#
+# Shellcheck covers the files this test belongs to. The other scripts predate
+# it and have findings of their own.
+on:
+  pull_request:
+    paths:
+      - "scripts/**"
+      - ".github/workflows/scripts.yml"
+  push:
+    branches: [main]
+    paths:
+      - "scripts/**"
+      - ".github/workflows/scripts.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  collect-builds:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Shellcheck
+        run: shellcheck scripts/collect-builds.sh scripts/test-collect-builds.sh
+
+      - name: Test the collector
+        run: scripts/test-collect-builds.sh
