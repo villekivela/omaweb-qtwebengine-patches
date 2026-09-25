@@ -67,18 +67,23 @@ git am --abort > /dev/null 2>&1 || true
 git reset -q --hard && git clean -qfd
 # A patch changed in place since the tree was built counts the same as one
 # that did not, so the count alone would keep the old one and build it again.
-# Each applied commit is compared with its file by patch id, and the tree is
-# rewound to just before the first that differs. The build directory is
+# Each patch file is applied to the tree its commit started from, in an index
+# of its own, and the tree that makes is compared with the commit's. The tree
+# is rewound to just before the first that differs. The build directory is
 # untracked and stays, so only what the changed patches touch is rebuilt.
 if [ "$applied" -gt 0 ]; then
     kept=0
+    index="$(mktemp)"
     for commit in $(git rev-list --reverse "v$version-tarball"..HEAD); do
         file="$(ls "$series"/*.patch | sed -n "$((kept + 1))p")"
         [ -n "$file" ] || break
-        [ "$(git show "$commit" | git patch-id --stable | cut -d' ' -f1)" = \
-            "$(git patch-id --stable < "$file" | cut -d' ' -f1)" ] || break
+        GIT_INDEX_FILE="$index" git read-tree "$commit^" \
+            && GIT_INDEX_FILE="$index" git apply --cached "$file" 2> /dev/null \
+            && [ "$(GIT_INDEX_FILE="$index" git write-tree)" = "$(git rev-parse "$commit^{tree}")" ] \
+            || break
         kept=$((kept + 1))
     done
+    rm -f "$index"
     if [ "$kept" -lt "$applied" ]; then
         echo "SERIES CHANGED: patch $((kept + 1)) differs from the tree, applying again from there"
         if [ "$kept" -gt 0 ]; then
