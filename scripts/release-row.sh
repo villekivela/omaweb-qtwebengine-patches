@@ -35,8 +35,11 @@ fi
 # anybody typed.
 tests="unrecorded"
 if [ -f "$out/verify.txt" ]; then
-    passed="$(sed -n 's/^Totals: \([0-9]*\) passed.*/\1/p' "$out/verify.txt" | head -1)"
-    failed="$(sed -n 's/^Totals: [0-9]* passed, \([0-9]*\) failed.*/\1/p' "$out/verify.txt" | head -1)"
+    # One totals line for each test program the gate runs, added together.
+    passed="$(sed -n 's/^Totals: \([0-9]*\) passed.*/\1/p' "$out/verify.txt" \
+        | awk '{ sum += $1 } END { if (NR) print sum }')"
+    failed="$(sed -n 's/^Totals: [0-9]* passed, \([0-9]*\) failed.*/\1/p' "$out/verify.txt" \
+        | awk '{ sum += $1 } END { if (NR) print sum }')"
     if [ -n "$passed" ]; then
         if [ "${failed:-0}" = "0" ]; then
             tests="$passed of $passed"
