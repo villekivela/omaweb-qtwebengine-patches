@@ -5,6 +5,7 @@ set -eu
 
 tree="${1:?usage: verify.sh <tree>}"
 test="$tree/build/tests/auto/widgets/extensions/tst_qwebengineextension"
+interceptor="$tree/build/tests/auto/core/qwebengineurlrequestinterceptor/tst_qwebengineurlrequestinterceptor"
 
 # macOS resolves frameworks through DYLD_FRAMEWORK_PATH, Linux libraries through
 # LD_LIBRARY_PATH, and the stock engine sits in a different place on each.
@@ -77,6 +78,27 @@ if env "$path_var=$tree/build/lib" \
     ${resources:+QTWEBENGINE_RESOURCES_PATH="$resources"} \
     ${locales:+QTWEBENGINE_LOCALES_PATH="$locales"} \
     "$test" -nocrashhandler -o -,txt 2>&1
+then
+    :
+else
+    echo "  the test did not finish cleanly, exit $?"
+fi
+
+# The request interceptor's DNS aliases are the one patch that is not about
+# extensions, so its cases live in Qt's own interceptor test. Only the cases the
+# patch adds run: the rest of that suite is Qt's, and it is Qt's to keep green.
+[ -x "$interceptor" ] || "$tree/build.sh" tst_qwebengineurlrequestinterceptor
+
+echo "=== patched engine, the request interceptor's DNS aliases"
+if env "$path_var=$tree/build/lib" \
+    ${helper:+QTWEBENGINEPROCESS_PATH="$helper"} \
+    ${resources:+QTWEBENGINE_RESOURCES_PATH="$resources"} \
+    ${locales:+QTWEBENGINE_LOCALES_PATH="$locales"} \
+    "$interceptor" dnsAliasesReachASecondCall dnsAliasesAreNotLookedUpUnlessAsked \
+    dnsAliasesAreNotLookedUpForABlockedRequest dnsAliasesAreNotLookedUpBehindAProxy \
+    dnsAliasesThatFailLeaveTheFirstDecision dnsAliasesNamingOnlyTheHostMakeNoSecondCall \
+    dnsAliasesAreRememberedForAHost dnsAliasesAreRememberedPerProfile \
+    -nocrashhandler -o -,txt 2>&1
 then
     :
 else

@@ -1,0 +1,647 @@
+From 7507fb76510421b9f1207b431b3cbd3388241f49 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Ville=20Kivela=CC=88?= <vkivela@hotmail.com>
+Date: Fri, 25 Sep 2026 09:11:04 +0300
+Subject: [PATCH] interceptor: let a request interceptor ask for the host's DNS
+ aliases
+
+A content blocker judges a request by its host, and a tracker served
+from a subdomain of the page's own site, with a DNS CNAME pointing at
+the tracker's real host, never shows the tracker's name. The
+interceptor cannot resolve the host itself: it runs before the network
+stack, and a lookup of its own would use a different resolver, cache
+and secure DNS configuration from the request's.
+
+QWebEngineUrlRequestInfo::requestDnsAliases() asks for them. When an
+interceptor calls it and neither blocks nor redirects the request, the
+host is resolved through the profile's own network context, and the
+interceptor is called once more with dnsAliases() set to the names in
+the host's CNAME chain. The resolver keeps those in a sorted set, so
+the list says which names are in the chain and not which is canonical.
+The lookup goes through the profile's host cache, so the request that
+follows reads the answer rather than resolving again.
+
+A profile also keeps its answers for a minute, so a page's later
+requests to the same host wait for neither the proxy check nor the
+lookup. Answers are kept per profile, because they say which hosts the
+profile has visited, and only after a proxy check that allowed a
+lookup, so a proxy set since cannot be bypassed.
+
+No lookup is made for a main-frame navigation, for an IP address, or
+when a proxy applies to the request: a local lookup behind a proxy
+leaks the query and can disagree with the address the proxy connects
+to. A failed lookup, or one that names only the host itself, makes no
+second call, and the first call's decision stands. An interceptor that
+never asks sees no change.
+
+Tests stand in for the resolver through a private hook that answers
+after the proxy check, so a CNAME chain can be named without a DNS
+server and the proxy case still proves no lookup is made.
+---
+ src/core/api/qwebengineurlrequestinfo.cpp     |  36 +++
+ src/core/api/qwebengineurlrequestinfo.h       |   4 +
+ src/core/api/qwebengineurlrequestinfo_p.h     |  13 ++
+ .../net/proxying_url_loader_factory_qt.cpp    | 221 ++++++++++++++++++
+ .../tst_qwebengineurlrequestinterceptor.cpp   | 200 ++++++++++++++++
+ 5 files changed, 474 insertions(+)
+
+diff --git a/src/core/api/qwebengineurlrequestinfo.cpp b/src/core/api/qwebengineurlrequestinfo.cpp
+index 0e69622c16..e73408f582 100644
+--- a/src/core/api/qwebengineurlrequestinfo.cpp
++++ b/src/core/api/qwebengineurlrequestinfo.cpp
+@@ -312,6 +312,42 @@ void QWebEngineUrlRequestInfo::block(bool shouldBlock)
+     d_ptr->shouldBlockRequest = shouldBlock;
+ }
+ 
++/*!
++    \since 6.12
++    Asks for the DNS aliases of the request's host.
++
++    Call this from QWebEngineUrlRequestInterceptor::interceptRequest() on a request the
++    interceptor does not block or redirect. The host is then resolved through the profile's
++    own resolver and host cache, and when the lookup returns an alias other than the host
++    itself, interceptRequest() is called once more for the same request, with dnsAliases()
++    set. The request waits for the lookup before it starts.
++
++    No lookup is made for a main-frame navigation, for a host that is an IP address, or when
++    a proxy applies to the request. A failed lookup leaves the first call's decision standing.
++
++    \sa dnsAliases()
++*/
++void QWebEngineUrlRequestInfo::requestDnsAliases()
++{
++    d_ptr->dnsAliasesRequested = true;
++}
++
++/*!
++    \since 6.12
++    Returns the names in the CNAME chain of the request's host, not including the host
++    itself. The order is not significant: the canonical name is among them, but the
++    resolver does not say which it is.
++
++    The list is empty unless the interceptor asked for it with requestDnsAliases() on an
++    earlier call for the same request, so a non-empty list also marks the second call.
++
++    \sa requestDnsAliases()
++*/
++QStringList QWebEngineUrlRequestInfo::dnsAliases() const
++{
++    return d_ptr->dnsAliases;
++}
++
+ /*!
+     Sets the request header \a name to \a value for this request.
+ */
+diff --git a/src/core/api/qwebengineurlrequestinfo.h b/src/core/api/qwebengineurlrequestinfo.h
+index 6e4d279b54..266f74174e 100644
+--- a/src/core/api/qwebengineurlrequestinfo.h
++++ b/src/core/api/qwebengineurlrequestinfo.h
+@@ -9,6 +9,7 @@
+ 
+ #include <QtCore/qurl.h>
+ #include <QtCore/qiodevice.h>
++#include <QtCore/qstringlist.h>
+ 
+ #include <memory>
+ 
+@@ -80,6 +81,9 @@ public:
+     void setHttpHeader(const QByteArray &name, const QByteArray &value);
+     QHash<QByteArray, QByteArray> httpHeaders() const;
+ 
++    void requestDnsAliases();
++    QStringList dnsAliases() const;
++
+ private:
+     friend class QtWebEngineCore::ContentBrowserClientQt;
+     friend class QtWebEngineCore::InterceptedRequest;
+diff --git a/src/core/api/qwebengineurlrequestinfo_p.h b/src/core/api/qwebengineurlrequestinfo_p.h
+index ef98c91d9f..3f99ae5a4b 100644
+--- a/src/core/api/qwebengineurlrequestinfo_p.h
++++ b/src/core/api/qwebengineurlrequestinfo_p.h
+@@ -58,10 +58,23 @@ public:
+     QHash<QByteArray, QByteArray> extraHeaders;
+     QtWebEngineCore::ResourceRequestBody *const resourceRequestBody;
+     bool isDownload;
++    bool dnsAliasesRequested = false;
++    QStringList dnsAliases;
+ 
+     QWebEngineUrlRequestInfo *q_ptr;
+ };
+ 
+ QT_END_NAMESPACE
+ 
++#include <functional>
++#include <optional>
++
++namespace QtWebEngineCore {
++// Answers the DNS lookup behind QWebEngineUrlRequestInfo::requestDnsAliases()
++// in place of the network service, for tests: the aliases of a host, or
++// std::nullopt for a lookup that failed. The proxy check still runs first.
++using DnsAliasResolverForTesting = std::function<std::optional<QStringList>(const QString &host)>;
++Q_WEBENGINECORE_EXPORT void setDnsAliasResolverForTesting(DnsAliasResolverForTesting resolver);
++} // namespace QtWebEngineCore
++
+ #endif // QWEBENGINEURLREQUESTINFO_P_H
+diff --git a/src/core/net/proxying_url_loader_factory_qt.cpp b/src/core/net/proxying_url_loader_factory_qt.cpp
+index 0c38fcadf4..4606e15f28 100644
+--- a/src/core/net/proxying_url_loader_factory_qt.cpp
++++ b/src/core/net/proxying_url_loader_factory_qt.cpp
+@@ -4,23 +4,39 @@
+ 
+ #include "proxying_url_loader_factory_qt.h"
+ 
++#include <map>
++#include <set>
+ #include <utility>
+ 
+ #include "base/functional/bind.h"
++#include "base/memory/raw_ptr.h"
++#include "base/strings/string_util.h"
++#include "base/task/sequenced_task_runner.h"
++#include "base/time/time.h"
++#include "content/browser/renderer_host/frame_tree_node.h"
+ #include "content/browser/web_contents/web_contents_impl.h"
++#include "content/public/browser/render_frame_host.h"
++#include "content/public/browser/storage_partition.h"
+ #include "content/public/browser/browser_thread.h"
+ #include "content/public/browser/web_contents.h"
+ #include "content/public/common/content_switches.h"
++#include "net/base/address_list.h"
+ #include "net/base/filename_util.h"
+ #include "net/http/http_status_code.h"
++#include "net/proxy_resolution/proxy_info.h"
+ #include "services/network/public/cpp/cors/cors.h"
+ #include "services/network/public/cpp/resource_request.h"
++#include "services/network/public/cpp/simple_host_resolver.h"
+ #include "services/network/public/mojom/early_hints.mojom.h"
++#include "services/network/public/mojom/network_context.mojom.h"
++#include "services/network/public/mojom/proxy_lookup_client.mojom.h"
+ #include "third_party/blink/public/mojom/loader/resource_load_info.mojom-shared.h"
+ #include "url/url_util.h"
+ #include "url/url_util_qt.h"
+ 
+ #include "api/qwebengineurlrequestinfo_p.h"
++#include "profile_adapter.h"
++#include "profile_qt.h"
+ #include "type_conversion.h"
+ #include "web_contents_adapter.h"
+ #include "web_contents_adapter_client.h"
+@@ -95,6 +111,145 @@ static QHash<QByteArray, QByteArray> toQt(const net::HttpRequestHeaders &headers
+     return hash;
+ }
+ 
++static DnsAliasResolverForTesting &dnsAliasResolverForTesting()
++{
++    static DnsAliasResolverForTesting resolver;
++    return resolver;
++}
++
++void setDnsAliasResolverForTesting(DnsAliasResolverForTesting resolver)
++{
++    dnsAliasResolverForTesting() = std::move(resolver);
++}
++
++// A profile's recent answers, so a page's second request to a host waits for
++// neither a proxy check nor a lookup. Kept per profile, because one profile's
++// answers say which hosts it has visited, and dropped with the profile. Only an
++// answer the proxy check let through is kept, so a hit makes no lookup that a
++// proxy set since could have ruled out. A minute is shorter than most CNAME
++// records live, and the bound keeps a page that names thousands of hosts from
++// growing the table without end.
++class DnsAliasCache
++{
++public:
++    static DnsAliasCache &instance()
++    {
++        static DnsAliasCache cache;
++        return cache;
++    }
++
++    std::optional<std::vector<std::string>> find(ProfileAdapter *profile, const std::string &host)
++    {
++        const auto entry = entries_.find({ profile, host });
++        if (entry == entries_.end())
++            return std::nullopt;
++        if (entry->second.expires <= base::TimeTicks::Now()) {
++            entries_.erase(entry);
++            return std::nullopt;
++        }
++        return entry->second.aliases;
++    }
++
++    void store(ProfileAdapter *profile, const std::string &host, std::vector<std::string> aliases)
++    {
++        if (watched_.insert(profile).second) {
++            QObject::connect(profile, &QObject::destroyed, [this, profile] { forget(profile); });
++        }
++        if (entries_.size() >= kLimit) {
++            const auto now = base::TimeTicks::Now();
++            std::erase_if(entries_, [now](const auto &entry) { return entry.second.expires <= now; });
++            if (entries_.size() >= kLimit)
++                entries_.clear();
++        }
++        entries_[{ profile, host }] = { std::move(aliases), base::TimeTicks::Now() + kLifetime };
++    }
++
++private:
++    void forget(ProfileAdapter *profile)
++    {
++        watched_.erase(profile);
++        std::erase_if(entries_, [profile](const auto &entry) { return entry.first.first == profile; });
++    }
++
++    struct Entry
++    {
++        std::vector<std::string> aliases;
++        base::TimeTicks expires;
++    };
++    static constexpr base::TimeDelta kLifetime = base::Minutes(1);
++    static constexpr size_t kLimit = 4096;
++    std::map<std::pair<ProfileAdapter *, std::string>, Entry> entries_;
++    std::set<ProfileAdapter *> watched_;
++};
++
++// Resolves one request's host for an interceptor that asked for its DNS
++// aliases. The proxy check comes first: behind a proxy a local lookup would
++// leak the query, and could disagree with the address the proxy connects to.
++// The lookup itself goes through the profile's own resolver and host cache, so
++// it honours the profile's secure DNS configuration and warms the cache for the
++// request that follows.
++class DnsAliasLookup : public network::mojom::ProxyLookupClient
++{
++public:
++    // The names, and whether a lookup was made at all: an answer the proxy
++    // check ruled out is not one to remember.
++    using Callback = base::OnceCallback<void(std::vector<std::string>, bool looked_up)>;
++
++    DnsAliasLookup(network::mojom::NetworkContext *context, const GURL &url,
++                   const net::NetworkAnonymizationKey &key, Callback callback)
++        : context_(context), url_(url), key_(key), callback_(std::move(callback))
++    {
++        context_->LookUpProxyForURL(url_, key_, receiver_.BindNewPipeAndPassRemote());
++        receiver_.set_disconnect_handler(base::BindOnce(&DnsAliasLookup::Finish,
++                                                        base::Unretained(this),
++                                                        std::vector<std::string>(), false));
++    }
++
++    void OnProxyLookupComplete(int32_t net_error,
++                               const std::optional<net::ProxyInfo> &proxy_info) override
++    {
++        receiver_.reset();
++        if (net_error != net::OK || !proxy_info || !proxy_info->is_direct())
++            return Finish({}, false);
++        if (const auto &resolveForTesting = dnsAliasResolverForTesting()) {
++            std::vector<std::string> aliases;
++            if (const auto answer = resolveForTesting(QString::fromStdString(url_.host())))
++                for (const QString &alias : *answer)
++                    aliases.push_back(alias.toStdString());
++            return Finish(std::move(aliases), true);
++        }
++        resolver_ = network::SimpleHostResolver::Create(context_);
++        resolver_->ResolveHost(network::mojom::HostResolverHost::NewSchemeHostPort(
++                                       url::SchemeHostPort(url_)),
++                               key_, nullptr,
++                               base::BindOnce(&DnsAliasLookup::OnResolved, base::Unretained(this)));
++    }
++
++private:
++    void OnResolved(int result, const net::ResolveErrorInfo &, const net::AddressList &addresses,
++                    const net::HostResolverEndpointResults &)
++    {
++        Finish(result == net::OK ? addresses.dns_aliases() : std::vector<std::string>(), true);
++    }
++
++    // Delivered as a task of its own, so the request that owns this lookup can
++    // destroy it from the callback.
++    void Finish(std::vector<std::string> aliases, bool looked_up)
++    {
++        if (!callback_)
++            return;
++        base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
++                FROM_HERE, base::BindOnce(std::move(callback_), std::move(aliases), looked_up));
++    }
++
++    raw_ptr<network::mojom::NetworkContext> context_;
++    const GURL url_;
++    const net::NetworkAnonymizationKey key_;
++    Callback callback_;
++    mojo::Receiver<network::mojom::ProxyLookupClient> receiver_{ this };
++    std::unique_ptr<network::SimpleHostResolver> resolver_;
++};
++
+ // Handles intercepted, in-progress requests/responses, so that they can be
+ // controlled and modified accordingly.
+ class InterceptedRequest : public network::mojom::URLLoader
+@@ -131,6 +286,9 @@ public:
+ private:
+     void InterceptOnUIThread();
+     void ContinueAfterIntercept();
++    bool WantsDnsAliases() const;
++    void LookUpDnsAliases();
++    void OnDnsAliases(std::vector<std::string> aliases, bool looked_up);
+ 
+     // This is called when the original URLLoaderClient has a connection error.
+     void OnURLLoaderClientError();
+@@ -177,6 +335,7 @@ private:
+     };
+ 
+     std::unique_ptr<QWebEngineUrlRequestInfo, RequestInfoDeleter> request_info_;
++    std::unique_ptr<DnsAliasLookup> dns_alias_lookup_;
+ 
+     mojo::Receiver<network::mojom::URLLoader> proxied_loader_receiver_;
+     mojo::Remote<network::mojom::URLLoaderClient> target_client_;
+@@ -345,6 +504,68 @@ void InterceptedRequest::Restart()
+     request_info_.reset(new QWebEngineUrlRequestInfo(info));
+ 
+     InterceptOnUIThread();
++    if (WantsDnsAliases())
++        return LookUpDnsAliases();
++    ContinueAfterIntercept();
++}
++
++// An interceptor that let a request through may ask to see it again with the
++// host's DNS aliases, to judge it by the name the host resolves to. Only a
++// subresource of a named host is looked up: a navigation goes where the
++// reader asked, and an IP address has no aliases.
++bool InterceptedRequest::WantsDnsAliases() const
++{
++    if (!request_info_ || !profile_adapter_)
++        return false;
++    const QWebEngineUrlRequestInfoPrivate &info = *request_info_->d_ptr;
++    if (!info.dnsAliasesRequested || info.shouldBlockRequest || info.shouldRedirectRequest)
++        return false;
++    if (blink::mojom::ResourceType(request_.resource_type) == blink::mojom::ResourceType::kMainFrame)
++        return false;
++    if (!request_.url.SchemeIsHTTPOrHTTPS() && !request_.url.SchemeIsWSOrWSS())
++        return false;
++    return !request_.url.HostIsIPAddress();
++}
++
++void InterceptedRequest::LookUpDnsAliases()
++{
++    DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
++    if (auto remembered = DnsAliasCache::instance().find(profile_adapter_, request_.url.host()))
++        return OnDnsAliases(std::move(*remembered), false);
++    net::NetworkAnonymizationKey key;
++    if (!frame_tree_node_id_.is_null()) {
++        if (auto *node = content::FrameTreeNode::GloballyFindByID(frame_tree_node_id_)) {
++            if (auto *frame = node->current_frame_host())
++                key = frame->GetIsolationInfoForSubresources().network_anonymization_key();
++        }
++    }
++    auto *context = profile_adapter_->profile()->GetDefaultStoragePartition()->GetNetworkContext();
++    dns_alias_lookup_ = std::make_unique<DnsAliasLookup>(
++            context, request_.url, key,
++            base::BindOnce(&InterceptedRequest::OnDnsAliases, weak_factory_.GetWeakPtr()));
++}
++
++// The second call happens only for an alias other than the host itself. With
++// none, or a lookup that failed, the first call's decision stands.
++void InterceptedRequest::OnDnsAliases(std::vector<std::string> aliases, bool looked_up)
++{
++    DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
++    dns_alias_lookup_.reset();
++    if (looked_up && profile_adapter_)
++        DnsAliasCache::instance().store(profile_adapter_, request_.url.host(), aliases);
++    if (!request_info_)
++        return ContinueAfterIntercept();
++    QStringList names;
++    for (const std::string &alias : aliases) {
++        if (!base::EqualsCaseInsensitiveASCII(alias, request_.url.host()))
++            names.append(QString::fromStdString(alias));
++    }
++    if (!names.isEmpty()) {
++        QWebEngineUrlRequestInfoPrivate &info = *request_info_->d_ptr;
++        info.dnsAliasesRequested = false;
++        info.dnsAliases = names;
++        InterceptOnUIThread();
++    }
+     ContinueAfterIntercept();
+ }
+ 
+diff --git a/tests/auto/core/qwebengineurlrequestinterceptor/tst_qwebengineurlrequestinterceptor.cpp b/tests/auto/core/qwebengineurlrequestinterceptor/tst_qwebengineurlrequestinterceptor.cpp
+index 2550580e24..c6b9f5c080 100644
+--- a/tests/auto/core/qwebengineurlrequestinterceptor/tst_qwebengineurlrequestinterceptor.cpp
++++ b/tests/auto/core/qwebengineurlrequestinterceptor/tst_qwebengineurlrequestinterceptor.cpp
+@@ -10,6 +10,8 @@
+ #include <QtWebEngineCore/qwebengineprofile.h>
+ #include <QtWebEngineCore/qwebenginepage.h>
+ #include <QtWebEngineCore/qwebenginehttprequest.h>
++#include <QtNetwork/qnetworkproxy.h>
++#include <QtCore/qscopeguard.h>
+ 
+ #include <httpserver.h>
+ #include <httpreqrep.h>
+@@ -55,6 +57,14 @@ private Q_SLOTS:
+     void profilePreventsPageInterception();
+     void download();
+     void redirect();
++    void dnsAliasesReachASecondCall();
++    void dnsAliasesAreNotLookedUpUnlessAsked();
++    void dnsAliasesAreNotLookedUpForABlockedRequest();
++    void dnsAliasesAreNotLookedUpBehindAProxy();
++    void dnsAliasesThatFailLeaveTheFirstDecision();
++    void dnsAliasesNamingOnlyTheHostMakeNoSecondCall();
++    void dnsAliasesAreRememberedForAHost();
++    void dnsAliasesAreRememberedPerProfile();
+ };
+ 
+ tst_QWebEngineUrlRequestInterceptor::tst_QWebEngineUrlRequestInterceptor()
+@@ -1173,5 +1183,195 @@ void tst_QWebEngineUrlRequestInterceptor::redirect()
+     QTRY_COMPARE(interceptor.requestInfos.size(), 3);
+ }
+ 
++// Asks for the DNS aliases of every subresource it lets through, and records
++// each call it gets: the address, and the aliases the call came with.
++class DnsAliasInterceptor : public QWebEngineUrlRequestInterceptor
++{
++public:
++    struct Call
++    {
++        QUrl url;
++        QStringList aliases;
++    };
++    QList<Call> calls;
++    bool ask = true;
++    bool block = false;
++
++    void interceptRequest(QWebEngineUrlRequestInfo &info) override
++    {
++        if (info.resourceType() == QWebEngineUrlRequestInfo::ResourceTypeMainFrame)
++            return;
++        calls.append({ info.requestUrl(), info.dnsAliases() });
++        if (!info.dnsAliases().isEmpty())
++            return;
++        if (block)
++            info.block(true);
++        else if (ask)
++            info.requestDnsAliases();
++    }
++
++    QList<Call> callsFor(const QUrl &url) const
++    {
++        QList<Call> matching;
++        for (const Call &call : calls) {
++            if (call.url == url)
++                matching.append(call);
++        }
++        return matching;
++    }
++};
++
++static const QUrl cloakedPixel(QStringLiteral("http://metrics.site.test/pixel.png"));
++
++// Loads a page on a named host that asks for one image from a subdomain of
++// its own, and waits for it to finish. No request reaches a network: the
++// hosts do not resolve, and the image failing to load is not what is tested.
++static void loadCloakedPixel(QWebEngineProfile &profile)
++{
++    QWebEnginePage page(&profile);
++    QSignalSpy loaded(&page, &QWebEnginePage::loadFinished);
++    page.setHtml(QStringLiteral("<img src='%1'>").arg(cloakedPixel.toString()),
++                 QUrl(QStringLiteral("http://site.test/")));
++    QTRY_COMPARE_WITH_TIMEOUT(loaded.size(), 1, 20000);
++}
++
++// Stands in for the network service's resolver, and counts how often it is
++// asked about the image's host. The page's favicon is looked up too, at a
++// moment of the engine's choosing, so it is left out of the count.
++struct TestResolver
++{
++    int lookups = 0;
++    std::optional<QStringList> answer;
++
++    TestResolver(std::optional<QStringList> value) : answer(std::move(value))
++    {
++        QtWebEngineCore::setDnsAliasResolverForTesting([this](const QString &host) {
++            if (host == cloakedPixel.host())
++                ++lookups;
++            return answer;
++        });
++    }
++    ~TestResolver() { QtWebEngineCore::setDnsAliasResolverForTesting({}); }
++};
++
++void tst_QWebEngineUrlRequestInterceptor::dnsAliasesReachASecondCall()
++{
++    TestResolver resolver(QStringList{ QStringLiteral("collect.tracker.test"),
++                                       QStringLiteral("edge.tracker.test"),
++                                       cloakedPixel.host() });
++    QWebEngineProfile profile;
++    DnsAliasInterceptor interceptor;
++    profile.setUrlRequestInterceptor(&interceptor);
++    loadCloakedPixel(profile);
++
++    const auto calls = interceptor.callsFor(cloakedPixel);
++    QCOMPARE(calls.size(), 2);
++    QVERIFY(calls.at(0).aliases.isEmpty());
++    // The chain as the resolver gave it, less the host itself.
++    QCOMPARE(calls.at(1).aliases,
++             (QStringList{ QStringLiteral("collect.tracker.test"), QStringLiteral("edge.tracker.test") }));
++    QCOMPARE(resolver.lookups, 1);
++}
++
++void tst_QWebEngineUrlRequestInterceptor::dnsAliasesAreNotLookedUpUnlessAsked()
++{
++    TestResolver resolver(QStringList{ QStringLiteral("collect.tracker.test") });
++    QWebEngineProfile profile;
++    DnsAliasInterceptor interceptor;
++    interceptor.ask = false;
++    profile.setUrlRequestInterceptor(&interceptor);
++    loadCloakedPixel(profile);
++
++    QCOMPARE(interceptor.callsFor(cloakedPixel).size(), 1);
++    QCOMPARE(resolver.lookups, 0);
++}
++
++void tst_QWebEngineUrlRequestInterceptor::dnsAliasesAreNotLookedUpForABlockedRequest()
++{
++    TestResolver resolver(QStringList{ QStringLiteral("collect.tracker.test") });
++    QWebEngineProfile profile;
++    DnsAliasInterceptor interceptor;
++    interceptor.block = true;
++    profile.setUrlRequestInterceptor(&interceptor);
++    loadCloakedPixel(profile);
++
++    QCOMPARE(interceptor.callsFor(cloakedPixel).size(), 1);
++    QCOMPARE(resolver.lookups, 0);
++}
++
++// Behind a proxy a local lookup leaks the query, and can disagree with the
++// address the proxy connects to, so none is made.
++void tst_QWebEngineUrlRequestInterceptor::dnsAliasesAreNotLookedUpBehindAProxy()
++{
++    TestResolver resolver(QStringList{ QStringLiteral("collect.tracker.test") });
++    QNetworkProxy::setApplicationProxy(
++            QNetworkProxy(QNetworkProxy::HttpProxy, QStringLiteral("127.0.0.1"), 9));
++    const auto restore = qScopeGuard([] { QNetworkProxy::setApplicationProxy(QNetworkProxy()); });
++    QWebEngineProfile profile;
++    DnsAliasInterceptor interceptor;
++    profile.setUrlRequestInterceptor(&interceptor);
++    loadCloakedPixel(profile);
++
++    QCOMPARE(interceptor.callsFor(cloakedPixel).size(), 1);
++    QCOMPARE(resolver.lookups, 0);
++}
++
++void tst_QWebEngineUrlRequestInterceptor::dnsAliasesThatFailLeaveTheFirstDecision()
++{
++    TestResolver resolver(std::nullopt);
++    QWebEngineProfile profile;
++    DnsAliasInterceptor interceptor;
++    profile.setUrlRequestInterceptor(&interceptor);
++    loadCloakedPixel(profile);
++
++    QCOMPARE(interceptor.callsFor(cloakedPixel).size(), 1);
++    QCOMPARE(resolver.lookups, 1);
++}
++
++void tst_QWebEngineUrlRequestInterceptor::dnsAliasesNamingOnlyTheHostMakeNoSecondCall()
++{
++    TestResolver resolver(QStringList{ cloakedPixel.host() });
++    QWebEngineProfile profile;
++    DnsAliasInterceptor interceptor;
++    profile.setUrlRequestInterceptor(&interceptor);
++    loadCloakedPixel(profile);
++
++    QCOMPARE(interceptor.callsFor(cloakedPixel).size(), 1);
++    QCOMPARE(resolver.lookups, 1);
++}
++
++// A host a profile has just resolved is not resolved again: the second
++// request is judged by the same answer, and waits for no lookup at all.
++void tst_QWebEngineUrlRequestInterceptor::dnsAliasesAreRememberedForAHost()
++{
++    TestResolver resolver(QStringList{ QStringLiteral("collect.tracker.test") });
++    QWebEngineProfile profile;
++    DnsAliasInterceptor interceptor;
++    profile.setUrlRequestInterceptor(&interceptor);
++    loadCloakedPixel(profile);
++    loadCloakedPixel(profile);
++
++    const auto calls = interceptor.callsFor(cloakedPixel);
++    QCOMPARE(calls.size(), 4);
++    QCOMPARE(calls.at(3).aliases, QStringList{ QStringLiteral("collect.tracker.test") });
++    QCOMPARE(resolver.lookups, 1);
++}
++
++// What one profile resolved says nothing to another: a Private window must
++// not learn which hosts a Space has visited.
++void tst_QWebEngineUrlRequestInterceptor::dnsAliasesAreRememberedPerProfile()
++{
++    TestResolver resolver(QStringList{ QStringLiteral("collect.tracker.test") });
++    QWebEngineProfile first(QStringLiteral("dns-aliases-first"));
++    QWebEngineProfile second(QStringLiteral("dns-aliases-second"));
++    DnsAliasInterceptor interceptor;
++    first.setUrlRequestInterceptor(&interceptor);
++    second.setUrlRequestInterceptor(&interceptor);
++    loadCloakedPixel(first);
++    loadCloakedPixel(second);
++
++    QCOMPARE(resolver.lookups, 2);
++}
++
+ QTEST_MAIN(tst_QWebEngineUrlRequestInterceptor)
+ #include "tst_qwebengineurlrequestinterceptor.moc"
+-- 
+2.54.0 (Apple Git-157)
+

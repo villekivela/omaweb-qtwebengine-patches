@@ -98,6 +98,17 @@ bare `WebEngineView` went from 25.5 to 33.9. The header is Chromium 140's, uncha
 [QTBUG-149450](https://qt-project.atlassian.net/browse/QTBUG-149450). The Windows build needs a
 form MSVC accepts._
 
+**0016, let a request interceptor ask for the host's DNS aliases.** A tracker served from a
+subdomain of the page's own site, with a CNAME pointing at the tracker's real host, never shows the
+tracker's name to an interceptor. `QWebEngineUrlRequestInfo::requestDnsAliases()` asks for them:
+the host is resolved through the profile's own network context and host cache, and the interceptor
+is called once more with `dnsAliases()`, the names in the host's CNAME chain. No lookup is made for a main-frame
+navigation, an IP address, or behind a proxy, and a profile remembers each host's answer for a
+minute, so a page's later requests to that host wait for nothing. This is the one patch that is not about extensions,
+and Omaweb's content blocking is what asks. See
+[omaweb#354](https://github.com/villekivela/omaweb/issues/354) and ADR 0050. _A feature with tests,
+written as Qt API. Propose it as one._
+
 ## The open question
 
 `TabsDelegateQt` is internal, and `ExtensionsBrowserClientQt` fills it by treating every page of the
@@ -118,7 +129,8 @@ worth having:
 - `nativeMessaging` fails
 - `anExtensionOpensAPage` fails
 
-`scripts/verify.sh` runs both halves and reports them.
+Patch 0016's eight cases live in Qt's own `tst_qwebengineurlrequestinterceptor`, and the gate runs
+only those, beside the extension tests. `scripts/verify.sh` runs both halves and reports them.
 
 ## Rebase record
 
