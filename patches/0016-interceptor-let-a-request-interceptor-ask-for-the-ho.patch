@@ -1,4 +1,4 @@
-From 7507fb76510421b9f1207b431b3cbd3388241f49 Mon Sep 17 00:00:00 2001
+From d4783b08c7d1d93aa6e8d40e33a01eff62c8dee9 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivela=CC=88?= <vkivela@hotmail.com>
 Date: Fri, 25 Sep 2026 09:11:04 +0300
 Subject: [PATCH] interceptor: let a request interceptor ask for the host's DNS
@@ -17,8 +17,15 @@ host is resolved through the profile's own network context, and the
 interceptor is called once more with dnsAliases() set to the names in
 the host's CNAME chain. The resolver keeps those in a sorted set, so
 the list says which names are in the chain and not which is canonical.
-The lookup goes through the profile's host cache, so the request that
-follows reads the answer rather than resolving again.
+Qt runs Chromium's own DNS client only under secure DNS; otherwise
+every lookup goes through the system resolver, which reports an alias
+only when asked for the canonical name, and then reports that one
+alone. So without secure DNS the lookup asks for it, and the second
+call carries the chain's last name. Under secure DNS it does not ask:
+Chromium sends any lookup that asks to the system resolver, which would
+take it off DoH. There the whole chain comes back, and the lookup goes
+through the profile's host cache, so the request that follows reads the
+answer rather than resolving again.
 
 A profile also keeps its answers for a minute, so a page's later
 requests to the same host wait for neither the proxy check nor the
@@ -35,14 +42,16 @@ never asks sees no change.
 
 Tests stand in for the resolver through a private hook that answers
 after the proxy check, so a CNAME chain can be named without a DNS
-server and the proxy case still proves no lookup is made.
+server and the proxy case still proves no lookup is made. One more case
+asks the real resolver about public hosts under both modes; it needs
+the internet, so it runs only when OMAWEB_CHECK_REAL_DNS is set.
 ---
  src/core/api/qwebengineurlrequestinfo.cpp     |  36 +++
  src/core/api/qwebengineurlrequestinfo.h       |   4 +
- src/core/api/qwebengineurlrequestinfo_p.h     |  13 ++
- .../net/proxying_url_loader_factory_qt.cpp    | 221 ++++++++++++++++++
- .../tst_qwebengineurlrequestinterceptor.cpp   | 200 ++++++++++++++++
- 5 files changed, 474 insertions(+)
+ src/core/api/qwebengineurlrequestinfo_p.h     |  13 +
+ .../net/proxying_url_loader_factory_qt.cpp    | 237 ++++++++++++++++
+ .../tst_qwebengineurlrequestinterceptor.cpp   | 254 ++++++++++++++++++
+ 5 files changed, 544 insertions(+)
 
 diff --git a/src/core/api/qwebengineurlrequestinfo.cpp b/src/core/api/qwebengineurlrequestinfo.cpp
 index 0e69622c16..e73408f582 100644
@@ -142,10 +151,10 @@ index ef98c91d9f..3f99ae5a4b 100644
 +
  #endif // QWEBENGINEURLREQUESTINFO_P_H
 diff --git a/src/core/net/proxying_url_loader_factory_qt.cpp b/src/core/net/proxying_url_loader_factory_qt.cpp
-index 0c38fcadf4..4606e15f28 100644
+index 0c38fcadf4..3db4797935 100644
 --- a/src/core/net/proxying_url_loader_factory_qt.cpp
 +++ b/src/core/net/proxying_url_loader_factory_qt.cpp
-@@ -4,23 +4,39 @@
+@@ -4,23 +4,40 @@
  
  #include "proxying_url_loader_factory_qt.h"
  
@@ -179,13 +188,14 @@ index 0c38fcadf4..4606e15f28 100644
  #include "url/url_util.h"
  #include "url/url_util_qt.h"
  
++#include "api/qwebengineglobalsettings_p.h"
  #include "api/qwebengineurlrequestinfo_p.h"
 +#include "profile_adapter.h"
 +#include "profile_qt.h"
  #include "type_conversion.h"
  #include "web_contents_adapter.h"
  #include "web_contents_adapter_client.h"
-@@ -95,6 +111,145 @@ static QHash<QByteArray, QByteArray> toQt(const net::HttpRequestHeaders &headers
+@@ -95,6 +112,160 @@ static QHash<QByteArray, QByteArray> toQt(const net::HttpRequestHeaders &headers
      return hash;
  }
  
@@ -299,11 +309,26 @@ index 0c38fcadf4..4606e15f28 100644
 +        resolver_ = network::SimpleHostResolver::Create(context_);
 +        resolver_->ResolveHost(network::mojom::HostResolverHost::NewSchemeHostPort(
 +                                       url::SchemeHostPort(url_)),
-+                               key_, nullptr,
++                               key_, parameters(),
 +                               base::BindOnce(&DnsAliasLookup::OnResolved, base::Unretained(this)));
 +    }
 +
 +private:
++    // Qt leaves Chromium's own DNS client off, so without secure DNS every
++    // lookup goes through the system resolver, which reports no alias unless
++    // it is asked for the canonical name, and then reports only that one. The
++    // question is asked only then: Chromium sends any lookup that asks it to
++    // the system resolver, which would take a secure DNS lookup off DoH.
++    static network::mojom::ResolveHostParametersPtr parameters()
++    {
++        if (QWebEngineGlobalSettingsPrivate::instance()->dnsMode
++            != QWebEngineGlobalSettings::SecureDnsMode::SystemOnly)
++            return nullptr;
++        auto parameters = network::mojom::ResolveHostParameters::New();
++        parameters->include_canonical_name = true;
++        return parameters;
++    }
++
 +    void OnResolved(int result, const net::ResolveErrorInfo &, const net::AddressList &addresses,
 +                    const net::HostResolverEndpointResults &)
 +    {
@@ -331,7 +356,7 @@ index 0c38fcadf4..4606e15f28 100644
  // Handles intercepted, in-progress requests/responses, so that they can be
  // controlled and modified accordingly.
  class InterceptedRequest : public network::mojom::URLLoader
-@@ -131,6 +286,9 @@ public:
+@@ -131,6 +302,9 @@ public:
  private:
      void InterceptOnUIThread();
      void ContinueAfterIntercept();
@@ -341,7 +366,7 @@ index 0c38fcadf4..4606e15f28 100644
  
      // This is called when the original URLLoaderClient has a connection error.
      void OnURLLoaderClientError();
-@@ -177,6 +335,7 @@ private:
+@@ -177,6 +351,7 @@ private:
      };
  
      std::unique_ptr<QWebEngineUrlRequestInfo, RequestInfoDeleter> request_info_;
@@ -349,7 +374,7 @@ index 0c38fcadf4..4606e15f28 100644
  
      mojo::Receiver<network::mojom::URLLoader> proxied_loader_receiver_;
      mojo::Remote<network::mojom::URLLoaderClient> target_client_;
-@@ -345,6 +504,68 @@ void InterceptedRequest::Restart()
+@@ -345,6 +520,68 @@ void InterceptedRequest::Restart()
      request_info_.reset(new QWebEngineUrlRequestInfo(info));
  
      InterceptOnUIThread();
@@ -419,10 +444,14 @@ index 0c38fcadf4..4606e15f28 100644
  }
  
 diff --git a/tests/auto/core/qwebengineurlrequestinterceptor/tst_qwebengineurlrequestinterceptor.cpp b/tests/auto/core/qwebengineurlrequestinterceptor/tst_qwebengineurlrequestinterceptor.cpp
-index 2550580e24..c6b9f5c080 100644
+index 2550580e24..5f2f9d1448 100644
 --- a/tests/auto/core/qwebengineurlrequestinterceptor/tst_qwebengineurlrequestinterceptor.cpp
 +++ b/tests/auto/core/qwebengineurlrequestinterceptor/tst_qwebengineurlrequestinterceptor.cpp
-@@ -10,6 +10,8 @@
+@@ -7,9 +7,12 @@
+ #include <QtWebEngineCore/private/qwebengineurlrequestinfo_p.h>
+ #include <QtWebEngineCore/qwebengineurlrequestinterceptor.h>
+ #include <QtWebEngineCore/qwebenginesettings.h>
++#include <QtWebEngineCore/qwebengineglobalsettings.h>
  #include <QtWebEngineCore/qwebengineprofile.h>
  #include <QtWebEngineCore/qwebenginepage.h>
  #include <QtWebEngineCore/qwebenginehttprequest.h>
@@ -431,7 +460,7 @@ index 2550580e24..c6b9f5c080 100644
  
  #include <httpserver.h>
  #include <httpreqrep.h>
-@@ -55,6 +57,14 @@ private Q_SLOTS:
+@@ -55,6 +58,16 @@ private Q_SLOTS:
      void profilePreventsPageInterception();
      void download();
      void redirect();
@@ -443,10 +472,12 @@ index 2550580e24..c6b9f5c080 100644
 +    void dnsAliasesNamingOnlyTheHostMakeNoSecondCall();
 +    void dnsAliasesAreRememberedForAHost();
 +    void dnsAliasesAreRememberedPerProfile();
++    void dnsAliasesFromTheResolver_data();
++    void dnsAliasesFromTheResolver();
  };
  
  tst_QWebEngineUrlRequestInterceptor::tst_QWebEngineUrlRequestInterceptor()
-@@ -1173,5 +1183,195 @@ void tst_QWebEngineUrlRequestInterceptor::redirect()
+@@ -1173,5 +1186,246 @@ void tst_QWebEngineUrlRequestInterceptor::redirect()
      QTRY_COMPARE(interceptor.requestInfos.size(), 3);
  }
  
@@ -638,6 +669,57 @@ index 2550580e24..c6b9f5c080 100644
 +    loadCloakedPixel(second);
 +
 +    QCOMPARE(resolver.lookups, 2);
++}
++
++// The real resolver rather than the stand-in, against hosts whose CNAME chains
++// are public and end at a CDN. It needs the internet, so it runs only when
++// asked for; scripts/check-real-dns.sh in the patch series asks. Without
++// secure DNS the system resolver answers, and it names the chain's last name
++// only. With it, Chromium's own client answers with the whole chain.
++void tst_QWebEngineUrlRequestInterceptor::dnsAliasesFromTheResolver_data()
++{
++    QTest::addColumn<QWebEngineGlobalSettings::SecureDnsMode>("mode");
++    QTest::addColumn<int>("fewestNames");
++    QTest::newRow("system resolver") << QWebEngineGlobalSettings::SecureDnsMode::SystemOnly << 1;
++    QTest::newRow("secure DNS") << QWebEngineGlobalSettings::SecureDnsMode::SecureOnly << 2;
++}
++
++void tst_QWebEngineUrlRequestInterceptor::dnsAliasesFromTheResolver()
++{
++    if (qEnvironmentVariableIsEmpty("OMAWEB_CHECK_REAL_DNS"))
++        QSKIP("Reaches the internet; set OMAWEB_CHECK_REAL_DNS to run it.");
++    QFETCH(QWebEngineGlobalSettings::SecureDnsMode, mode);
++    QFETCH(int, fewestNames);
++    QVERIFY(QWebEngineGlobalSettings::setDnsMode(
++            { mode, { QStringLiteral("https://cloudflare-dns.com/dns-query") } }));
++    const auto restore = qScopeGuard([] {
++        QWebEngineGlobalSettings::setDnsMode({ QWebEngineGlobalSettings::SecureDnsMode::SystemOnly, {} });
++    });
++
++    const QList<QUrl> icons{ QUrl(QStringLiteral("https://www.apple.com/favicon.ico")),
++                             QUrl(QStringLiteral("https://www.ibm.com/favicon.ico")),
++                             QUrl(QStringLiteral("https://www.microsoft.com/favicon.ico")) };
++    QString html;
++    for (const QUrl &icon : icons)
++        html += QStringLiteral("<img src='%1'>").arg(icon.toString());
++    QWebEngineProfile profile;
++    DnsAliasInterceptor interceptor;
++    profile.setUrlRequestInterceptor(&interceptor);
++    QWebEnginePage page(&profile);
++    QSignalSpy loaded(&page, &QWebEnginePage::loadFinished);
++    page.setHtml(html, QUrl(QStringLiteral("http://site.test/")));
++    QTRY_COMPARE_WITH_TIMEOUT(loaded.size(), 1, 30000);
++
++    for (const QUrl &icon : icons) {
++        const auto calls = interceptor.callsFor(icon);
++        QVERIFY2(calls.size() == 2, qPrintable(icon.host() + QStringLiteral(": no second call")));
++        const QStringList names = calls.at(1).aliases;
++        qInfo() << icon.host() << names;
++        QVERIFY2(names.size() >= fewestNames, qPrintable(icon.host()));
++        QVERIFY2(std::any_of(names.cbegin(), names.cend(),
++                             [](const QString &name) { return name.endsWith(QStringLiteral(".akamaiedge.net")); }),
++                 qPrintable(icon.host()));
++    }
 +}
 +
  QTEST_MAIN(tst_QWebEngineUrlRequestInterceptor)

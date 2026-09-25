@@ -104,7 +104,11 @@ tracker's name to an interceptor. `QWebEngineUrlRequestInfo::requestDnsAliases()
 the host is resolved through the profile's own network context and host cache, and the interceptor
 is called once more with `dnsAliases()`, the names in the host's CNAME chain. No lookup is made for a main-frame
 navigation, an IP address, or behind a proxy, and a profile remembers each host's answer for a
-minute, so a page's later requests to that host wait for nothing. This is the one patch that is not about extensions,
+minute, so a page's later requests to that host wait for nothing. Qt runs Chromium's own DNS client
+only under secure DNS, so that is where the whole chain comes back; through the system resolver the
+lookup asks for the canonical name and gets the chain's last name only.
+`scripts/check-real-dns.sh <tree>` asks real public hosts under both modes, which the gate cannot
+because it has no DNS server and no internet. This is the one patch that is not about extensions,
 and Omaweb's content blocking is what asks. See
 [omaweb#354](https://github.com/villekivela/omaweb/issues/354) and ADR 0050. _A feature with tests,
 written as Qt API. Propose it as one._
