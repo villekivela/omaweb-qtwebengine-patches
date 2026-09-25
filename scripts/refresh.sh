@@ -65,6 +65,30 @@ total="$(ls "$series"/*.patch | wc -l | tr -d ' ')"
 # work, and `git am` refuses a dirty tree.
 git am --abort > /dev/null 2>&1 || true
 git reset -q --hard && git clean -qfd
+# A patch changed in place since the tree was built counts the same as one
+# that did not, so the count alone would keep the old one and build it again.
+# Each applied commit is compared with its file by patch id, and the tree is
+# rewound to just before the first that differs. The build directory is
+# untracked and stays, so only what the changed patches touch is rebuilt.
+if [ "$applied" -gt 0 ]; then
+    kept=0
+    for commit in $(git rev-list --reverse "v$version-tarball"..HEAD); do
+        file="$(ls "$series"/*.patch | sed -n "$((kept + 1))p")"
+        [ -n "$file" ] || break
+        [ "$(git show "$commit" | git patch-id --stable | cut -d' ' -f1)" = \
+            "$(git patch-id --stable < "$file" | cut -d' ' -f1)" ] || break
+        kept=$((kept + 1))
+    done
+    if [ "$kept" -lt "$applied" ]; then
+        echo "SERIES CHANGED: patch $((kept + 1)) differs from the tree, applying again from there"
+        if [ "$kept" -gt 0 ]; then
+            git reset -q --hard "$(git rev-list --reverse "v$version-tarball"..HEAD | sed -n "${kept}p")"
+        else
+            git reset -q --hard "v$version-tarball"
+        fi
+        applied="$kept"
+    fi
+fi
 if [ "$applied" -ge "$total" ]; then
     echo "SERIES ALREADY APPLIED: $applied commits on the tarball"
 elif [ "$applied" -gt 0 ] && git am $(ls "$series"/*.patch | tail -n +"$((applied + 1))"); then
