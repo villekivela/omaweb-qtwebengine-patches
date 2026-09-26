@@ -105,6 +105,24 @@ else
     echo "  the test did not finish cleanly, exit $?"
 fi
 
+# The certificate chain a page arrived over is the one patch whose case lives
+# in Qt's certificate error test, because that test has the server certificate
+# to accept. Only the case the patch adds runs.
+certificates="$tree/build/tests/auto/core/certificateerror/tst_certificateerror"
+[ -x "$certificates" ] || "$tree/build.sh" tst_certificateerror
+
+echo "=== patched engine, the certificate chain a page arrived over"
+if env "$path_var=$tree/build/lib" \
+    ${helper:+QTWEBENGINEPROCESS_PATH="$helper"} \
+    ${resources:+QTWEBENGINE_RESOURCES_PATH="$resources"} \
+    ${locales:+QTWEBENGINE_LOCALES_PATH="$locales"} \
+    "$certificates" loadingInfoCarriesAcceptedChain -nocrashhandler -o -,txt 2>&1
+then
+    :
+else
+    echo "  the test did not finish cleanly, exit $?"
+fi
+
 echo "=== stock engine, where each of these must fail or crash"
 if [ ! -e "$stock/qt6/QtWebEngineProcess" ] && [ ! -e "$stock/QtWebEngineProcess" ] \
     && [ ! -d "$stock/QtWebEngineCore.framework" ]

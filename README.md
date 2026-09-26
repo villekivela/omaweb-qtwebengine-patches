@@ -113,6 +113,15 @@ and Omaweb's content blocking is what asks. See
 [omaweb#354](https://github.com/villekivela/omaweb/issues/354) and ADR 0050. _A feature with tests,
 written as Qt API. Propose it as one._
 
+**0017, report the certificate chain a page arrived over.** A certificate failure carries the chain
+it was raised for, and a page whose certificate verified raises nothing, so an application has no
+way to show the reader the certificate of the page on show. `QWebEngineLoadingInfo::certificateChain()`
+returns it for a finished main-frame load: the chain Chromium's verifier built, from the server's
+certificate to the trust anchor, taken from the navigation's SSL info as the response headers are.
+A load that made no TLS connection carries none. See
+[omaweb#325](https://github.com/villekivela/omaweb/issues/325) and ADR 0054. _A feature with tests,
+written as Qt API. Propose it as one._
+
 ## The open question
 
 `TabsDelegateQt` is internal, and `ExtensionsBrowserClientQt` fills it by treating every page of the
@@ -134,7 +143,10 @@ worth having:
 - `anExtensionOpensAPage` fails
 
 Patch 0016's eight cases live in Qt's own `tst_qwebengineurlrequestinterceptor`, and the gate runs
-only those, beside the extension tests. `scripts/verify.sh` runs both halves and reports them.
+only those, beside the extension tests. Patch 0017's case lives in Qt's `tst_certificateerror`, which
+has the test server's certificate, and the gate runs it the same way. `scripts/verify.sh` runs all
+three and reports them. Neither compiles against a stock build, which has no API for them to call,
+so there is no stock run to compare: removing the line that keeps the chain fails 0017's case.
 
 ## Rebase record
 
