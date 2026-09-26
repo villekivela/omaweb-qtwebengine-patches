@@ -6,15 +6,21 @@ name: Scripts
 #
 # Shellcheck covers the files this test belongs to. The other scripts predate
 # it and have findings of their own.
+#
+# The PKGBUILD's checksums are checked here too: makepkg checks them only when
+# an engine is packaged, and a notice edited without its checksum stopped the
+# package there.
 on:
   pull_request:
     paths:
       - "scripts/**"
+      - "packaging/**"
       - ".github/workflows/scripts.yml"
   push:
     branches: [main]
     paths:
       - "scripts/**"
+      - "packaging/**"
       - ".github/workflows/scripts.yml"
 
 permissions:
@@ -32,3 +38,15 @@ jobs:
 
       - name: Test the collector
         run: scripts/test-collect-builds.sh
+
+  pkgbuild-sums:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Shellcheck
+        run: shellcheck scripts/check-pkgbuild-sums.sh
+
+      - name: Check the PKGBUILD's checksums
+        run: scripts/check-pkgbuild-sums.sh
