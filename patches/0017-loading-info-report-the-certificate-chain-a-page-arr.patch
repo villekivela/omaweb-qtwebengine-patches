@@ -1,0 +1,286 @@
+From 79018497acb4e8bfa93965f5c36908077ac31b5e Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Ville=20Kivela=CC=88?= <vkivela@hotmail.com>
+Date: Sat, 26 Sep 2026 12:26:44 +0300
+Subject: [PATCH] loading info: report the certificate chain a page arrived
+ over
+
+A browser shows the reader the certificate of the page on show, and an
+application embedding QtWebEngine has no way to read it. A certificate
+failure carries the chain it was raised for, but a page whose
+certificate verified raises nothing, and nothing else says what it
+arrived over.
+
+QWebEngineLoadingInfo::certificateChain() returns it for a finished
+main-frame load, from the server's certificate to the trust anchor. It
+is the chain Chromium's verifier built, taken from the navigation's SSL
+info when the navigation finishes, so it ends at the anchor the
+verifier trusted rather than wherever the server's own list ended. For
+a certificate the application accepted through
+QWebEngineCertificateError, it is the chain that failed. A load that
+made no TLS connection carries none, and a same-document navigation
+leaves it as it was. It travels as the response headers do, and an
+application that never reads it sees no change.
+
+The test accepts the test server's certificate, reads the chain from
+the finished load, and checks it is the chain the failure named, that a
+second document from the same server reports it too, and that a page
+set from HTML reports none. A plain HTTP load reports none either.
+---
+ src/core/api/qwebengineloadinginfo.cpp        | 31 +++++++++--
+ src/core/api/qwebengineloadinginfo.h          |  5 +-
+ src/core/web_contents_delegate_qt.cpp         | 14 ++++-
+ src/core/web_contents_delegate_qt.h           |  2 +
+ .../certificateerror/tst_certificateerror.cpp | 51 +++++++++++++++++++
+ .../tst_qwebengineloadinginfo.cpp             |  2 +
+ 6 files changed, 100 insertions(+), 5 deletions(-)
+
+diff --git a/src/core/api/qwebengineloadinginfo.cpp b/src/core/api/qwebengineloadinginfo.cpp
+index 12e6762f0d..05706b9d9c 100644
+--- a/src/core/api/qwebengineloadinginfo.cpp
++++ b/src/core/api/qwebengineloadinginfo.cpp
+@@ -25,7 +25,7 @@ public:
+     QWebEngineLoadingInfoPrivate(const QUrl& url, LoadStatus status, bool isErrorPage,
+                                  const QString& errorString, int errorCode, ErrorDomain errorDomain,
+                                  const QMultiMap<QByteArray,QByteArray>& responseHeaders,
+-                                 bool isDownload)
++                                 bool isDownload, const QList<QSslCertificate> &certificateChain)
+         : url(url)
+         , status(status)
+         , isErrorPage(isErrorPage)
+@@ -34,6 +34,7 @@ public:
+         , errorDomain(errorDomain)
+         , responseHeaders(responseHeaders)
+         , isDownload(isDownload)
++        , certificateChain(certificateChain)
+     {
+     }
+ 
+@@ -45,6 +46,7 @@ public:
+     ErrorDomain errorDomain;
+     QMultiMap<QByteArray,QByteArray> responseHeaders;
+     bool isDownload;
++    QList<QSslCertificate> certificateChain;
+ };
+ 
+ /*!
+@@ -61,9 +63,9 @@ public:
+ QWebEngineLoadingInfo::QWebEngineLoadingInfo(const QUrl& url, LoadStatus status, bool isErrorPage,
+                                              const QString& errorString, int errorCode, ErrorDomain errorDomain,
+                                              const QMultiMap<QByteArray,QByteArray>& responseHeaders,
+-                                             bool isDownload)
++                                             bool isDownload, const QList<QSslCertificate> &certificateChain)
+     : d_ptr(new QWebEngineLoadingInfoPrivate(url, status, isErrorPage, errorString, errorCode, errorDomain,
+-                                             responseHeaders, isDownload))
++                                             responseHeaders, isDownload, certificateChain))
+ {
+ }
+ 
+@@ -198,6 +200,29 @@ bool QWebEngineLoadingInfo::isDownload() const
+     return d->isDownload;
+ }
+ 
++/*!
++    \since 6.12
++    Returns the certificate chain the main frame's document arrived over, from the
++    server's own certificate first to the trust anchor last, when \c status() is
++    \c QWebEngineLoadingInfo::LoadSucceededStatus or
++    \c QWebEngineLoadingInfo::LoadFailedStatus.
++
++    The chain is the one certificate verification built, so it ends at the anchor
++    the verifier trusted rather than wherever the server's own list ended. For a
++    certificate the application accepted through QWebEngineCertificateError, it is
++    the chain that failed verification.
++
++    The list is empty for a document that did not arrive over TLS, and for a
++    status other than those two.
++
++    \sa QWebEngineCertificateError::certificateChain()
++*/
++QList<QSslCertificate> QWebEngineLoadingInfo::certificateChain() const
++{
++    Q_D(const QWebEngineLoadingInfo);
++    return d->certificateChain;
++}
++
+ QT_END_NAMESPACE
+ 
+ #include "moc_qwebengineloadinginfo.cpp"
+diff --git a/src/core/api/qwebengineloadinginfo.h b/src/core/api/qwebengineloadinginfo.h
+index 8b14983ff2..15f1294839 100644
+--- a/src/core/api/qwebengineloadinginfo.h
++++ b/src/core/api/qwebengineloadinginfo.h
+@@ -11,6 +11,7 @@
+ #include <QtCore/qobject.h>
+ #include <QtCore/qshareddata.h>
+ #include <QtCore/qurl.h>
++#include <QtNetwork/qsslcertificate.h>
+ 
+ namespace QtWebEngineCore {
+ class WebContentsAdapter;
+@@ -67,13 +68,15 @@ public:
+     int errorCode() const;
+     QMultiMap<QByteArray,QByteArray> responseHeaders() const;
+     bool isDownload() const;
++    QList<QSslCertificate> certificateChain() const;
+ 
+ private:
+     QWebEngineLoadingInfo(const QUrl &url, LoadStatus status, bool isErrorPage = false,
+                           const QString &errorString = QString(), int errorCode = 0,
+                           ErrorDomain errorDomain = NoErrorDomain,
+                           const QMultiMap<QByteArray,QByteArray> &responseHeaders = {},
+-                          bool isDownload = false);
++                          bool isDownload = false,
++                          const QList<QSslCertificate> &certificateChain = {});
+     class QWebEngineLoadingInfoPrivate;
+     Q_DECLARE_PRIVATE(QWebEngineLoadingInfo)
+     QExplicitlySharedDataPointer<QWebEngineLoadingInfoPrivate> d_ptr;
+diff --git a/src/core/web_contents_delegate_qt.cpp b/src/core/web_contents_delegate_qt.cpp
+index 6d808d6a0b..8b9b497df3 100644
+--- a/src/core/web_contents_delegate_qt.cpp
++++ b/src/core/web_contents_delegate_qt.cpp
+@@ -53,6 +53,7 @@
+ #include "content/public/browser/web_contents.h"
+ #include "content/public/common/url_constants.h"
+ #include "net/base/data_url.h"
++#include "net/ssl/ssl_info.h"
+ #include "net/base/url_util.h"
+ #include "third_party/blink/public/mojom/mediastream/media_stream.mojom.h"
+ 
+@@ -407,7 +408,8 @@ void WebContentsDelegateQt::emitLoadFinished(bool isErrorPage)
+     QWebEngineLoadingInfo info(m_loadingInfo.url, loadStatus, m_loadingInfo.isErrorPage,
+                                m_loadingInfo.errorDescription, m_loadingInfo.errorCode,
+                                QWebEngineLoadingInfo::ErrorDomain(m_loadingInfo.errorDomain),
+-                               m_loadingInfo.responseHeaders, m_loadingInfo.isDownload);
++                               m_loadingInfo.responseHeaders, m_loadingInfo.isDownload,
++                               m_loadingInfo.certificateChain);
+     m_viewClient->loadFinished(std::move(info));
+     m_viewClient->updateNavigationActions();
+ }
+@@ -458,6 +460,16 @@ void WebContentsDelegateQt::DidFinishNavigation(content::NavigationHandle *navig
+         }
+     }
+ 
++    // The verified chain, which is what a browser shows as the page's certificate.
++    // A navigation that never reached TLS carries none. A same-document one
++    // makes no connection, and leaves the chain as it was.
++    if (!navigation_handle->IsSameDocument()) {
++        m_loadingInfo.certificateChain.clear();
++        const auto &sslInfo = navigation_handle->GetSSLInfo();
++        if (sslInfo && sslInfo->cert)
++            m_loadingInfo.certificateChain = toCertificateChain(sslInfo->cert.get());
++    }
++
+     // Success is reported by DidFinishLoad, but DidFailLoad is now dead code and needs to be handled below
+     if (navigation_handle->GetNetErrorCode() == net::OK)
+         return;
+diff --git a/src/core/web_contents_delegate_qt.h b/src/core/web_contents_delegate_qt.h
+index 8e075526b3..53a7f55608 100644
+--- a/src/core/web_contents_delegate_qt.h
++++ b/src/core/web_contents_delegate_qt.h
+@@ -14,6 +14,7 @@
+ 
+ #include <QtCore/qlist.h>
+ #include <QtCore/qmap.h>
++#include <QtNetwork/qsslcertificate.h>
+ 
+ namespace blink {
+     namespace web_pref {
+@@ -214,6 +215,7 @@ private:
+         bool triggersErrorPage = false;
+         QMultiMap<QByteArray, QByteArray> responseHeaders;
+         bool isDownload = false;
++        QList<QSslCertificate> certificateChain;
+         void clear() { *this = LoadingInfo(); }
+     } m_loadingInfo;
+ 
+diff --git a/tests/auto/core/certificateerror/tst_certificateerror.cpp b/tests/auto/core/certificateerror/tst_certificateerror.cpp
+index 6a646c0e71..c132feb614 100644
+--- a/tests/auto/core/certificateerror/tst_certificateerror.cpp
++++ b/tests/auto/core/certificateerror/tst_certificateerror.cpp
+@@ -4,6 +4,7 @@
+ #include <util.h>
+ 
+ #include <QWebEngineCertificateError>
++#include <QWebEngineLoadingInfo>
+ #include <QWebEnginePage>
+ #include <QWebEngineSettings>
+ 
+@@ -21,6 +22,7 @@ private Q_SLOTS:
+     void handleError();
+     void fatalError();
+     void resourceError();
++    void loadingInfoCarriesAcceptedChain();
+ };
+ 
+ struct PageWithCertificateErrorHandler : QWebEnginePage
+@@ -152,5 +154,54 @@ void tst_CertificateError::resourceError()
+     QCOMPARE(page.error->isMainFrame(), false);
+ }
+ 
++void tst_CertificateError::loadingInfoCarriesAcceptedChain()
++{
++    if (QTestPrivate::isSecureTransportBlockingTest())
++        QSKIP("SecureTransport will block the test server while accessing the login keychain");
++
++    HttpsServer server(":/resources/server.pem", ":/resources/server.key", "");
++    server.setExpectError(false);
++    QVERIFY(server.start());
++    connect(&server, &HttpsServer::newRequest, [&] (HttpReqRep *rr) {
++        rr->setResponseBody(QByteArrayLiteral("<html><body>TEST</body></html>"));
++        rr->sendResponse();
++    });
++
++    PageWithCertificateErrorHandler page(false, true);
++    page.settings()->setAttribute(QWebEngineSettings::ErrorPageEnabled, false);
++    QList<QWebEngineLoadingInfo> finished;
++    connect(&page, &QWebEnginePage::loadingChanged, [&] (const QWebEngineLoadingInfo &info) {
++        if (info.status() == QWebEngineLoadingInfo::LoadStartedStatus)
++            QVERIFY(info.certificateChain().isEmpty());
++        else
++            finished.append(info);
++    });
++
++    page.setUrl(server.url());
++    QTRY_COMPARE_WITH_TIMEOUT(page.loadSpy.size(), 1, 30000);
++    QVERIFY(page.loadSpy.takeFirst().value(0).toBool());
++    QCOMPARE(finished.size(), 1);
++    QCOMPARE(finished[0].status(), QWebEngineLoadingInfo::LoadSucceededStatus);
++    const auto chain = finished[0].certificateChain();
++    QCOMPARE(chain, page.error->certificateChain());
++    QCOMPARE(chain.size(), 2);
++    QCOMPARE(chain[0].serialNumber(), "15:91:08:23:37:91:ee:51:00:d7:4a:db:d7:8c:3b:31:f8:4f:f3:b3");
++
++    // A second document from the same server arrives over the same chain, and a
++    // page that did not arrive over TLS carries none.
++    finished.clear();
++    page.setUrl(server.url("/second"));
++    QTRY_COMPARE_WITH_TIMEOUT(page.loadSpy.size(), 1, 30000);
++    QCOMPARE(finished.size(), 1);
++    QCOMPARE(finished[0].certificateChain(), chain);
++
++    finished.clear();
++    page.setHtml("<html><body>plain</body></html>");
++    QTRY_COMPARE_WITH_TIMEOUT(page.loadSpy.size(), 2, 30000);
++    QCOMPARE(finished.size(), 1);
++    QVERIFY(finished[0].certificateChain().isEmpty());
++    QVERIFY(server.stop());
++}
++
+ QTEST_MAIN(tst_CertificateError)
+ #include <tst_certificateerror.moc>
+diff --git a/tests/auto/core/qwebengineloadinginfo/tst_qwebengineloadinginfo.cpp b/tests/auto/core/qwebengineloadinginfo/tst_qwebengineloadinginfo.cpp
+index 773421b8c5..22e3974f6a 100644
+--- a/tests/auto/core/qwebengineloadinginfo/tst_qwebengineloadinginfo.cpp
++++ b/tests/auto/core/qwebengineloadinginfo/tst_qwebengineloadinginfo.cpp
+@@ -33,6 +33,8 @@ public slots:
+         } else {
+             QVERIFY(responseHeaders.size() == 0);
+         }
++        // Plain HTTP makes no TLS connection, so there is no chain to report.
++        QVERIFY(loadingInfo.certificateChain().isEmpty());
+     }
+ 
+ private Q_SLOTS:
+-- 
+2.54.0 (Apple Git-157)
+
