@@ -7,6 +7,10 @@ name: Scripts
 # Shellcheck covers the files this test belongs to. The other scripts predate
 # it and have findings of their own.
 #
+# The release finder's test serves stand-ins for download.qt.io, because the
+# layout it has to read next does not exist there until the engine's first
+# release of its own.
+#
 # The PKGBUILD's checksums are checked here too: makepkg checks them only when
 # an engine is packaged, and a notice edited without its checksum stopped the
 # package there.
@@ -38,6 +42,18 @@ jobs:
 
       - name: Test the collector
         run: scripts/test-collect-builds.sh
+
+  newest-engine:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Shellcheck
+        run: shellcheck scripts/newest-engine.sh scripts/test-newest-engine.sh
+
+      - name: Test the release finder
+        run: scripts/test-newest-engine.sh
 
   pkgbuild-sums:
     runs-on: ubuntu-latest

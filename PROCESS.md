@@ -3,6 +3,11 @@
 Qt publishes a release every couple of months. What follows is who does what,
 when, and what it costs when something goes wrong.
 
+Up to 6.11, QtWebEngine was a module of Qt's release and carried its version.
+From Qt 6.12 it is released on its own and versioned after its Chromium: 6.140
+is Chromium 140, and Qt 6.12.0 has no engine at all. The scripts take the
+engine's version, and `scripts/newest-engine.sh` says which is the newest.
+
 ## The run, in order
 
 | When | What | Who | Cost |
@@ -43,9 +48,11 @@ first.
 **Chromium moved underneath.** The expensive case, described below. Found as a
 build failure, and the fix is mechanical rather than clever.
 
-**System Qt is older than the engine.** The remote build refuses before it
-starts: QtWebEngine builds against the Qt it belongs to, and Arch is a day or
-two behind Qt. Either wait for the distribution or build the rest of Qt too.
+**System Qt is older than the engine.** Up to 6.11 the remote build refuses
+before it starts: QtWebEngine builds against the Qt it belongs to, and Arch is
+a day or two behind Qt. Either wait for the distribution or build the rest of
+Qt too. From 6.140 the engine names the oldest Qt it builds against, and the
+configure step refuses an older one, with CMake's reason in the log.
 
 ## Resolving a conflict
 
@@ -53,11 +60,11 @@ Always on your own machine, never on a builder. A builder has no person at it
 and no history to look at, and the rented machine costs money while it waits.
 
 ```sh
-scripts/refresh.sh 6.12.0            # stops and names the patch that failed
-cd ~/Projects/villekivela/qtwebengine/qtwebengine-everywhere-src-6.12.0
+scripts/refresh.sh 6.140.0           # stops and names the patch that failed
+cd ~/Projects/villekivela/qtwebengine/qtwebengine-everywhere-src-6.140.0
 # fix the conflict in the tree
 git am --continue
-git format-patch -o /path/to/omaweb-qtwebengine-patches/patches v6.12.0-tarball..HEAD
+git format-patch -o /path/to/omaweb-qtwebengine-patches/patches v6.140.0-tarball..HEAD
 ```
 
 Then build and verify before the builders run. The patches in this repository

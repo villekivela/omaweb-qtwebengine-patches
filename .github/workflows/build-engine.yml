@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Qt version, for example 6.11.2"
+        description: "QtWebEngine version, for example 6.11.2 or 6.140.0"
         required: true
       arch:
         description: "Which architecture to build"

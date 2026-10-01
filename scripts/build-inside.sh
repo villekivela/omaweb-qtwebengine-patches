@@ -16,14 +16,18 @@ pacman -Syu --noconfirm --needed \
     libxcursor libxrandr libxtst libxdamage nss libdrm mesa pipewire \
     libxslt libvpx re2 snappy minizip jsoncpp ffmpeg opus > /dev/null
 
-# QtWebEngine builds against the Qt it belongs to. A mismatch fails late and
-# confusingly, so fail early and clearly instead.
+# Up to 6.11, QtWebEngine builds against the Qt it belongs to. A mismatch fails
+# late and confusingly, so fail early and clearly instead. From 6.140 the engine
+# is released on its own and names the oldest Qt it builds against, which its
+# configure step checks and `refresh.sh` reports.
 system_qt="$(qmake6 -query QT_VERSION)"
-if [ "$system_qt" != "$version" ]; then
+engine_minor="$(echo "$version" | cut -d. -f2)"
+if [ "$engine_minor" -lt 100 ] && [ "$system_qt" != "$version" ]; then
     echo "system Qt is $system_qt but the engine is $version."
     echo "Wait for the distribution to catch up, or build the rest of Qt too."
     exit 1
 fi
+echo "building engine $version against system Qt $system_qt"
 
 # The series is applied with `git am`, which refuses to record a commit without
 # somebody to record it as. The container is fresh every time, so it has nobody

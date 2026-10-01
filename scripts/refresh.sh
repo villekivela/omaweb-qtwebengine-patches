@@ -23,9 +23,16 @@ cd "$work"
 
 if [ ! -f "$tarball" ]; then
     echo "fetching $tarball"
+    # Up to 6.11 the engine was a module of Qt's release and carried its version. From Qt 6.12 it
+    # is released on its own, versioned after its Chromium (6.140 is Chromium 140), and Qt 6.12.0
+    # has no engine at all. Its prereleases sit in one flat directory; where its releases will sit
+    # is not known before the first one, so both likely layouts are tried.
     for base in \
         "https://download.qt.io/official_releases/qt/$minor/$version/submodules" \
-        "https://download.qt.io/development_releases/qt/$minor/$version/submodules"
+        "https://download.qt.io/development_releases/qt/$minor/$version/submodules" \
+        "https://download.qt.io/official_releases/qtwebengine/$minor/$version" \
+        "https://download.qt.io/official_releases/qtwebengine/$version" \
+        "https://download.qt.io/development_releases/qtwebengine/$version"
     do
         if curl -fsSL -o "$tarball.part" "$base/$tarball"; then
             mv "$tarball.part" "$tarball"
@@ -38,9 +45,16 @@ fi
 
 if [ ! -d "$tree" ]; then
     echo "unpacking"
-    tar xJf "$tarball"
+    # A prerelease unpacks under the release's name: 6.140.0-rc into ...-src-6.140.0. It is moved
+    # to the name it was asked for, so the release that follows gets a tree of its own rather than
+    # being taken for an RC tree that already carries the series. It unpacks somewhere of its own
+    # first, because the release's tree may already be in the work directory.
+    rm -rf "$tree.unpack"
+    mkdir "$tree.unpack"
+    tar xJf "$tarball" -C "$tree.unpack"
+    mv "$tree.unpack"/* "$tree"
+    rmdir "$tree.unpack"
     cd "$tree"
-    printf 'build/\n*.log\nbuild.sh\n__pycache__/\n' > .git/info/exclude 2>/dev/null || true
     git init -q
     printf 'build/\n*.log\nbuild.sh\n__pycache__/\n' > .git/info/exclude
     git add -A
@@ -161,7 +175,13 @@ else
     set -- "$@" -DCMAKE_INSTALL_PREFIX="$prefix"
 fi
 
-cmake "$@" > configure.log 2>&1
+# From 6.140 the engine states the oldest Qt it builds against rather than requiring its own
+# version, so a system Qt that is too old is refused here, by CMake, and the reason is in the log.
+if ! cmake "$@" > configure.log 2>&1; then
+    tail -n 30 configure.log
+    echo "configure failed; the whole log is $tree/configure.log"
+    exit 1
+fi
 
 sed -n '/Build QtWebEngine Modules/,/QtPdf Modules/p' build/config.summary
 

@@ -14,10 +14,10 @@ Six of the fifteen are ordinary bug fixes headed for Gerrit. The rest wait on on
 ## Running it
 
 ```sh
-scripts/refresh.sh 6.12.0     # fetch, unpack, apply the series, configure
+scripts/refresh.sh 6.140.0    # fetch, unpack, apply the series, configure
 <tree>/build.sh               # hours
 scripts/verify.sh <tree>      # tests, twice
-scripts/package-locally.sh 6.12.0   # package here, sign here
+scripts/package-locally.sh 6.140.0  # package here, sign here
 ```
 
 `PROCESS.md` has the rest, including what to do when a patch conflicts and what a Chromium bump
