@@ -1,0 +1,82 @@
+diff --git a/cmake/QtToolchainHelpers.cmake b/cmake/QtToolchainHelpers.cmake
+index b0cd2dd..14541d8 100644
+--- a/cmake/QtToolchainHelpers.cmake
++++ b/cmake/QtToolchainHelpers.cmake
+@@ -334,7 +334,7 @@ macro(append_build_type_setup)
+         )
+     else()
+         list(APPEND gnArgArg is_official_build=true)
+-        if(NOT CLANG OR NOT QT_FEATURE_use_lld_linker)
++        if(NOT CLANG OR NOT (QT_FEATURE_use_lld_linker OR OMAWEB_USE_LLD))
+             list(APPEND gnArgArg
+                 use_thin_lto=false
+             )
+@@ -454,13 +454,13 @@ macro(append_compiler_linker_sdk_setup)
+             endif()
+         endif()
+     else()
+-        if(QT_FEATURE_use_lld_linker OR QT_FEATURE_webengine_rust_build)
++        if(QT_FEATURE_use_lld_linker OR OMAWEB_USE_LLD OR QT_FEATURE_webengine_rust_build)
+             list(APPEND gnArgArg clang_base_path="${QWELibClang_BASE_PATH}")
+             if (QT_FEATURE_webengine_rust_build)
+                 get_clang_runtime_path_version(clang_runtime_path_version)
+                 list(APPEND gnArgArg clang_version="${clang_runtime_path_version}")
+             endif()
+-            if(QT_FEATURE_use_lld_linker)
++            if(QT_FEATURE_use_lld_linker OR OMAWEB_USE_LLD)
+                 list(APPEND gnArgArg fatal_linker_warnings=false)
+             endif()
+         endif()
+@@ -538,7 +538,7 @@ macro(append_compiler_linker_sdk_setup)
+     )
+     extend_gn_list(gnArgArg
+         ARGS use_lld
+-        CONDITION QT_FEATURE_use_lld_linker OR (MSVC AND CLANG)
++        CONDITION QT_FEATURE_use_lld_linker OR OMAWEB_USE_LLD OR (MSVC AND CLANG)
+     )
+     extend_gn_list(gnArgArg
+         ARGS use_mold
+diff --git a/src/core/CMakeLists.txt b/src/core/CMakeLists.txt
+index 5dc3029..38a90f0 100644
+--- a/src/core/CMakeLists.txt
++++ b/src/core/CMakeLists.txt
+@@ -341,6 +341,14 @@ foreach(arch ${archs})
+         append_toolchain_setup(gnArgArg)
+         append_pkg_config_setup(gnArgArg)
+ 
++        # Chrome's own profile for this Chromium, when one is given. Functions the series or Qt
++        # changed fall back to their unprofiled code, which clang reports and does not refuse.
++        if(OMAWEB_PGO_PROFILE)
++            list(APPEND gnArgArg chrome_pgo_phase=2 pgo_data_path="${OMAWEB_PGO_PROFILE}")
++        else()
++            list(APPEND gnArgArg chrome_pgo_phase=0)
++        endif()
++
+         list(APPEND gnArgArg
+             qtwebengine_target="${buildDir}/${config}/${arch}:QtWebEngineCore"
+             build_dawn_tests=false
+@@ -348,7 +356,6 @@ foreach(arch ${archs})
+             webnn_use_tflite=false
+             is_qtwebengine=true
+             is_qtpdf=false
+-            chrome_pgo_phase=0
+             disable_fieldtrial_testing_config=true
+             enable_background_contents=false
+             enable_background_mode=false
+diff --git a/src/3rdparty/chromium/v8/BUILD.gn b/src/3rdparty/chromium/v8/BUILD.gn
+--- a/src/3rdparty/chromium/v8/BUILD.gn
++++ b/src/3rdparty/chromium/v8/BUILD.gn
+@@ -2580,9 +2580,10 @@ template("run_mksnapshot") {
+         "--turbo-profiling-input",
+         rebase_path(v8_builtins_profiling_log_file, root_build_dir),
+ 
+-        # Replace this with --warn-about-builtin-profile-data to see the full
+-        # list of builtins with incompatible profiles.
+-        "--abort-on-bad-builtin-profile-data",
++        # Qt's V8 is not built quite as Chrome's, and a builtin that compiles
++        # differently has no profile that fits. It is named and built without
++        # one rather than stopping the build.
++        "--warn-about-builtin-profile-data",
+       ]
+ 
+       if (!v8_enable_builtins_profiling && v8_enable_builtins_reordering) {
