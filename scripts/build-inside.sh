@@ -36,6 +36,24 @@ git config --global user.email "builder@omaweb.invalid"
 git config --global user.name "Engine build"
 git config --global --add safe.directory '*'
 
+# Jobs by memory as well as by core: a Chromium compile takes 1.2 to 1.6 GB
+# and a link more, so about 2.2 GB a job. A machine with more cores than that
+# allows thrashes instead of being OOM-killed, and took a 22 GiB devbox down
+# twice. The limit is the container's own when it has one. QtWebEngine runs
+# Chromium's build in a ninja of its own, which reads NINJAFLAGS when CMake
+# configures rather than when it builds, so this is exported before refresh.sh
+# configures; the outer -j alone never reaches it.
+mem_kb="$(awk '/^MemTotal/{print $2}' /proc/meminfo)"
+if [ -r /sys/fs/cgroup/memory.max ] && [ "$(cat /sys/fs/cgroup/memory.max)" != max ]; then
+    mem_kb=$(( $(cat /sys/fs/cgroup/memory.max) / 1024 ))
+fi
+jobs=$(( mem_kb / 2200000 ))
+[ "$jobs" -gt "$(nproc)" ] && jobs="$(nproc)"
+[ "$jobs" -lt 1 ] && jobs=1
+NINJAFLAGS="-j$jobs"
+export NINJAFLAGS
+echo "building with $jobs jobs for $(( mem_kb / 1024 / 1024 )) GiB and $(nproc) cores"
+
 cd /root/work
 # Kept, because what the series did is half of what maintaining it costs and
 # `release-row.sh` reads it out of here rather than anyone remembering. Through
@@ -50,10 +68,8 @@ rm -f /root/out/apply.status
 [ "$applied" -eq 0 ] || exit "$applied"
 tree="/root/work/qtwebengine-everywhere-src-$version"
 
-# Comfortable for compiling and not for linking at this much memory per core,
-# so the link steps run fewer at a time.
 cd "$tree"
-cmake --build build --parallel "$(nproc)" -- -j "$(nproc)" -l "$(nproc)"
+cmake --build build --parallel "$jobs" -- -j "$jobs"
 
 sh /root/series/scripts/verify.sh "$tree" | tee /root/out/verify.txt
 # Every case passed and at least the ones this series adds ran. The count is not written down:
