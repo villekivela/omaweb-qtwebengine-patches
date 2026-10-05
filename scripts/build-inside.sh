@@ -83,6 +83,10 @@ if [ "$(grep -cE "^Totals: " /root/out/verify.txt)" -lt 3 ] \
     exit 2
 fi
 
+# Emptied first, because the work space is kept between builds and an install only adds. A
+# 6.11.2 package built after a 6.140.0-rc in the same volume carried the RC's libraries beside
+# its own (omaweb#574).
+rm -rf /root/work/staging
 DESTDIR=/root/work/staging cmake --install "$tree/build" > /dev/null
 cd /root/work/staging
 tarball="/root/out/omaweb-qtwebengine-$version-$(uname -m).tar.zst"
