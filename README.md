@@ -1,15 +1,17 @@
 # QtWebEngine extension patches
 
-Fifteen patches to QtWebEngine. Fourteen let it host a password manager's Chromium extension, and
-one restores a trace macro that slowed every page. Base is the released
+Eighteen patches to QtWebEngine. Fourteen let it host a password manager's Chromium extension, two
+add API that Omaweb's content blocking and certificate view ask for, one restores a trace macro that
+slowed every page, and one turns V8's write barriers back on. Base is the released
 `qtwebengine-everywhere-src-6.11.2` tarball.
 
 Built for [omaweb#344](https://github.com/villekivela/omaweb/issues/344), which asks whether Omaweb
 can host Bitwarden and 1Password. The findings live in `docs/research/password-manager-extensions.md`
 in that repository.
 
-Six of the fifteen are ordinary bug fixes headed for Gerrit. The rest wait on one question to Qt, in
-`upstream/QTBUG-draft.md`. If Qt takes the work, this repository is deleted rather than maintained.
+Six of the eighteen are ordinary bug fixes headed for Gerrit, and 0018 is Qt's own change. The rest
+wait on one question to Qt, in `upstream/QTBUG-draft.md`. If Qt takes the work, this repository is
+deleted rather than maintained.
 
 ## Running it
 
@@ -122,6 +124,16 @@ A load that made no TLS connection carries none. See
 [omaweb#325](https://github.com/villekivela/omaweb/issues/325) and ADR 0054. _A feature with tests,
 written as Qt API. Propose it as one._
 
+**0018, turn V8's write barriers back on.** Qt's 6.11.2 builds V8 with `v8_disable_write_barriers =
+true`, which also gives it a single generation. Every allocation goes to the old space, and the
+collector can neither scavenge nor mark incrementally. Qt restored Chromium's default in
+qtwebengine-chromium 770837 and 772657, which 6.140.0 carries, and 0018 is the two as one backport,
+with their Change-Ids and bug numbers. On aarch64 it took JetStream 2.2 from 0.742 to 0.947 of
+Chromium 140's score. On x86_64, turning them on by hand had taken it from 0.718 to 0.917. See
+[omaweb#574](https://github.com/villekivela/omaweb/issues/574) and
+[omaweb#356](https://github.com/villekivela/omaweb/issues/356). _Qt's change. It drops when the
+series moves to 6.140.0._
+
 ## The open question
 
 `TabsDelegateQt` is internal, and `ExtensionsBrowserClientQt` fills it by treating every page of the
@@ -148,6 +160,11 @@ has the test server's certificate, and the gate runs it the same way. `scripts/v
 three and reports them. Neither compiles against a stock build, which has no API for them to call,
 so there is no stock run to compare: removing the line that keeps the chain fails 0017's case.
 
+Patch 0018 has no test case, because what it changes is how V8 is compiled. The gate reads that
+instead. `scripts/check-write-barriers.sh` fails a tree whose V8 is compiled with
+`-DV8_DISABLE_WRITE_BARRIERS`, as 6.11.2 is without the patch, and names the ninja file it read. It
+stays after 0018 drops, so a later Qt that turns the barriers off again is noticed.
+
 ## Rebase record
 
 | Release | Applying | Build | Tests | People's time |
@@ -155,6 +172,7 @@ so there is no stock run to compare: removing the line that keeps the chain fail
 | 6.11.2  | 6 of 6, no conflicts | clean | 22 of 22 | none |
 | 6.11.2, series grown to 9 | 2 more, no conflicts | incremental | 28 of 28 | none |
 | 6.11.2, series grown to 12 | 3 more, no conflicts | incremental | 33 of 33 | none |
+| 6.11.2, series grown to 18 | 1 more, no conflicts | incremental | 50 of 50 | none |
 
 The last two rows are the series growing rather than Qt moving, so they measure `refresh.sh`
 picking up a tree it has already patched rather than a rebase. The next release is the next real
