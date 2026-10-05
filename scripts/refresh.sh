@@ -155,89 +155,18 @@ fi
 prefix="${OMAWEB_ENGINE_PREFIX:-/usr/lib/omaweb}"
 
 # OMAWEB_ENGINE_TOOLCHAIN=clang builds the engine the way Chrome is built:
-# clang, linked by LLD with ThinLTO, and on x86_64 with Chrome's own PGO profile
-# for this Chromium. Qt turns ThinLTO on only when Qt itself was built for LLD,
-# and PGO never, so a patch outside the series opens both. The same patch lets
-# V8 apply its builtins profile where it fits, since Qt's V8 is not built quite
-# as Chrome's. It is opt-in while it is measured against the GCC build that
-# ships (villekivela/omaweb#356).
+# clang, linked by LLD with ThinLTO, and with Chrome's own PGO profile for this
+# Chromium where Chrome publishes one. Qt turns ThinLTO on only when Qt itself
+# was built for LLD, and PGO never, so toolchain/clang.patch opens both. Unset,
+# Qt's own choice builds it, which is GCC. `build-inside.sh` sets it from
+# `engine-toolchain.sh`, which names each architecture's default.
 toolchain="${OMAWEB_ENGINE_TOOLCHAIN:-}"
 profile=""
-
-# Fetches a file from Google Storage and holds it to the MD5 the bucket
-# publishes, which catches a truncated or damaged download before hours are
-# spent building against it. An object stored gzipped has the MD5 of those
-# bytes, so it is asked for as stored and unpacked once it checks out; a client
-# that does not accept gzip is sent other bytes.
-fetch_checked() {
-    headers="$(curl -fsSI -H 'Accept-Encoding: gzip' "$1" | tr -d '\r')"
-    published="$(printf '%s\n' "$headers" | sed -n 's/^x-goog-hash: md5=//Ip')"
-    encoding="$(printf '%s\n' "$headers" | sed -n 's/^x-goog-stored-content-encoding: //Ip')"
-    curl -fsSL -H 'Accept-Encoding: gzip' -o "$2.download" "$1"
-    fetched="$(python3 -c 'import base64, hashlib, sys
-print(base64.b64encode(hashlib.md5(open(sys.argv[1], "rb").read()).digest()).decode())' \
-        "$2.download")"
-    if [ -z "$published" ] || [ "$fetched" != "$published" ]; then
-        echo "$1 did not match its published MD5"
-        exit 1
-    fi
-    if [ "$encoding" = "gzip" ]; then
-        gzip -dc "$2.download" > "$2"
-        rm "$2.download"
-    else
-        mv "$2.download" "$2"
-    fi
-}
 if [ "$toolchain" = "clang" ]; then
     [ "$system" = "Linux" ] || { echo "the clang toolchain is for Linux builds"; exit 1; }
-    git apply "$series/../experiments/optimised-toolchain.patch"
+    git apply "$series/../toolchain/clang.patch"
     echo "TOOLCHAIN: clang, LLD and ThinLTO"
-    if [ "$(uname -m)" = "x86_64" ]; then
-        # The profile's name is in the Chromium tree it was taken for. Qt's copy
-        # of Chromium may leave the file out, and then Chromium's own tag says.
-        chromium="$(awk -F= '/^MAJOR=/{a=$2} /^MINOR=/{b=$2} /^BUILD=/{c=$2} /^PATCH=/{d=$2}
-            END {print a"."b"."c"."d}' src/3rdparty/chromium/chrome/VERSION)"
-        named=src/3rdparty/chromium/chrome/build/linux.pgo.txt
-        if [ -f "$named" ]; then
-            name="$(cat "$named")"
-        else
-            name="$(curl -fsSL "https://chromium.googlesource.com/chromium/src/+/refs/tags/$chromium/chrome/build/linux.pgo.txt?format=TEXT" | base64 -d)"
-            # Chromium's PGO configuration lists this file as an input of every
-            # object it profiles, so it is put back where Chromium keeps it. It
-            # is dated as the tree is, or recreating it after `git clean` would
-            # rebuild everything.
-            mkdir -p "$(dirname "$named")"
-            printf '%s\n' "$name" > "$named"
-            touch -r src/3rdparty/chromium/chrome/VERSION "$named"
-        fi
-        profile="$work/pgo/$name"
-        if [ ! -f "$profile" ]; then
-            mkdir -p "$work/pgo"
-            fetch_checked \
-                "https://storage.googleapis.com/chromium-optimization-profiles/pgo_profiles/$name" \
-                "$profile"
-        fi
-        # V8 optimises its builtins from a profile of its own, kept per V8
-        # version, which Qt's copy of V8 leaves out as well. They are dated as
-        # the tree is, for the same reason as the name above.
-        v8="$(awk '/define V8_MAJOR_VERSION/{a=$3} /define V8_MINOR_VERSION/{b=$3}
-            /define V8_BUILD_NUMBER/{c=$3} /define V8_PATCH_LEVEL/{d=$3}
-            END {print a"."b"."c"."d}' src/3rdparty/chromium/v8/include/v8-version.h)"
-        builtins=src/3rdparty/chromium/v8/tools/builtins-pgo/profiles
-        for file in meta.json x64.profile x64-rl.profile; do
-            if [ ! -f "$work/pgo/v8-$v8/$file" ]; then
-                mkdir -p "$work/pgo/v8-$v8"
-                fetch_checked \
-                    "https://storage.googleapis.com/chromium-v8-builtins-pgo/by-version/$v8/$file" \
-                    "$work/pgo/v8-$v8/$file"
-            fi
-            cp "$work/pgo/v8-$v8/$file" "$builtins/$file"
-            touch -r src/3rdparty/chromium/chrome/VERSION "$builtins/$file"
-        done
-        echo "PGO: Chrome's profile for Chromium $chromium, $name, and V8 $v8's for its builtins"
-    else
-        echo "PGO: none, Chrome publishes no Linux profile for $(uname -m)"
-    fi
+    profile="$(sh "$series/../scripts/fetch-profiles.sh" "$tree" "$work/pgo")"
 fi
 
 set -- -S . -B build -G Ninja \
@@ -264,6 +193,8 @@ if [ "$toolchain" = "clang" ]; then
     if [ -n "$profile" ]; then
         set -- "$@" -DOMAWEB_PGO_PROFILE="$profile"
     fi
+    # V8's builtins profile applies with or without Chrome's.
+    set -- "$@" -DOMAWEB_V8_BUILTINS_PGO=ON
 fi
 
 if [ "$system" = "Darwin" ]; then
