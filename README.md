@@ -128,8 +128,9 @@ written as Qt API. Propose it as one._
 true`, which also gives it a single generation. Every allocation goes to the old space, and the
 collector can neither scavenge nor mark incrementally. Qt restored Chromium's default in
 qtwebengine-chromium 770837 and 772657, which 6.140.0 carries, and 0018 is the two as one backport,
-with their Change-Ids and bug numbers. On x86_64 it took JetStream 2.2 from 0.718 to 0.917 of
-Chromium 140's score. See [omaweb#574](https://github.com/villekivela/omaweb/issues/574) and
+with their Change-Ids and bug numbers. On aarch64 it took JetStream 2.2 from 0.742 to 0.947 of
+Chromium 140's score. On x86_64, turning them on by hand had taken it from 0.718 to 0.917. See
+[omaweb#574](https://github.com/villekivela/omaweb/issues/574) and
 [omaweb#356](https://github.com/villekivela/omaweb/issues/356). _Qt's change. It drops when the
 series moves to 6.140.0._
 
