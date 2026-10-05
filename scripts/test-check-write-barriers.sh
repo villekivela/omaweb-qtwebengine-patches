@@ -13,8 +13,9 @@ trap 'rm -rf "$work"' EXIT
 
 failed=0
 
-# A tree whose V8 compiles with the given defines, or with no defines line when given none.
-tree() {
+# A stand-in tree whose V8 compiles with the given defines, or with no defines line when given
+# none.
+stand_in() {
     dir="$work/$1/build/src/core/Release/aarch64/obj/v8"
     mkdir -p "$dir"
     if [ -n "$2" ]; then
@@ -45,20 +46,20 @@ check() {
 ninja="build/src/core/Release/aarch64/obj/v8/v8_base_without_compiler.ninja"
 
 # Qt's 6.11.2 as it ships: no write barriers, so a single generation.
-tree off "-DV8_ENABLE_WEBASSEMBLY -DV8_DISABLE_WRITE_BARRIERS -DV8_ENABLE_SINGLE_GENERATION"
+stand_in off "-DV8_ENABLE_WEBASSEMBLY -DV8_DISABLE_WRITE_BARRIERS -DV8_ENABLE_SINGLE_GENERATION"
 check off 1 "0 passed, 1 failed" "off/$ninja"
 
 # With patch 0018, or from 6.140.0 on.
-tree on "-DV8_ENABLE_WEBASSEMBLY -DV8_ENABLE_LAZY_SOURCE_POSITIONS"
+stand_in on "-DV8_ENABLE_WEBASSEMBLY -DV8_ENABLE_LAZY_SOURCE_POSITIONS"
 check on 0 "1 passed, 0 failed" "on/$ninja"
 
 # A define that only starts the same way is not the one.
-tree prefix "-DV8_DISABLE_WRITE_BARRIERS_FOR_TESTING"
+stand_in prefix "-DV8_DISABLE_WRITE_BARRIERS_FOR_TESTING"
 check prefix 0 "1 passed, 0 failed" "prefix/$ninja"
 
 # A file that no longer says what it compiles with proves nothing either way.
-tree undefined ""
-check undefined 1 "0 passed, 1 failed" "undefined/$ninja"
+stand_in nodefines ""
+check nodefines 1 "0 passed, 1 failed" "nodefines/$ninja"
 
 # A tree whose layout moved, or that was never built.
 mkdir -p "$work/unbuilt/build"

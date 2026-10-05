@@ -171,6 +171,7 @@ stays after 0018 drops, so a later Qt that turns the barriers off again is notic
 | 6.11.2  | 6 of 6, no conflicts | clean | 22 of 22 | none |
 | 6.11.2, series grown to 9 | 2 more, no conflicts | incremental | 28 of 28 | none |
 | 6.11.2, series grown to 12 | 3 more, no conflicts | incremental | 33 of 33 | none |
+| 6.11.2, series grown to 18 | 1 more, no conflicts | incremental | 50 of 50 | none |
 
 The last two rows are the series growing rather than Qt moving, so they measure `refresh.sh`
 picking up a tree it has already patched rather than a rebase. The next release is the next real

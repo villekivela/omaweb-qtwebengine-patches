@@ -1,6 +1,6 @@
-From 9b162a9269cb8913c792dd6c22d222330a6fdb03 Mon Sep 17 00:00:00 2001
-From: Allan Sandfeld Jensen <allan.jensen@qt.io>
-Date: Mon, 21 Sep 2026 12:17:01 +0200
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Ville=20Kivel=C3=A4?= <vkivela@hotmail.com>
+Date: Mon, 5 Oct 2026 17:30:00 +0300
 Subject: [PATCH] v8: turn write barriers back on
 
 Qt's 6.11.2 tarball builds V8 with v8_disable_write_barriers = true on
@@ -9,10 +9,10 @@ has no young generation. Every allocation goes to the old space, and the
 collector can neither scavenge nor mark incrementally.
 
 Qt restored Chromium's default on the 140-based branch of
-qtwebengine-chromium in two changes, and 6.140.0 carries both. This is
-the two of them as one backport to 6.11.2: 770837 set the value to
-is_win, and 772657 set it to false. The patch drops when the series
-moves to an engine that carries them.
+qtwebengine-chromium in two changes by Allan Sandfeld Jensen, and
+6.140.0 carries both. This is the two of them as one backport to
+6.11.2. 770837 set the value to is_win, and 772657 set it to false.
+The patch drops when the series moves to an engine that carries them.
 
 On x86_64, JetStream 2.2 went from 0.718 to 0.917 of Chromium 140's
 score and Speedometer 3.1 from 0.706 to 0.727 (omaweb#356).
@@ -36,6 +36,8 @@ Change-Id: Idf79c914693124f6ca0db05facb433bc5690ee64
 Reviewed-on: https://codereview.qt-project.org/c/qt/qtwebengine-chromium/+/772657
 
 omaweb#574
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
  src/3rdparty/chromium/v8/BUILD.gn | 2 +-
  1 file changed, 1 insertion(+), 1 deletion(-)

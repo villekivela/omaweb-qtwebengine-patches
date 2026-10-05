@@ -36,10 +36,10 @@ Each change carries `Fixes: QTBUG-…` and `Pick-to: 6.140`. Two more changes fo
 
 ## Where each change stands in 6.140
 
-Checked on 2026-10-05. The series' first 17 patches carry no Change-Id, so the merged ones were matched by
-their reports and changes, and compared line by line. For the rest, the series was applied in order
-to each tree, and every upstream commit since the RC that touches a file the series touches was
-listed. Nothing else of the series is upstream.
+Checked on 2026-10-05. The series' first 17 patches carry no Change-Id, so the merged ones were
+matched by their reports and changes, and compared line by line. For the rest, the series was
+applied in order to each tree, and every upstream commit since the RC that touches a file the series
+touches was listed. Nothing else of the series is upstream.
 
 | Patch | Upstream | 6.140.0-rc | `6.140.0` | `6.140` | `dev` |
 | ----- | -------- | ---------- | --------- | ------- | ----- |
@@ -67,10 +67,11 @@ Change-Ids of the two changes it backports.
   RC, where 0002 no longer applies. It drops when the final 6.140.0 is qualified.
 
 - **0018** is Qt's own: qtwebengine-chromium 770837 and 772657 on `140-based`, merged on 2026-09-14
-  and 2026-09-21, which set `v8_disable_write_barriers` back to Chromium's default. It was backported
-  for [omaweb#574](https://github.com/villekivela/omaweb/issues/574) and sent nowhere. The RC's
-  tarball still has `true`. `6.140.0`, `6.140` and `dev` pin qtwebengine-chromium `1e645e7ec`, where
-  it is `false`, so 0018 no longer applies to the final 6.140.0 and drops when it is qualified.
+  and 2026-09-21, which set `v8_disable_write_barriers` back to Chromium's default. It was
+  backported for [omaweb#574](https://github.com/villekivela/omaweb/issues/574) and sent nowhere.
+  The RC's tarball still has `true`. `6.140.0`, `6.140` and `dev` pin qtwebengine-chromium
+  `1e645e7ec`, where it is `false`, so 0018 no longer applies to the final 6.140.0 and drops when it
+  is qualified.
 
 Patch 0015 answers a report someone else had already filed, so it went there as a comment rather
 than a sixth report. [QTBUG-149450](https://qt-project.atlassian.net/browse/QTBUG-149450) measures
