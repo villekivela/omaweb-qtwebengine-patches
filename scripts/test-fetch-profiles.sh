@@ -182,6 +182,20 @@ else
     echo "ok   damaged: refused"
 fi
 
+# A gzip that matches its MD5 but does not unpack, as an object stored cut short would, stops the
+# build too. Nothing is left under the profile's name, or the next build would take it unchecked.
+stand_in truncated
+names truncated chrome-linux-7339-6.profdata
+head -c 20 "$work/served/pgo_profiles/chrome-linux-7339-3.profdata.gzstored" \
+    > "$work/served/pgo_profiles/chrome-linux-7339-6.profdata.gzstored"
+if fetch truncated x86_64 > /dev/null; then
+    fail "truncated: a profile that did not unpack was taken"
+elif [ -e "$work/truncated-cache/chrome-linux-7339-6.profdata" ]; then
+    fail "truncated: what unpacked was left in the cache under the profile's name"
+else
+    echo "ok   truncated: refused, nothing kept"
+fi
+
 # Chrome publishes no profile for aarch64, so there is none to name. V8's builtins profile is
 # taken from x64's, as V8's own build does for arm64.
 stand_in arm

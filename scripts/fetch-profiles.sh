@@ -41,7 +41,14 @@ print(base64.b64encode(hashlib.md5(open(sys.argv[1], "rb").read()).digest()).dec
         exit 1
     fi
     if [ "$encoding" = "gzip" ]; then
-        gzip -dc "$2.download" > "$2"
+        # Unpacked beside it and moved, because a file under the profile's name is taken as
+        # fetched and checked, and a gzip that stops short would leave half of one there.
+        if ! gzip -dc "$2.download" > "$2.unpacked"; then
+            rm -f "$2.download" "$2.unpacked"
+            echo "$1 did not unpack" >&2
+            exit 1
+        fi
+        mv "$2.unpacked" "$2"
         rm "$2.download"
     else
         mv "$2.download" "$2"

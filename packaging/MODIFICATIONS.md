@@ -22,9 +22,10 @@ build turns off and its 6.140.0 turns on again.
 On x86_64 the engine is built with clang and LLD, with ThinLTO and Chrome's own PGO profile for its
 Chromium, where Qt's build would use GCC. On aarch64 it is built with GCC, as Qt's is.
 `toolchain/clang.patch` opens the clang build in Qt's build files, `cmake/QtToolchainHelpers.cmake`
-and `src/core/CMakeLists.txt`. Where V8's builtins profile no longer fits a builtin, the patch has
-V8's snapshot step build that builtin without it instead of stopping. It changes how the engine is
-compiled, not what its code does. `scripts/engine-toolchain.sh` names the toolchain each architecture is built with.
+and `src/core/CMakeLists.txt`, and edits Chromium's `v8/BUILD.gn`: where V8's builtins profile no
+longer fits a builtin, V8's snapshot step builds that builtin without it instead of stopping. It
+changes how the engine is compiled, not what its code does. `scripts/engine-toolchain.sh` names the
+toolchain each architecture is built with.
 
 Each patch is a single commit with its own message explaining what it changes and why. They are in
 `patches/` in the repository named as this package's URL, and `README.md` there lists them one by

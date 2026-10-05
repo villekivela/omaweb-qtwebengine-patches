@@ -164,9 +164,22 @@ toolchain="${OMAWEB_ENGINE_TOOLCHAIN:-}"
 profile=""
 if [ "$toolchain" = "clang" ]; then
     [ "$system" = "Linux" ] || { echo "the clang toolchain is for Linux builds"; exit 1; }
+    # Checked here, because CMake is handed their paths below and an empty one fails hours
+    # later, or archives ThinLTO's bitcode with a tool that cannot index it.
+    for tool in clang clang++ ld.lld llvm-ar llvm-nm llvm-ranlib; do
+        command -v "$tool" > /dev/null 2>&1 \
+            || { echo "the clang toolchain needs $tool, which is not installed"; exit 1; }
+    done
     git apply "$series/../toolchain/clang.patch"
     echo "TOOLCHAIN: clang, LLD and ThinLTO"
-    profile="$(sh "$series/../scripts/fetch-profiles.sh" "$tree" "$work/pgo")"
+    # Its PGO line goes to the output build-inside.sh keeps as apply.txt, so a release records
+    # which profiles it was built with.
+    if ! profile="$(sh "$series/../scripts/fetch-profiles.sh" "$tree" "$work/pgo" \
+        2> "$work/pgo.log")"; then
+        cat "$work/pgo.log"
+        exit 1
+    fi
+    cat "$work/pgo.log"
 fi
 
 set -- -S . -B build -G Ninja \
