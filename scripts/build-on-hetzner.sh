@@ -44,11 +44,17 @@ case "$arch" in
     # also brings it under the six hours a CI job gets, so the build no longer
     # has to outlive its driver. Set HCLOUD_TYPE_X86=ccx43 to try it, and change
     # this default once one has actually built.
-    x86) type="${HCLOUD_TYPE_X86:-ccx33}" ;;
+    x86) type="${HCLOUD_TYPE_X86:-ccx33}"; machine=x86_64 ;;
     # Ampere. 32 GB is tight for parallel links, so the remote script caps them.
-    arm) type="${HCLOUD_TYPE_ARM:-cax41}" ;;
+    arm) type="${HCLOUD_TYPE_ARM:-cax41}"; machine=aarch64 ;;
     *)   echo "arch must be x86 or arm"; exit 1 ;;
 esac
+
+# Named before anything is rented, so a toolchain nobody builds with is refused
+# here rather than on the machine. OMAWEB_ENGINE_TOOLCHAIN asks for one, and
+# otherwise the architecture takes its own.
+toolchain="$(sh "$here/scripts/engine-toolchain.sh" "$machine")"
+echo "building with $toolchain"
 
 server="omaweb-engine-$(echo "$version" | tr . -)-$arch-$$"
 mkdir -p "$out"
@@ -110,7 +116,8 @@ done
 echo "sending the series"
 # `packaging` as well as the series: the build packages what it built, on a
 # machine of the right architecture, so nothing has to be repackaged by hand.
-tar cf - -C "$here" patches scripts packaging \
+# `toolchain` too, because a clang build applies the patch in it.
+tar cf - -C "$here" patches scripts packaging toolchain \
     | ssh "root@$ip" "mkdir -p /root/series && tar xf - -C /root/series"
 
 # Detached, and polled rather than watched. The build outlives any connection
@@ -120,7 +127,8 @@ tar cf - -C "$here" patches scripts packaging \
 # nothing.
 echo "building, which takes hours"
 ssh "root@$ip" \
-    "setsid nohup sh /root/series/scripts/remote-build.sh $version \
+    "OMAWEB_ENGINE_TOOLCHAIN=$toolchain \
+        setsid nohup sh /root/series/scripts/remote-build.sh $version \
         > /root/build.log 2>&1 < /dev/null & echo started"
 
 # The last line of the log every minute, so a run can be followed, and the

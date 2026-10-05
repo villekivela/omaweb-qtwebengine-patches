@@ -9,12 +9,26 @@
 set -eu
 version="${1:?usage: build-inside.sh <qt-version>}"
 
+# Each architecture's own toolchain unless one was asked for, and refresh.sh
+# configures with the same answer.
+OMAWEB_ENGINE_TOOLCHAIN="$(sh /root/series/scripts/engine-toolchain.sh)"
+export OMAWEB_ENGINE_TOOLCHAIN
+toolchain_packages=""
+if [ "$OMAWEB_ENGINE_TOOLCHAIN" = "clang" ]; then
+    toolchain_packages="clang lld llvm"
+fi
+
+# One transaction. The upgrade can bring a newer pacman, and pacman 7.1's
+# download sandbox fails in a Docker container on macOS, so a second call
+# would stop the build there.
+# shellcheck disable=SC2086 # the toolchain's packages are separate words
 pacman -Syu --noconfirm --needed \
     base-devel git cmake ninja python python-html5lib nodejs npm gperf \
     qt6-base qt6-declarative qt6-tools qt6-websockets qt6-webchannel \
     qt6-positioning qt6-svg libxkbcommon libxkbcommon-x11 libxcomposite \
     libxcursor libxrandr libxtst libxdamage nss libdrm mesa pipewire \
-    libxslt libvpx re2 snappy minizip jsoncpp ffmpeg opus > /dev/null
+    libxslt libvpx re2 snappy minizip jsoncpp ffmpeg opus \
+    $toolchain_packages > /dev/null
 
 # Up to 6.11, QtWebEngine builds against the Qt it belongs to. A mismatch fails
 # late and confusingly, so fail early and clearly instead. From 6.140 the engine

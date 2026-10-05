@@ -16,6 +16,12 @@ on:
         default: both
         type: choice
         options: [both, x86, arm]
+      toolchain:
+        description: "Toolchain, where not each architecture's own (scripts/engine-toolchain.sh)"
+        required: true
+        default: default
+        type: choice
+        options: [default, gcc, clang]
 
 permissions:
   contents: read
@@ -29,6 +35,10 @@ jobs:
     # machine and polls: the driver dying is then a lost connection rather than
     # a lost build, and the run can be collected from a machine with no ceiling.
     timeout-minutes: 360
+    # Empty for each architecture's own toolchain, which build-on-hetzner.sh
+    # names. The patch check before renting reads the same.
+    env:
+      OMAWEB_ENGINE_TOOLCHAIN: ${{ inputs.toolchain != 'default' && inputs.toolchain || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -43,6 +53,17 @@ jobs:
           git config --global user.email "builder@example.invalid"
           git config --global user.name "Engine build"
           scripts/refresh.sh --apply-only "${{ inputs.version }}" "$RUNNER_TEMP/qt"
+          # A clang build applies one patch more, to Qt's build files, once
+          # the machine is rented. It is checked here for the same reason.
+          case "${{ matrix.arch }}" in
+            x86) machine=x86_64 ;;
+            arm) machine=aarch64 ;;
+          esac
+          if [ "$(sh scripts/engine-toolchain.sh "$machine")" = clang ]; then
+            git -C "$RUNNER_TEMP/qt/qtwebengine-everywhere-src-${{ inputs.version }}" \
+              apply --check "$PWD/toolchain/clang.patch"
+            echo "toolchain/clang.patch applies"
+          fi
 
       - name: Install hcloud
         run: |

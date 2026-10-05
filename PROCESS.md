@@ -150,6 +150,14 @@ scripts/build-on-hetzner.sh 6.11.2 x86
 scripts/build-on-hetzner.sh 6.11.2 arm
 ```
 
+Each architecture is built with its own toolchain: clang, LLD and ThinLTO with
+Chrome's PGO profile on x86_64, and GCC on aarch64, where clang measured no
+faster without a profile Chrome does not publish. `scripts/engine-toolchain.sh`
+names it, and `toolchain/README.md` has the measurements. Set
+`OMAWEB_ENGINE_TOOLCHAIN=gcc` or `=clang` to build one the other way, or pick
+it in "Build the engine"'s `toolchain` input. A clang build locally takes a
+volume of its own, `omaweb-engine-work-clang`.
+
 Each run creates a server, sends the series, builds inside an Arch container,
 runs `verify.sh`, and refuses to package anything if the gate does not pass. It
 returns an unsigned tarball of the install tree and a checksum, then deletes the

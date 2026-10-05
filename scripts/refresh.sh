@@ -154,6 +154,34 @@ fi
 # every other Qt application on the machine keeps the engine it had.
 prefix="${OMAWEB_ENGINE_PREFIX:-/usr/lib/omaweb}"
 
+# OMAWEB_ENGINE_TOOLCHAIN=clang builds the engine the way Chrome is built:
+# clang, linked by LLD with ThinLTO, and with Chrome's own PGO profile for this
+# Chromium where Chrome publishes one. Qt turns ThinLTO on only when Qt itself
+# was built for LLD, and PGO never, so toolchain/clang.patch opens both. Unset,
+# Qt's own choice builds it, which is GCC. `build-inside.sh` sets it from
+# `engine-toolchain.sh`, which names each architecture's default.
+toolchain="${OMAWEB_ENGINE_TOOLCHAIN:-}"
+profile=""
+if [ "$toolchain" = "clang" ]; then
+    [ "$system" = "Linux" ] || { echo "the clang toolchain is for Linux builds"; exit 1; }
+    # Checked here, because CMake is handed their paths below and an empty one fails hours
+    # later, or archives ThinLTO's bitcode with a tool that cannot index it.
+    for tool in clang clang++ ld.lld llvm-ar llvm-nm llvm-ranlib; do
+        command -v "$tool" > /dev/null 2>&1 \
+            || { echo "the clang toolchain needs $tool, which is not installed"; exit 1; }
+    done
+    git apply "$series/../toolchain/clang.patch"
+    echo "TOOLCHAIN: clang, LLD and ThinLTO"
+    # Its PGO line goes to the output build-inside.sh keeps as apply.txt, so a release records
+    # which profiles it was built with.
+    if ! profile="$(sh "$series/../scripts/fetch-profiles.sh" "$tree" "$work/pgo" \
+        2> "$work/pgo.log")"; then
+        cat "$work/pgo.log"
+        exit 1
+    fi
+    cat "$work/pgo.log"
+fi
+
 set -- -S . -B build -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DFEATURE_webengine_proprietary_codecs=ON \
@@ -164,6 +192,22 @@ set -- -S . -B build -G Ninja \
 
 if command -v ccache > /dev/null 2>&1; then
     set -- "$@" -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_C_COMPILER_LAUNCHER=ccache
+fi
+
+if [ "$toolchain" = "clang" ]; then
+    # CMake links the engine library itself, from what GN compiled, so it is
+    # told to use LLD as well. ThinLTO archives hold bitcode, which only LLVM's
+    # archiver indexes.
+    set -- "$@" -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+        -DCMAKE_AR="$(command -v llvm-ar)" -DCMAKE_NM="$(command -v llvm-nm)" \
+        -DCMAKE_RANLIB="$(command -v llvm-ranlib)" \
+        -DCMAKE_SHARED_LINKER_FLAGS=-fuse-ld=lld -DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld \
+        -DCMAKE_MODULE_LINKER_FLAGS=-fuse-ld=lld -DOMAWEB_USE_LLD=ON
+    if [ -n "$profile" ]; then
+        set -- "$@" -DOMAWEB_PGO_PROFILE="$profile"
+    fi
+    # V8's builtins profile applies with or without Chrome's.
+    set -- "$@" -DOMAWEB_V8_BUILTINS_PGO=ON
 fi
 
 if [ "$system" = "Darwin" ]; then

@@ -35,8 +35,10 @@ fi
 
 mkdir -p /root/out /root/work
 
-
+# The toolchain build-on-hetzner.sh named, into the container. Left empty,
+# build-inside.sh takes the architecture's own.
 podman run --rm \
+    -e OMAWEB_ENGINE_TOOLCHAIN="${OMAWEB_ENGINE_TOOLCHAIN:-}" \
     -v /root/work:/root/work \
     -v /root/series:/root/series \
     -v /root/out:/root/out \

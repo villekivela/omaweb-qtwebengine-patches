@@ -22,6 +22,11 @@ scripts/verify.sh <tree>      # tests, twice
 scripts/package-locally.sh 6.140.0  # package here, sign here
 ```
 
+x86_64 is built with clang, LLD and ThinLTO and Chrome's PGO profile, aarch64 with GCC.
+`build-inside.sh`, which the local and rented builds run, takes that default from
+`scripts/engine-toolchain.sh`. `refresh.sh` run by hand configures Qt's own choice, GCC, unless
+`OMAWEB_ENGINE_TOOLCHAIN=clang` is set. `toolchain/README.md` says why and how.
+
 `PROCESS.md` has the rest, including what to do when a patch conflicts and what a Chromium bump
 costs.
 
