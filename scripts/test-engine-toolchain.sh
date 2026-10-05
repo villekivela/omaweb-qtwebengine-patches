@@ -28,6 +28,11 @@ check "x86_64 by default" "" x86_64 clang
 # A Mac or a Docker host names the same machine its own way.
 check "amd64 by default" "" amd64 clang
 
+# Without Chrome's profile, which Chrome does not publish for aarch64, clang measured within the
+# spread of GCC there (villekivela/omaweb#575), so aarch64 keeps GCC.
+check "aarch64 by default" "" aarch64 gcc
+check "arm64 by default" "" arm64 gcc
+
 # Asked for by name, either way round, on either machine.
 check "gcc asked for on x86_64" gcc x86_64 gcc
 check "clang asked for on aarch64" clang aarch64 clang
