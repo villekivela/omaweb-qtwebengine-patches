@@ -4,8 +4,10 @@ All five reproduce on a stock build and each comes with a test that fails withou
 separately from the tab-delegate suggestion in `QTBUG-draft.md`, which asks for new API and is a
 different conversation.
 
-Fixes go to Gerrit against `dev` with `Pick-to: 6.140`, the release branch QtWebEngine cut after
-6.12 (`QT_REPO_MODULE_VERSION` 6.140.0, alpha1 in September 2026).
+Fixes go to Gerrit against `dev` with `Pick-to: 6.140`. From Qt 6.12, QtWebEngine is released on
+its own and versioned after its Chromium, so 6.140 is its first series, on Chromium 140. `6.140` is
+that series' branch and becomes 6.140.1 and later. The 6.140.0 release itself comes from `6.140.0`,
+which split from `6.140` on 2026-09-08, and a pick to `6.140` does not reach it.
 
 Four touch `qtwebengine` alone and can go up in any order. The `ExtensionPrefs` crash also needs a
 change in `qtwebengine-chromium`, so it is two changes with a dependency and is worth sending last,
@@ -13,7 +15,8 @@ once the others have shown the reviewers what this is about.
 
 All five are filed. Four are on Gerrit, and two of those have merged into `dev` and been picked to
 `6.140`. The fifth waits on an answer about where its fix belongs. The patches whose change has
-merged stay in the series until Omaweb's engine is built on a Qt release that carries them.
+merged stay in the series until Omaweb's engine is built on a Qt release that carries them, which
+is 6.140.1 at the earliest. Where each stands in 6.140 is below the table.
 
 | Order | Patch | Report | Change | Status | What it is |
 | ----- | ----- | ------ | ------ | ------ | ---------- |
@@ -30,6 +33,36 @@ Each change carries `Fixes: QTBUG-…` and `Pick-to: 6.140`. Two more changes fo
 - [773908](https://codereview.qt-project.org/c/qt/qtwebengine/+/773908), in review, is the test that
   a `use_dynamic_url` resource stays unreachable at its fixed URL, which patch 0014 carries too. It
   uses `Task-number: QTBUG-150590`, because it tests that fix rather than fixing anything.
+
+## Where each change stands in 6.140
+
+Checked on 2026-10-05. The series' 17 patches carry no Change-Id, so the merged ones were matched by
+their reports and changes, and compared line by line. For the rest, the series was applied in order
+to each tree, and every upstream commit since the RC that touches a file the series touches was
+listed. Nothing else of the series is upstream.
+
+| Patch | Upstream | 6.140.0-rc | `6.140.0` | `6.140` | `dev` |
+| ----- | -------- | ---------- | --------- | ------- | ----- |
+| 0001 | 772848: `dev` `85c4b70af`, `6.140` `4f674b4e8` (change 773404) | no | no | yes | yes |
+| 0002 | qtwebengine-chromium 772104, in another form | no | yes | yes | yes |
+| 0010 | 772849, in review | no | no | no | no |
+| 0011 | 772850, in review | no | no | no | no |
+| 0014 | 772845: `dev` `182770309`, `6.140` `1aa9958ff` (change 773151) | no | no | yes | yes |
+| 0014 follow-up | 773048: `dev` `7bc989efe` | no | no | no | yes |
+
+The rest, 0003 to 0009, 0012, 0013 and 0015 to 0017, are in none of them.
+
+- **0001 and 0014** merged on 2026-09-22 and were picked to `6.140` the same day and the next. The
+  RC is tagged on `6.140.0`, which split from `6.140` before the picks, so both still applied to it.
+  Their source changes are the series' own, line for line. Only the tests differ. 0001's upstream
+  test has `QVERIFY2` with the extension's error where the patch has `QVERIFY`. 0014's upstream
+  test leaves out the dynamic URL case, which is 773908. Neither is picked to `6.140.0`, so the
+  final 6.140.0 still needs both patches, and they drop at 6.140.1.
+- **0002** was never sent: it is a local build fix for the macOS 26 SDK, which removed
+  `kSBXProfilePureComputation`. qtwebengine-chromium 772104, "[Backport] Fix macOS 27 build of
+  `chrome` target" on `140-based`, merged 2026-09-18, removes the `kProfilePureComputation` member
+  and its uses outright. It reached `6.140.0`, `6.140` and `dev` with a Chromium update after the
+  RC, where 0002 no longer applies. It drops when the final 6.140.0 is qualified.
 
 Patch 0015 answers a report someone else had already filed, so it went there as a comment rather
 than a sixth report. [QTBUG-149450](https://qt-project.atlassian.net/browse/QTBUG-149450) measures
