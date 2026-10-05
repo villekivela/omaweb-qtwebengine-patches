@@ -44,19 +44,15 @@ case "$arch" in
     # also brings it under the six hours a CI job gets, so the build no longer
     # has to outlive its driver. Set HCLOUD_TYPE_X86=ccx43 to try it, and change
     # this default once one has actually built.
-    x86) type="${HCLOUD_TYPE_X86:-ccx33}" ;;
+    x86) type="${HCLOUD_TYPE_X86:-ccx33}"; machine=x86_64 ;;
     # Ampere. 32 GB is tight for parallel links, so the remote script caps them.
-    arm) type="${HCLOUD_TYPE_ARM:-cax41}" ;;
+    arm) type="${HCLOUD_TYPE_ARM:-cax41}"; machine=aarch64 ;;
     *)   echo "arch must be x86 or arm"; exit 1 ;;
 esac
 
 # Named before anything is rented, so a toolchain nobody builds with is refused
 # here rather than on the machine. OMAWEB_ENGINE_TOOLCHAIN asks for one, and
 # otherwise the architecture takes its own.
-case "$arch" in
-    x86) machine=x86_64 ;;
-    arm) machine=aarch64 ;;
-esac
 toolchain="$(sh "$here/scripts/engine-toolchain.sh" "$machine")"
 echo "building with $toolchain"
 
@@ -131,7 +127,8 @@ tar cf - -C "$here" patches scripts packaging toolchain \
 # nothing.
 echo "building, which takes hours"
 ssh "root@$ip" \
-    "OMAWEB_ENGINE_TOOLCHAIN=$toolchain setsid nohup sh /root/series/scripts/remote-build.sh $version \
+    "OMAWEB_ENGINE_TOOLCHAIN=$toolchain \
+        setsid nohup sh /root/series/scripts/remote-build.sh $version \
         > /root/build.log 2>&1 < /dev/null & echo started"
 
 # The last line of the log every minute, so a run can be followed, and the

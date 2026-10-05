@@ -27,6 +27,8 @@ chromium_tree="$tree/src/3rdparty/chromium"
 # out; a client that does not accept gzip is sent other bytes.
 fetch_checked() {
     headers="$(curl -fsSI -H 'Accept-Encoding: gzip' "$1" | tr -d '\r')"
+    # A pipeline's status is tr's, so a request that failed shows as no headers.
+    [ -n "$headers" ] || { echo "$1 did not answer" >&2; exit 1; }
     published="$(printf '%s\n' "$headers" | sed -n 's/^x-goog-hash: .*md5=//Ip')"
     encoding="$(printf '%s\n' "$headers" | sed -n 's/^x-goog-stored-content-encoding: //Ip')"
     curl -fsSL -H 'Accept-Encoding: gzip' -o "$2.download" "$1"
@@ -66,7 +68,7 @@ done
 case "$machine" in
     x86_64 | amd64) ;;
     *)
-        echo "PGO: V8 $v8's for its builtins, and no Chrome profile: Chrome publishes none for $machine" >&2
+        echo "PGO: V8 $v8's for its builtins. Chrome publishes no profile for $machine" >&2
         exit 0
         ;;
 esac

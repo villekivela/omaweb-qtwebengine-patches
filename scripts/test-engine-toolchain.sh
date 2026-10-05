@@ -13,8 +13,8 @@ failed=0
 
 check() {
     name="$1" asked="$2" machine="$3" expected="$4"
-    actual="$(OMAWEB_ENGINE_TOOLCHAIN="$asked" sh "$here/engine-toolchain.sh" "$machine" 2> /dev/null \
-        || echo "failed")"
+    actual="$(OMAWEB_ENGINE_TOOLCHAIN="$asked" sh "$here/engine-toolchain.sh" "$machine" \
+        2> /dev/null || echo "failed")"
     if [ "$actual" = "$expected" ]; then
         echo "ok   $name: $actual"
     else

@@ -35,6 +35,10 @@ jobs:
     # machine and polls: the driver dying is then a lost connection rather than
     # a lost build, and the run can be collected from a machine with no ceiling.
     timeout-minutes: 360
+    # Empty for each architecture's own toolchain, which build-on-hetzner.sh
+    # names. The patch check before renting reads the same.
+    env:
+      OMAWEB_ENGINE_TOOLCHAIN: ${{ inputs.toolchain != 'default' && inputs.toolchain || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -43,8 +47,6 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Refuse a series that does not apply
-        env:
-          OMAWEB_ENGINE_TOOLCHAIN: ${{ inputs.toolchain != 'default' && inputs.toolchain || '' }}
         # Minutes here save hours on a rented machine. The same check runs
         # daily; this is the one that gates spending money.
         run: |
@@ -79,7 +81,6 @@ jobs:
         env:
           HCLOUD_TOKEN: ${{ secrets.HCLOUD_TOKEN }}
           OMAWEB_SSH_KEY: ${{ vars.BUILDER_SSH_KEY_NAME || 'omaweb-builder' }}
-          OMAWEB_ENGINE_TOOLCHAIN: ${{ inputs.toolchain != 'default' && inputs.toolchain || '' }}
         run: scripts/build-on-hetzner.sh "${{ inputs.version }}" "${{ matrix.arch }}"
 
       # No cleanup step here on purpose. This job being stopped at the ceiling

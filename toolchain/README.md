@@ -30,8 +30,8 @@ the series: it changes how the engine is compiled, not what its code does. It do
 - It turns on LLD and ThinLTO, which Qt allows only when Qt itself was built for LLD.
 - It turns on PGO when a profile is given, which Qt never does.
 - It turns on V8's builtins profile on its own, which V8 takes only with Chrome's.
-- It lets V8 build a builtin its profile no longer fits without the profile, instead of stopping
-  the build. Qt's V8 is not built quite as Chrome's.
+- Where V8's builtins profile no longer fits a builtin, it has V8 build that builtin without the
+  profile instead of stopping the build. Qt's V8 is not built quite as Chrome's.
 
 ## The profiles
 
