@@ -50,6 +50,16 @@ case "$arch" in
     *)   echo "arch must be x86 or arm"; exit 1 ;;
 esac
 
+# Named before anything is rented, so a toolchain nobody builds with is refused
+# here rather than on the machine. OMAWEB_ENGINE_TOOLCHAIN asks for one, and
+# otherwise the architecture takes its own.
+case "$arch" in
+    x86) machine=x86_64 ;;
+    arm) machine=aarch64 ;;
+esac
+toolchain="$(sh "$here/scripts/engine-toolchain.sh" "$machine")"
+echo "building with $toolchain"
+
 server="omaweb-engine-$(echo "$version" | tr . -)-$arch-$$"
 mkdir -p "$out"
 
@@ -110,7 +120,8 @@ done
 echo "sending the series"
 # `packaging` as well as the series: the build packages what it built, on a
 # machine of the right architecture, so nothing has to be repackaged by hand.
-tar cf - -C "$here" patches scripts packaging \
+# `toolchain` too, because a clang build applies the patch in it.
+tar cf - -C "$here" patches scripts packaging toolchain \
     | ssh "root@$ip" "mkdir -p /root/series && tar xf - -C /root/series"
 
 # Detached, and polled rather than watched. The build outlives any connection
@@ -120,7 +131,7 @@ tar cf - -C "$here" patches scripts packaging \
 # nothing.
 echo "building, which takes hours"
 ssh "root@$ip" \
-    "setsid nohup sh /root/series/scripts/remote-build.sh $version \
+    "OMAWEB_ENGINE_TOOLCHAIN=$toolchain setsid nohup sh /root/series/scripts/remote-build.sh $version \
         > /root/build.log 2>&1 < /dev/null & echo started"
 
 # The last line of the log every minute, so a run can be followed, and the

@@ -26,11 +26,13 @@ case "$(uname -m)" in
     *)             echo "unsupported architecture"; exit 1 ;;
 esac
 
-# A clang build gets a work space of its own, because a build directory
-# configured for one compiler refuses the other (OMAWEB_ENGINE_TOOLCHAIN in
-# refresh.sh).
-toolchain="${OMAWEB_ENGINE_TOOLCHAIN:-}"
-volume=omaweb-engine-work${toolchain:+-$toolchain}
+# The architecture's own toolchain unless OMAWEB_ENGINE_TOOLCHAIN asks for gcc
+# or clang. A clang build gets a work space of its own, because a build
+# directory configured for one compiler refuses the other. The GCC one keeps
+# the name it had.
+toolchain="$(sh "$here/scripts/engine-toolchain.sh")"
+volume=omaweb-engine-work
+[ "$toolchain" = "clang" ] && volume=omaweb-engine-work-clang
 
 mkdir -p "$out"
 docker volume create "$volume" > /dev/null

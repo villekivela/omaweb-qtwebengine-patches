@@ -15,7 +15,11 @@ pacman -Syu --noconfirm --needed \
     qt6-positioning qt6-svg libxkbcommon libxkbcommon-x11 libxcomposite \
     libxcursor libxrandr libxtst libxdamage nss libdrm mesa pipewire \
     libxslt libvpx re2 snappy minizip jsoncpp ffmpeg opus > /dev/null
-if [ "${OMAWEB_ENGINE_TOOLCHAIN:-}" = "clang" ]; then
+# Each architecture's own toolchain unless one was asked for, and refresh.sh
+# configures with the same answer.
+OMAWEB_ENGINE_TOOLCHAIN="$(sh /root/series/scripts/engine-toolchain.sh)"
+export OMAWEB_ENGINE_TOOLCHAIN
+if [ "$OMAWEB_ENGINE_TOOLCHAIN" = "clang" ]; then
     pacman -S --noconfirm --needed clang lld llvm > /dev/null
 fi
 

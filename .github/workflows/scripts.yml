@@ -14,6 +14,10 @@ name: Scripts
 # The write-barrier check reads a build tree, which takes hours to make, so its
 # test hands it stand-in trees holding the setting each way and none at all.
 #
+# The toolchain an architecture builds with picks the work space and what the
+# rented machine installs, and the profile fetch is held to Google's MD5, so
+# both are tested here: the fetch against a stand-in bucket.
+#
 # The PKGBUILD's checksums are checked here too: makepkg checks them only when
 # an engine is packaged, and a notice edited without its checksum stopped the
 # package there.
@@ -22,12 +26,14 @@ on:
     paths:
       - "scripts/**"
       - "packaging/**"
+      - "toolchain/**"
       - ".github/workflows/scripts.yml"
   push:
     branches: [main]
     paths:
       - "scripts/**"
       - "packaging/**"
+      - "toolchain/**"
       - ".github/workflows/scripts.yml"
 
 permissions:
@@ -81,3 +87,20 @@ jobs:
 
       - name: Test the write-barrier check
         run: scripts/test-check-write-barriers.sh
+
+  toolchain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Shellcheck
+        run: >
+          shellcheck scripts/engine-toolchain.sh scripts/test-engine-toolchain.sh
+          scripts/fetch-profiles.sh scripts/test-fetch-profiles.sh
+
+      - name: Test the toolchain each architecture builds with
+        run: scripts/test-engine-toolchain.sh
+
+      - name: Test the profile fetch
+        run: scripts/test-fetch-profiles.sh
