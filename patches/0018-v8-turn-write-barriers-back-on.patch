@@ -1,0 +1,58 @@
+From 9b162a9269cb8913c792dd6c22d222330a6fdb03 Mon Sep 17 00:00:00 2001
+From: Allan Sandfeld Jensen <allan.jensen@qt.io>
+Date: Mon, 21 Sep 2026 12:17:01 +0200
+Subject: [PATCH] v8: turn write barriers back on
+
+Qt's 6.11.2 tarball builds V8 with v8_disable_write_barriers = true on
+every platform, which also turns on v8_enable_single_generation. V8 then
+has no young generation. Every allocation goes to the old space, and the
+collector can neither scavenge nor mark incrementally.
+
+Qt restored Chromium's default on the 140-based branch of
+qtwebengine-chromium in two changes, and 6.140.0 carries both. This is
+the two of them as one backport to 6.11.2: 770837 set the value to
+is_win, and 772657 set it to false. The patch drops when the series
+moves to an engine that carries them.
+
+On x86_64, JetStream 2.2 went from 0.718 to 0.917 of Chromium 140's
+score and Speedometer 3.1 from 0.706 to 0.727 (omaweb#356).
+
+qtwebengine-chromium 62f90830c0750182d2b40be60e2e5f9c2f31c4c9:
+Task-number: QTBUG-141377
+Task-number: QTBUG-147960
+Task-number: QTBUG-149846
+Task-number: QTBUG-150024
+Task-number: QTBUG-150026
+Change-Id: I2e0d026aa4c4dbdbde0144f5e45ace0cb4641fab
+Reviewed-on: https://codereview.qt-project.org/c/qt/qtwebengine-chromium/+/770837
+
+qtwebengine-chromium 9b162a9269cb8913c792dd6c22d222330a6fdb03:
+Fixes: QTBUG-141377
+Fixes: QTBUG-147960
+Fixes: QTBUG-149846
+Fixes: QTBUG-150024
+Fixes: QTBUG-150026
+Change-Id: Idf79c914693124f6ca0db05facb433bc5690ee64
+Reviewed-on: https://codereview.qt-project.org/c/qt/qtwebengine-chromium/+/772657
+
+omaweb#574
+---
+ src/3rdparty/chromium/v8/BUILD.gn | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/3rdparty/chromium/v8/BUILD.gn b/src/3rdparty/chromium/v8/BUILD.gn
+index 4c6f7fb4b1..3883c2a8e7 100644
+--- a/src/3rdparty/chromium/v8/BUILD.gn
++++ b/src/3rdparty/chromium/v8/BUILD.gn
+@@ -292,7 +292,7 @@ declare_args() {
+ 
+   # Disable write barriers when GCs are non-incremental and
+   # heap has single generation.
+-  v8_disable_write_barriers = true
++  v8_disable_write_barriers = false
+ 
+   # Ensure that write barriers are always used.
+   # Useful for debugging purposes.
+-- 
+2.54.0 (Apple Git-157)
+

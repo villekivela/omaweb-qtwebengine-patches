@@ -1,15 +1,17 @@
 # QtWebEngine extension patches
 
-Fifteen patches to QtWebEngine. Fourteen let it host a password manager's Chromium extension, and
-one restores a trace macro that slowed every page. Base is the released
+Eighteen patches to QtWebEngine. Fourteen let it host a password manager's Chromium extension, two
+add API that Omaweb's content blocking and certificate view ask for, one restores a trace macro that
+slowed every page, and one turns V8's write barriers back on. Base is the released
 `qtwebengine-everywhere-src-6.11.2` tarball.
 
 Built for [omaweb#344](https://github.com/villekivela/omaweb/issues/344), which asks whether Omaweb
 can host Bitwarden and 1Password. The findings live in `docs/research/password-manager-extensions.md`
 in that repository.
 
-Six of the fifteen are ordinary bug fixes headed for Gerrit. The rest wait on one question to Qt, in
-`upstream/QTBUG-draft.md`. If Qt takes the work, this repository is deleted rather than maintained.
+Six of the eighteen are ordinary bug fixes headed for Gerrit, and 0018 is Qt's own change. The rest
+wait on one question to Qt, in `upstream/QTBUG-draft.md`. If Qt takes the work, this repository is
+deleted rather than maintained.
 
 ## Running it
 
@@ -121,6 +123,15 @@ certificate to the trust anchor, taken from the navigation's SSL info as the res
 A load that made no TLS connection carries none. See
 [omaweb#325](https://github.com/villekivela/omaweb/issues/325) and ADR 0054. _A feature with tests,
 written as Qt API. Propose it as one._
+
+**0018, turn V8's write barriers back on.** Qt's 6.11.2 builds V8 with `v8_disable_write_barriers =
+true`, which also gives it a single generation. Every allocation goes to the old space, and the
+collector can neither scavenge nor mark incrementally. Qt restored Chromium's default in
+qtwebengine-chromium 770837 and 772657, which 6.140.0 carries, and 0018 is the two as one backport,
+with their Change-Ids and bug numbers. On x86_64 it took JetStream 2.2 from 0.718 to 0.917 of
+Chromium 140's score. See [omaweb#574](https://github.com/villekivela/omaweb/issues/574) and
+[omaweb#356](https://github.com/villekivela/omaweb/issues/356). _Qt's change. It drops when the
+series moves to 6.140.0._
 
 ## The open question
 
