@@ -65,6 +65,10 @@ if [ "$(id -u)" = "0" ]; then
 fi
 export QTWEBENGINE_CHROMIUM_FLAGS
 
+# Read from the build rather than run, and before the tests, so its verdict is there even when a
+# test never reaches one. Its Totals line goes to the gate with theirs.
+sh "$(dirname "$0")/check-write-barriers.sh" "$tree" || true
+
 [ -x "$test" ] || "$tree/build.sh" tst_qwebengineextension
 
 echo "=== patched engine, where everything must pass"

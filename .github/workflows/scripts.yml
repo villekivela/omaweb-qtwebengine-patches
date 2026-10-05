@@ -11,6 +11,9 @@ name: Scripts
 # layout it has to read next does not exist there until the engine's first
 # release of its own.
 #
+# The write-barrier check reads a build tree, which takes hours to make, so its
+# test hands it stand-in trees holding the setting each way and none at all.
+#
 # The PKGBUILD's checksums are checked here too: makepkg checks them only when
 # an engine is packaged, and a notice edited without its checksum stopped the
 # package there.
@@ -66,3 +69,15 @@ jobs:
 
       - name: Check the PKGBUILD's checksums
         run: scripts/check-pkgbuild-sums.sh
+
+  write-barriers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Shellcheck
+        run: shellcheck scripts/check-write-barriers.sh scripts/test-check-write-barriers.sh
+
+      - name: Test the write-barrier check
+        run: scripts/test-check-write-barriers.sh

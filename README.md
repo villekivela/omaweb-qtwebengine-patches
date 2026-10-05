@@ -148,6 +148,11 @@ has the test server's certificate, and the gate runs it the same way. `scripts/v
 three and reports them. Neither compiles against a stock build, which has no API for them to call,
 so there is no stock run to compare: removing the line that keeps the chain fails 0017's case.
 
+Patch 0018 has no test case, because what it changes is how V8 is compiled. The gate reads that
+instead. `scripts/check-write-barriers.sh` fails a tree whose V8 is compiled with
+`-DV8_DISABLE_WRITE_BARRIERS`, as 6.11.2 is without the patch, and names the ninja file it read. It
+stays after 0018 drops, so a later Qt that turns the barriers off again is noticed.
+
 ## Rebase record
 
 | Release | Applying | Build | Tests | People's time |
