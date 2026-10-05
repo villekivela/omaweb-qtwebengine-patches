@@ -52,13 +52,14 @@ Each is held to the MD5 Google Storage publishes before it is used, and kept in 
 
 `scripts/build-locally.sh` caps its container at `OMAWEB_ENGINE_MEMORY`, 20g by default, and
 `build-inside.sh` counts its compile jobs from the cap, about 2.2 GB a job. The compile, not the
-link, is what fills it. Sampled every five seconds on 6.11.2 with an empty ThinLTO cache
+link, is what fills it. Sampled every five seconds on 6.11.2 with an empty ThinLTO cache, as the
+container's anonymous memory, what its processes hold without the page cache
 ([omaweb#575](https://github.com/villekivela/omaweb/issues/575)):
 
-| Machine | Cap, jobs | Compile, peak | ThinLTO link of `libQt6WebEngineCore.so` |
+| Machine | Cap, jobs | Compile, peak | ThinLTO link of `libQt6WebEngineCore.so`, peak |
 | --- | --- | --- | --- |
-| x86_64, Ryzen 7 PRO 7840HS, 16 threads | 20g, 9 | not measured | `ld.lld` 4.7 GB resident, 5.0 GB in the container with its page cache, under three minutes |
-| aarch64, Apple M2 Max, 6 of 12 CPUs | 22g, 6 | 13.0 GB | 2.5 GB, 4.3 GB with its page cache, about two minutes |
+| x86_64, Ryzen 7 PRO 7840HS, 16 threads | 20g, 9 | not measured | 3.5 GB, under three minutes |
+| aarch64, Apple M2 Max, 6 of 12 CPUs | 22g, 6 | 13.0 GB | 2.5 GB, about two minutes |
 
 The x86_64 build was incremental, so its compile peak was not measured. The link uses every thread
 the container has (`--thinlto-jobs=all`), and its cache in `build/thinlto-cache` makes a relink of

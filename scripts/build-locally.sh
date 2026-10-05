@@ -46,8 +46,8 @@ docker rm -f omaweb-engine-build > /dev/null 2>&1 || true
 # inside the container rather than freezing everything else on the machine.
 # The cap is also what build-inside.sh counts its jobs from. 20g fits the 22 GiB
 # devbox; OMAWEB_ENGINE_MEMORY sets it for another machine. The compile fills
-# it, not the clang build's ThinLTO link, which peaked at 5 GB with sixteen
-# threads (toolchain/README.md).
+# it, not the clang build's ThinLTO link, which peaked at 3.5 GB of anonymous
+# memory with sixteen threads (toolchain/README.md).
 memory="${OMAWEB_ENGINE_MEMORY:-20g}"
 docker run --rm \
     --name omaweb-engine-build \
