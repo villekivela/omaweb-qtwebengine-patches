@@ -15,6 +15,9 @@ pacman -Syu --noconfirm --needed \
     qt6-positioning qt6-svg libxkbcommon libxkbcommon-x11 libxcomposite \
     libxcursor libxrandr libxtst libxdamage nss libdrm mesa pipewire \
     libxslt libvpx re2 snappy minizip jsoncpp ffmpeg opus > /dev/null
+if [ "${OMAWEB_ENGINE_TOOLCHAIN:-}" = "clang" ]; then
+    pacman -S --noconfirm --needed clang lld llvm > /dev/null
+fi
 
 # Up to 6.11, QtWebEngine builds against the Qt it belongs to. A mismatch fails
 # late and confusingly, so fail early and clearly instead. From 6.140 the engine

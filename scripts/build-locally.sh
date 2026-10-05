@@ -26,8 +26,14 @@ case "$(uname -m)" in
     *)             echo "unsupported architecture"; exit 1 ;;
 esac
 
+# A clang build gets a work space of its own, because a build directory
+# configured for one compiler refuses the other (OMAWEB_ENGINE_TOOLCHAIN in
+# refresh.sh).
+toolchain="${OMAWEB_ENGINE_TOOLCHAIN:-}"
+volume=omaweb-engine-work${toolchain:+-$toolchain}
+
 mkdir -p "$out"
-docker volume create omaweb-engine-work > /dev/null
+docker volume create "$volume" > /dev/null
 
 echo "building $version in $image, which takes hours"
 echo "watch it with: docker logs -f omaweb-engine-build"
@@ -43,7 +49,8 @@ docker run --rm \
     --name omaweb-engine-build \
     --memory="$memory" --memory-swap="$memory" \
     --platform "linux/$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')" \
-    -v omaweb-engine-work:/root/work \
+    -e OMAWEB_ENGINE_TOOLCHAIN="$toolchain" \
+    -v "$volume":/root/work \
     -v "$here:/root/series:ro" \
     -v "$out:/root/out" \
     "$image" sh /root/series/scripts/build-inside.sh "$version"
@@ -53,4 +60,4 @@ sha256sum ./*.tar.zst ./*.pkg.tar.* > SHA256SUMS
 cat SHA256SUMS
 echo
 echo "unsigned, tarball and package both. Signing happens where the key is."
-echo "the work space is kept: docker volume rm omaweb-engine-work"
+echo "the work space is kept: docker volume rm $volume"
