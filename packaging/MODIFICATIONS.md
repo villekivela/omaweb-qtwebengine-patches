@@ -19,12 +19,12 @@ aliases of a request's host, and the seventeenth reports the certificate chain a
 on `QWebEngineLoadingInfo`. The eighteenth turns V8's write barriers back on, which Qt's 6.11.2
 build turns off and its 6.140.0 turns on again.
 
-The engine is built with clang and LLD, with ThinLTO, and on x86_64 with Chrome's own PGO profile
-for its Chromium, where Qt's build would use GCC. `toolchain/clang.patch` opens that in Qt's build
-files, `cmake/QtToolchainHelpers.cmake` and `src/core/CMakeLists.txt`, and lets V8's snapshot step
-build a builtin its profile does not fit without the profile rather than stop. It changes how the
-engine is compiled, not what its code does. `scripts/engine-toolchain.sh` names the toolchain each
-architecture is built with.
+On x86_64 the engine is built with clang and LLD, with ThinLTO and Chrome's own PGO profile for its
+Chromium, where Qt's build would use GCC. On aarch64 it is built with GCC, as Qt's is.
+`toolchain/clang.patch` opens the clang build in Qt's build files, `cmake/QtToolchainHelpers.cmake`
+and `src/core/CMakeLists.txt`, and lets V8's snapshot step build a builtin its profile does not fit
+without the profile rather than stop. It changes how the engine is compiled, not what its code
+does. `scripts/engine-toolchain.sh` names the toolchain each architecture is built with.
 
 Each patch is a single commit with its own message explaining what it changes and why. They are in
 `patches/` in the repository named as this package's URL, and `README.md` there lists them one by

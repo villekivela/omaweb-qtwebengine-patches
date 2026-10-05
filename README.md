@@ -22,6 +22,9 @@ scripts/verify.sh <tree>      # tests, twice
 scripts/package-locally.sh 6.140.0  # package here, sign here
 ```
 
+x86_64 is built with clang, LLD and ThinLTO and Chrome's PGO profile, aarch64 with GCC.
+`toolchain/README.md` says why and how.
+
 `PROCESS.md` has the rest, including what to do when a patch conflicts and what a Chromium bump
 costs.
 

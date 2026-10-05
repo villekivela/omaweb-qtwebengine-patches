@@ -34,7 +34,7 @@ optdepends=('qt6-tools: the QWebEngineView plugin for Qt Designer')
 # The notices travel with this file rather than with the tarball, so correcting
 # one does not cost a rebuild.
 source=('MODIFICATIONS.md' 'LGPL-3.0-only.txt' 'chromium-LICENSE.txt')
-sha256sums=('357df00ade91b442259bc155fd8093b9ff5b4a5d37aadaab87484ed1eaba2357'
+sha256sums=('35409bd4d4e72e65d681d0f41c4a347ebdd0e84947f5e0730dfea93341aa7a6b'
             'da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768'
             '368cca1106be99d39ecd32a38d8305585d802a475effb66380b91ffc9bcf709b')
 
