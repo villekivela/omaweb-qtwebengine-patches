@@ -1,15 +1,16 @@
 # QtWebEngine extension patches
 
-Eighteen patches to QtWebEngine. Fourteen let it host a password manager's Chromium extension, two
+Twenty patches to QtWebEngine. Fourteen let it host a password manager's Chromium extension, two
 add API that Omaweb's content blocking and certificate view ask for, one restores a trace macro that
-slowed every page, and one turns V8's write barriers back on. Base is the released
+slowed every page, one turns V8's write barriers back on, one keeps an offscreen document from
+crashing the engine, and one builds the tests against Qt 6.12. Base is the released
 `qtwebengine-everywhere-src-6.11.2` tarball.
 
 Built for [omaweb#344](https://github.com/villekivela/omaweb/issues/344), which asks whether Omaweb
 can host Bitwarden and 1Password. The findings live in `docs/research/password-manager-extensions.md`
 in that repository.
 
-Six of the eighteen are ordinary bug fixes headed for Gerrit, and 0018 is Qt's own change. The rest
+Seven of the twenty are ordinary bug fixes headed for Gerrit, and 0018 and 0020 are Qt's own changes. The rest
 wait on one question to Qt, in `upstream/QTBUG-draft.md`. If Qt takes the work, this repository is
 deleted rather than maintained.
 
@@ -139,6 +140,23 @@ Chromium 140's score. On x86_64, turning them on by hand had taken it from 0.718
 [omaweb#356](https://github.com/villekivela/omaweb/issues/356). _Qt's change. It drops when the
 series moves to 6.140.0._
 
+**0019, let an extension create an offscreen document.** `chrome.offscreen.createDocument` crashed
+the engine every time. An offscreen document lives in contents the extension system creates itself,
+so its views have no delegate, and `RenderWidgetHostViewQt::Hide()` dereferenced the missing one
+when Chromium hid the document's first speculative frame. `Hide()` now handles a missing delegate as
+`ShowWithVisibility()` already did, and `IsShowing()` answers false. Bitwarden makes one, and the
+browser crashed on resume from suspend because of it
+([omaweb#646](https://github.com/villekivela/omaweb/issues/646)). _A bug fix with a test. Send it to
+Gerrit; `upstream/bug-reports.md` has the report._
+
+**0020, build the widget tests against Qt 6.12.** Qt 6.12 removed `QTEST_DISABLE_KEYPAD_NAVIGATION`,
+which did nothing, so `W_QTEST_MAIN` stopped compiling and took every widget test program with it,
+the extension tests the gate runs among them. Engine 6.11.2 is built against Qt 6.12, as Arch builds
+its own ([omaweb#660](https://github.com/villekivela/omaweb/issues/660)). Qt removed the same line in
+qtwebengine c9300848e28e for QTBUG-147006, and 0020 is that change backported with its Change-Id. It
+touches only the tests, so the engine a reader installs is the same with or without it. _Qt's change.
+It drops when the series moves to 6.140.0._
+
 ## The open question
 
 `TabsDelegateQt` is internal, and `ExtensionsBrowserClientQt` fills it by treating every page of the
@@ -150,7 +168,7 @@ one is active. That is what the QTBUG draft asks for. Ask before writing the API
 
 ## Tests
 
-36 tests pass with the series applied. Five of them fail on a stock build, which is why they are
+37 tests pass with the series applied. Six of them fail on a stock build, which is why they are
 worth having:
 
 - `serviceWorkerLocalization` fails
@@ -158,6 +176,7 @@ worth having:
 - `tabsWindowsAndScripting` fails
 - `nativeMessaging` fails
 - `anExtensionOpensAPage` fails
+- `anOffscreenDocumentCanBeCreated` crashes, signal 11
 
 Patch 0016's eight cases live in Qt's own `tst_qwebengineurlrequestinterceptor`, and the gate runs
 only those, beside the extension tests. Patch 0017's case lives in Qt's `tst_certificateerror`, which
@@ -179,11 +198,19 @@ stays after 0018 drops, so a later Qt that turns the barriers off again is notic
 | 6.11.2, series grown to 12 | 3 more, no conflicts | incremental | 33 of 33 | none |
 | 6.11.2, series grown to 18 | 1 more, no conflicts | incremental | 50 of 50 | none |
 | 6.11.2-5, rebuilt for speed | already applied | incremental | 50 of 50 | none |
+| 6.11.2-6, on Qt 6.12, series grown to 20 | 19 already applied, 1 more, no conflicts | incremental | 51 of 51 | minutes: 0020, after the tests did not build |
 
 The rows after the first are the series growing, and the last is the same series rebuilt with each
 architecture's toolchain and published as 6.11.2-5 (omaweb#576), rather than Qt moving. They
 measure `refresh.sh` picking up a tree it has already patched rather than a rebase. The next
 release is the next real measurement.
+
+6.11.2-6 is the first time Qt moved a minor under the series: the same engine rebuilt against Qt
+6.12, with 0019 for omaweb#646 (omaweb#660). The x86_64 build applied 19 patches to a fresh tarball
+and compiled the engine clean, then stopped where the tests compile, because Qt 6.12 removed
+`QTEST_DISABLE_KEYPAD_NAVIGATION`. 0020 is Qt's own one-line removal, and the row is the run that
+added it to that tree. aarch64 was built on the Mac from the same commit, `32be1d7`, against Arch
+Linux ARM's Qt 6.11.2, and its gate read the same: 37 of 37, 10 of 10, 3 of 3 and 1 of 1.
 
 That row is the easy case. 6.11.1 and 6.11.2 share a Chromium base, so nothing under patches 0005
 and 0006 moved.

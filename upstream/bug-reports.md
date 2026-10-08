@@ -1,6 +1,6 @@
-# Five defect reports
+# Six defect reports
 
-All five reproduce on a stock build and each comes with a test that fails without the fix. File
+All six reproduce on a stock build and each comes with a test that fails without the fix. File
 separately from the tab-delegate suggestion in `QTBUG-draft.md`, which asks for new API and is a
 different conversation.
 
@@ -13,9 +13,9 @@ Four touch `qtwebengine` alone and can go up in any order. The `ExtensionPrefs` 
 change in `qtwebengine-chromium`, so it is two changes with a dependency and is worth sending last,
 once the others have shown the reviewers what this is about.
 
-All five are filed. Four are on Gerrit, and two of those have merged into `dev` and been picked to
-`6.140`. The fifth waits on an answer about where its fix belongs. The patches whose change has
-merged stay in the series until Omaweb's engine is built on a Qt release that carries them, which
+All six are filed. Five are on Gerrit, and two of those have merged into `dev` and been picked to
+`6.140`. The fifth report waits on an answer about where its fix belongs. The patches whose change
+has merged stay in the series until Omaweb's engine is built on a Qt release that carries them, which
 is 6.140.1 at the earliest. Where each stands in 6.140 is below the table.
 
 | Order | Patch | Report | Change | Status | What it is |
@@ -25,6 +25,7 @@ is 6.140.1 at the earliest. Where each stands in 6.140 is below the table.
 | 3 | 0010 | [QTBUG-150592](https://bugreports.qt.io/browse/QTBUG-150592) | [772849](https://codereview.qt-project.org/c/qt/qtwebengine/+/772849) | in review | Loading a loaded extension leaves it dead |
 | 4 | 0011 | [QTBUG-150593](https://bugreports.qt.io/browse/QTBUG-150593) | [772850](https://codereview.qt-project.org/c/qt/qtwebengine/+/772850) | in review | An extension document cannot close its own window |
 | 5 | 0003 | [QTBUG-150594](https://bugreports.qt.io/browse/QTBUG-150594) | waiting | – | `setExtensionEnabled` crashes after a storage path change |
+| 6 | 0019 | [QTBUG-151304](https://bugreports.qt.io/browse/QTBUG-151304) | [778807](https://codereview.qt-project.org/c/qt/qtwebengine/+/778807) | in review | Creating an offscreen document crashes the browser |
 
 Each change carries `Fixes: QTBUG-…` and `Pick-to: 6.140`. Two more changes follow the first report:
 
@@ -49,6 +50,7 @@ touches was listed. Nothing else of the series is upstream.
 | 0011 | 772850, in review | no | no | no | no |
 | 0014 | 772845: `dev` `182770309`, `6.140` `1aa9958ff` (change 773151) | no | no | yes | yes |
 | 0014 follow-up | 773048: `dev` `7bc989efe` | no | no | no | yes |
+| 0019 | 778807, in review | no | no | no | no |
 | 0018 | qtwebengine-chromium 770837 and 772657, through the pin to `1e645e7ec` | no | yes | yes | yes |
 
 The rest, 0003 to 0009, 0012, 0013 and 0015 to 0017, are in none of them. 0018 carries the
@@ -312,6 +314,80 @@ This one is two changes: `ExtensionPrefs::ResetPrefService` in `qtwebengine-chro
 would rather not add a method to Chromium's `ExtensionPrefs`, the alternative is to rebuild the
 keyed services that hold the pointer, which is a larger change and worth asking about rather than
 guessing at.
+
+---
+
+## 6. Creating an offscreen document crashes the browser
+
+**Type:** Bug **Component:** WebEngine **Affects:** 6.11.2, 6.140, dev **Filed:**
+[QTBUG-151304](https://bugreports.qt.io/browse/QTBUG-151304), P1
+
+Small, and the one most readers would hit: every MV3 extension that uses `chrome.offscreen` takes
+the browser down the first time it does. Bitwarden is one.
+
+### Symptom
+
+The browser process dies with SIGSEGV, a null read, as soon as an extension calls
+`chrome.offscreen.createDocument()`, every time:
+
+```text
+#0  QtWebEngineCore::RenderWidgetHostViewQt::Hide()
+#1  content::RenderFrameHostManager::CreateSpeculativeRenderFrame(...)
+#2  content::RenderFrameHostManager::CreateSpeculativeRenderFrameHost(...)
+#3  content::RenderFrameHostManager::GetFrameHostForNavigation(...)
+...
+#9  content::NavigationControllerImpl::LoadURL(...)
+#10 extensions::ExtensionHost::LoadInitialURL()
+#11 extensions::ExtensionHost::CreateRendererNow()
+#12 extensions::ExtensionHostQueue::ProcessOneHost()
+```
+
+### Reproduce
+
+An MV3 extension with the `offscreen` permission and an extension page that calls:
+
+```js
+chrome.offscreen.createDocument({url: "offscreen.html", reasons: ["CLIPBOARD"], justification: "x"});
+```
+
+Load it with `QWebEngineExtensionManager::loadExtension`, enable it, and open the page in a
+`QWebEnginePage`. Calling it from the extension's service worker crashes the same way. Arch's stock
+`qt6-webengine` 6.11.2 crashes on it, so this is Qt's code, not the series.
+
+Test: `tst_qwebengineextension::anOffscreenDocumentCanBeCreated`. Without the fix the test program
+dies with signal 11 before its totals.
+
+### Cause
+
+`ExtensionHost` creates its `WebContents` itself, with no `WebContentsAdapter`, so
+`WebContentsViewQt` never gets a factory client and `CreateViewForWidget` creates every
+`RenderWidgetHostViewQt` in those contents without a delegate. The offscreen document's first
+navigation creates a speculative main frame, and `CreateSpeculativeRenderFrame` hides its view
+"like a new RenderViewHost would be, until navigation commits". `Hide()` has only
+`Q_ASSERT(m_delegate)` before `m_delegate->hide()`, so a release build reads through null.
+`ShowWithVisibility()` on the line above checks for the missing delegate, and `IsShowing()` has the
+same unchecked dereference as `Hide()`.
+
+### Fix
+
+Patch 0019 makes `Hide()` hide the delegate when there is one and otherwise cancel a deferred show,
+so a delegate set later does not show a view Chromium hid, and makes `IsShowing()` answer false
+without a delegate. `Hide()` and `IsShowing()` are the same in 6.11.2, 6.140 and `dev`.
+
+On Gerrit as [778807](https://codereview.qt-project.org/c/qt/qtwebengine/+/778807), in review,
+against `dev` with `Pick-to: 6.140`, `Fixes: QTBUG-151304` and Change-Id
+`Ieabdf4016943f0aee73c93f11feeee5c2048dc9a`. It was pushed without being compiled against `dev`;
+the same source and test pass on 6.11.2. What went up is
+[`0001-Don-t-crash-hiding-a-view-that-has-no-delegate.patch`](0001-Don-t-crash-hiding-a-view-that-has-no-delegate.patch),
+a `git format-patch` against `dev` at `eafb229`, with the Change-Id the commit hook added. The fix
+and the test are in one commit, using the fixtures and helpers `dev`'s test already has plus one new
+fixture, `offscreen_ext`.
+
+### Why it went unnoticed
+
+The tests never created an offscreen document, and a debug build would stop on the assertion with
+the same stack. Omaweb found it from a core dump: Bitwarden made an offscreen document as the laptop
+resumed from suspend ([omaweb#646](https://github.com/villekivela/omaweb/issues/646)).
 
 ---
 

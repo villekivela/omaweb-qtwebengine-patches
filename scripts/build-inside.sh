@@ -30,14 +30,17 @@ pacman -Syu --noconfirm --needed \
     libxslt libvpx re2 snappy minizip jsoncpp ffmpeg opus \
     $toolchain_packages > /dev/null
 
-# Up to 6.11, QtWebEngine builds against the Qt it belongs to. A mismatch fails
-# late and confusingly, so fail early and clearly instead. From 6.140 the engine
-# is released on its own and names the oldest Qt it builds against, which its
-# configure step checks and `refresh.sh` reports.
+# Up to 6.11, QtWebEngine builds against the Qt it belongs to or a newer one: Arch
+# builds engine 6.11.2 against Qt 6.12.0, because Qt 6.12 has no engine of its
+# own (omaweb#660). An older Qt fails late and confusingly, so fail early and
+# clearly instead. From 6.140 the engine is released on its own and names the
+# oldest Qt it builds against, which its configure step checks and `refresh.sh`
+# reports.
 system_qt="$(qmake6 -query QT_VERSION)"
 engine_minor="$(echo "$version" | cut -d. -f2)"
-if [ "$engine_minor" -lt 100 ] && [ "$system_qt" != "$version" ]; then
-    echo "system Qt is $system_qt but the engine is $version."
+oldest="$(printf '%s\n%s\n' "$system_qt" "$version" | sort -V | head -n 1)"
+if [ "$engine_minor" -lt 100 ] && [ "$oldest" != "$version" ]; then
+    echo "system Qt is $system_qt, older than the engine $version."
     echo "Wait for the distribution to catch up, or build the rest of Qt too."
     exit 1
 fi

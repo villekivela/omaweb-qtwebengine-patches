@@ -12,7 +12,7 @@
 
 pkgname=omaweb-qtwebengine
 pkgver=6.11.2
-pkgrel=5
+pkgrel=6
 pkgdesc="QtWebEngine with Omaweb's extension patches, installed beside Omaweb"
 arch=('x86_64' 'aarch64')
 url="https://github.com/villekivela/omaweb-qtwebengine-patches"
@@ -24,17 +24,28 @@ license=('LGPL-3.0-only' 'BSD-3-Clause')
 # their DT_NEEDED entries, less what glibc, gcc-libs and the Qt packages below
 # already bring. A clean Arch install has none of the media and image
 # libraries, so leaving one out fails at load time on the reader's machine.
-depends=('qt6-base' 'qt6-declarative' 'qt6-positioning' 'qt6-webchannel' 'nss' 'libxkbcommon'
+depends=('qt6-positioning' 'qt6-webchannel' 'nss' 'libxkbcommon'
          'alsa-lib' 'dbus' 'expat' 'fontconfig' 'freetype2' 'harfbuzz' 'lcms2' 'libglvnd'
          'libjpeg-turbo' 'libpng' 'libtiff' 'libwebp' 'libxml2' 'libxslt' 'mesa' 'minizip'
          'openjpeg2' 'opus' 'snappy' 'systemd-libs' 'zlib')
+# The engine uses Qt's private API, which promises nothing across a Qt minor, so
+# it is built against the Qt it runs on, and pacman brings that Qt along with
+# it. There is no upper bound, on purpose: Omaweb must not hold back a reader's
+# system upgrade (omaweb#660). A new Qt minor is answered by rebuilding the
+# engine promptly, and raising these two to it, as PROCESS.md says.
+#
+# Per architecture, because the two distributions move apart: Arch has Qt 6.12,
+# and Arch Linux ARM is still on 6.11.2, so an aarch64 engine is built against
+# 6.11.2 and a floor of 6.12.0 there could never be met.
+depends_x86_64=('qt6-base>=6.12.0' 'qt6-declarative>=6.12.0')
+depends_aarch64=('qt6-base' 'qt6-declarative')
 # Only Qt Designer loads the QWebEngineView plugin, and it links libQt6Designer.
 optdepends=('qt6-tools: the QWebEngineView plugin for Qt Designer')
 
 # The notices travel with this file rather than with the tarball, so correcting
 # one does not cost a rebuild.
 source=('MODIFICATIONS.md' 'LGPL-3.0-only.txt' 'chromium-LICENSE.txt')
-sha256sums=('6f6ea92a3221bfeccb1ac8a31513b0b7cb5851e240d7081d8f98725b7205314c'
+sha256sums=('35b6a25c88252af76554c4cb1f5a95d5bc8200f58a9b7ccf436164bb90c67d18'
             'da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768'
             '368cca1106be99d39ecd32a38d8305585d802a475effb66380b91ffc9bcf709b')
 

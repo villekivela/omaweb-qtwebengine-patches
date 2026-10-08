@@ -9,7 +9,7 @@ this file is for.
 
 ## What changed
 
-Eighteen patches, applied in order to the released source. Fourteen add the part of Chromium's
+Twenty patches, applied in order to the released source. Fourteen add the part of Chromium's
 extension runtime that QtWebEngine compiles out: renderer bindings, the `tabs`, `windows`,
 `permissions`, `scripting`, `notifications` and `webNavigation` namespaces behind an embedder
 delegate, native messaging, and web accessible resources. Five of those are bug fixes in Qt's own
@@ -17,7 +17,10 @@ code rather than additions. The fifteenth restores Perfetto's `track_event_macro
 Chromium ships, which Qt's copy changes. The sixteenth lets a request interceptor ask for the DNS
 aliases of a request's host, and the seventeenth reports the certificate chain a page arrived over
 on `QWebEngineLoadingInfo`. The eighteenth turns V8's write barriers back on, which Qt's 6.11.2
-build turns off and its 6.140.0 turns on again.
+build turns off and its 6.140.0 turns on again. The nineteenth is a bug fix in Qt's own code: an
+extension that creates an offscreen document no longer crashes the engine. The twentieth is Qt's
+own change to the engine's tests, so that they build against Qt 6.12; it changes nothing that is
+installed.
 
 On x86_64 the engine is built with clang and LLD, with ThinLTO and Chrome's own PGO profile for its
 Chromium, where Qt's build would use GCC. On aarch64 it is built with GCC, as Qt's is.
