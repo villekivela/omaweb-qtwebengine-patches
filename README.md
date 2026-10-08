@@ -1,16 +1,16 @@
 # QtWebEngine extension patches
 
-Nineteen patches to QtWebEngine. Fourteen let it host a password manager's Chromium extension, two
+Twenty patches to QtWebEngine. Fourteen let it host a password manager's Chromium extension, two
 add API that Omaweb's content blocking and certificate view ask for, one restores a trace macro that
-slowed every page, one turns V8's write barriers back on, and one keeps an offscreen document from
-crashing the engine. Base is the released
+slowed every page, one turns V8's write barriers back on, one keeps an offscreen document from
+crashing the engine, and one builds the tests against Qt 6.12. Base is the released
 `qtwebengine-everywhere-src-6.11.2` tarball.
 
 Built for [omaweb#344](https://github.com/villekivela/omaweb/issues/344), which asks whether Omaweb
 can host Bitwarden and 1Password. The findings live in `docs/research/password-manager-extensions.md`
 in that repository.
 
-Seven of the nineteen are ordinary bug fixes headed for Gerrit, and 0018 is Qt's own change. The rest
+Seven of the twenty are ordinary bug fixes headed for Gerrit, and 0018 and 0020 are Qt's own changes. The rest
 wait on one question to Qt, in `upstream/QTBUG-draft.md`. If Qt takes the work, this repository is
 deleted rather than maintained.
 
@@ -148,6 +148,14 @@ when Chromium hid the document's first speculative frame. `Hide()` now handles a
 browser crashed on resume from suspend because of it
 ([omaweb#646](https://github.com/villekivela/omaweb/issues/646)). _A bug fix with a test. Send it to
 Gerrit; `upstream/bug-reports.md` has the report._
+
+**0020, build the widget tests against Qt 6.12.** Qt 6.12 removed `QTEST_DISABLE_KEYPAD_NAVIGATION`,
+which did nothing, so `W_QTEST_MAIN` stopped compiling and took every widget test program with it,
+the extension tests the gate runs among them. Engine 6.11.2 is built against Qt 6.12, as Arch builds
+its own ([omaweb#660](https://github.com/villekivela/omaweb/issues/660)). Qt removed the same line in
+qtwebengine c9300848e28e for QTBUG-147006, and 0020 is that change backported with its Change-Id. It
+touches only the tests, so the engine a reader installs is the same with or without it. _Qt's change.
+It drops when the series moves to 6.140.0._
 
 ## The open question
 

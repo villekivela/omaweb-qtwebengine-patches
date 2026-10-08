@@ -1,0 +1,42 @@
+From cc599c8ab940aea95ed363eacffe88ac5968cf5d Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Ville=20Kivel=C3=A4?=
+ <5814559+villekivela@users.noreply.github.com>
+Date: Thu, 8 Oct 2026 21:21:26 +0300
+Subject: [PATCH] tests: build the widget tests against Qt 6.12
+
+Qt 6.12 removed QTEST_DISABLE_KEYPAD_NAVIGATION from QtTest, so
+W_QTEST_MAIN no longer compiles there, and with it every widget test
+program, the extension tests the gate runs among them. Engine 6.11.2 is
+built against Qt 6.12, as Arch builds its own qt6-webengine 6.11.2
+(omaweb#660).
+
+The macro did nothing, which is why qtbase removed it. This is Qt's
+own change to the same line, backported unchanged. It drops when the
+series moves to an engine that carries it.
+
+qtwebengine c9300848e28ef0d8e9dfcfb29c5e1b2c5d43042f:
+Fixes: QTBUG-147006
+Change-Id: I4675020e79d85b7598967002863f44eb3a228e75
+
+omaweb#660
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ tests/auto/util/widgetutil.h | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/tests/auto/util/widgetutil.h b/tests/auto/util/widgetutil.h
+index 356d3c826c..3a3e0abbbf 100644
+--- a/tests/auto/util/widgetutil.h
++++ b/tests/auto/util/widgetutil.h
+@@ -24,7 +24,6 @@ int main(int argc, char *argv[]) \
+     \
+     QApplication app(w_argc, const_cast<char **>(w_argv.data())); \
+     app.setAttribute(Qt::AA_Use96Dpi, true); \
+-    QTEST_DISABLE_KEYPAD_NAVIGATION \
+     TestObject tc; \
+     QTEST_SET_MAIN_SOURCE_PATH \
+     return QTest::qExec(&tc, argc, argv); \
+-- 
+2.55.0
+
