@@ -68,6 +68,11 @@ upgrade, so a Qt minor is answered by rebuilding promptly, not by pinning
 (omaweb#660). Engine 6.11.2 on Qt 6.12.0 was the first: Qt 6.12 has no engine
 of its own, and Arch ships that pairing.
 
+The floor is per architecture, in `depends_x86_64` and `depends_aarch64`,
+because Arch Linux ARM moves Qt later than Arch. Each architecture's floor is
+the Qt its engine was built against, and an architecture still on the older Qt
+keeps the older floor until its distribution moves.
+
 ## Resolving a conflict
 
 Always on your own machine, never on a builder. A builder has no person at it
@@ -157,6 +162,14 @@ them.
 
 The build runs on a machine rented for it and destroyed afterwards, because a
 macOS build cannot ship and a laptop should not be the release machine.
+
+A local container build, `scripts/build-locally.sh`, may make a release
+package too. It runs the same `build-inside.sh` in the same Arch container, so
+it is the same recipe. It ships only if `verify.sh` passed in that build, which
+`build-inside.sh` enforces by refusing to package otherwise, and only once the
+package is signed in the Omaweb repository, as every package is. A build on
+the host does not qualify: it builds against the host's Qt, which is not the Qt
+the package depends on.
 
 ```sh
 export HCLOUD_TOKEN=...            # a Hetzner project token
