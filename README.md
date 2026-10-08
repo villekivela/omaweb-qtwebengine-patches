@@ -198,11 +198,19 @@ stays after 0018 drops, so a later Qt that turns the barriers off again is notic
 | 6.11.2, series grown to 12 | 3 more, no conflicts | incremental | 33 of 33 | none |
 | 6.11.2, series grown to 18 | 1 more, no conflicts | incremental | 50 of 50 | none |
 | 6.11.2-5, rebuilt for speed | already applied | incremental | 50 of 50 | none |
+| 6.11.2-6, on Qt 6.12, series grown to 20 | 19 already applied, 1 more, no conflicts | incremental | 51 of 51 | minutes: 0020, after the tests did not build |
 
 The rows after the first are the series growing, and the last is the same series rebuilt with each
 architecture's toolchain and published as 6.11.2-5 (omaweb#576), rather than Qt moving. They
 measure `refresh.sh` picking up a tree it has already patched rather than a rebase. The next
 release is the next real measurement.
+
+6.11.2-6 is the first time Qt moved a minor under the series: the same engine rebuilt against Qt
+6.12, with 0019 for omaweb#646 (omaweb#660). The x86_64 build applied 19 patches to a fresh tarball
+and compiled the engine clean, then stopped where the tests compile, because Qt 6.12 removed
+`QTEST_DISABLE_KEYPAD_NAVIGATION`. 0020 is Qt's own one-line removal, and the row is the run that
+added it to that tree. aarch64 was built on the Mac from the same commit, `32be1d7`, against Arch
+Linux ARM's Qt 6.11.2, and its gate read the same: 37 of 37, 10 of 10, 3 of 3 and 1 of 1.
 
 That row is the easy case. 6.11.1 and 6.11.2 share a Chromium base, so nothing under patches 0005
 and 0006 moved.
