@@ -1,4 +1,4 @@
-From f59fe63998d6c7406e361079dd22502e6d60ad63 Mon Sep 17 00:00:00 2001
+From 44c8b108dea3279ce7acfc2857b8b3813ea5142c Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivel=C3=A4?= <vkivela@hotmail.com>
 Date: Thu, 8 Oct 2026 18:13:33 +0300
 Subject: [PATCH] Don't crash hiding a view that has no delegate
@@ -17,7 +17,7 @@ show to setDelegate(). Hide() now hides the delegate when there is one
 and otherwise cancels a deferred show, so a delegate set later does not
 show a view Chromium hid. IsShowing() answers false without a delegate.
 
-Fixes: QTBUG-XXXXX
+Fixes: QTBUG-151304
 Pick-to: 6.140
 ---
  src/core/render_widget_host_view_qt.cpp          | 11 +++++++----
