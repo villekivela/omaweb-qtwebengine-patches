@@ -372,8 +372,11 @@ Patch 0019 makes `Hide()` hide the delegate when there is one and otherwise canc
 so a delegate set later does not show a view Chromium hid, and makes `IsShowing()` answer false
 without a delegate. `Hide()` and `IsShowing()` are the same in 6.11.2, 6.140 and `dev`.
 
-The change for Gerrit is prepared against `dev` with `Fixes: QTBUG-XXXXX` and `Pick-to: 6.140`, the
-fix and the test in one commit, using the fixtures and helpers `dev`'s test already has plus one new
+The change for Gerrit is
+[`0001-Don-t-crash-hiding-a-view-that-has-no-delegate.patch`](0001-Don-t-crash-hiding-a-view-that-has-no-delegate.patch),
+a `git format-patch` against `dev` at `eafb229` that applies there with `git am`. It carries
+`Fixes: QTBUG-XXXXX` and `Pick-to: 6.140` and no `Change-Id`, which the commit hook adds. The fix
+and the test are in one commit, using the fixtures and helpers `dev`'s test already has plus one new
 fixture, `offscreen_ext`. It has not been compiled against `dev`; the same source and test pass on
 6.11.2.
 
