@@ -12,7 +12,7 @@
 
 pkgname=omaweb-qtwebengine
 pkgver=6.11.2
-pkgrel=5
+pkgrel=6
 pkgdesc="QtWebEngine with Omaweb's extension patches, installed beside Omaweb"
 arch=('x86_64' 'aarch64')
 url="https://github.com/villekivela/omaweb-qtwebengine-patches"
@@ -24,7 +24,13 @@ license=('LGPL-3.0-only' 'BSD-3-Clause')
 # their DT_NEEDED entries, less what glibc, gcc-libs and the Qt packages below
 # already bring. A clean Arch install has none of the media and image
 # libraries, so leaving one out fails at load time on the reader's machine.
-depends=('qt6-base' 'qt6-declarative' 'qt6-positioning' 'qt6-webchannel' 'nss' 'libxkbcommon'
+#
+# The engine uses Qt's private API, which promises nothing across a Qt minor, so
+# it is built against the Qt it runs on, and pacman brings that Qt along with
+# it. There is no upper bound, on purpose: Omaweb must not hold back a reader's
+# system upgrade (omaweb#660). A new Qt minor is answered by rebuilding the
+# engine promptly, and raising these two to it, as PROCESS.md says.
+depends=('qt6-base>=6.12.0' 'qt6-declarative>=6.12.0' 'qt6-positioning' 'qt6-webchannel' 'nss' 'libxkbcommon'
          'alsa-lib' 'dbus' 'expat' 'fontconfig' 'freetype2' 'harfbuzz' 'lcms2' 'libglvnd'
          'libjpeg-turbo' 'libpng' 'libtiff' 'libwebp' 'libxml2' 'libxslt' 'mesa' 'minizip'
          'openjpeg2' 'opus' 'snappy' 'systemd-libs' 'zlib')

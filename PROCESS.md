@@ -49,10 +49,24 @@ first.
 build failure, and the fix is mechanical rather than clever.
 
 **System Qt is older than the engine.** Up to 6.11 the remote build refuses
-before it starts: QtWebEngine builds against the Qt it belongs to, and Arch is
-a day or two behind Qt. Either wait for the distribution or build the rest of
-Qt too. From 6.140 the engine names the oldest Qt it builds against, and the
-configure step refuses an older one, with CMake's reason in the log.
+before it starts: QtWebEngine builds against the Qt it belongs to or a newer
+one, and Arch is a day or two behind Qt. Either wait for the distribution or
+build the rest of Qt too. From 6.140 the engine names the oldest Qt it builds
+against, and the configure step refuses an older one, with CMake's reason in
+the log.
+
+## When Qt moves a minor
+
+The engine uses Qt's private API, which promises nothing from one Qt minor to
+the next, so Arch rebuilds every user of it when Qt moves a minor, its own
+`qt6-webengine` included. The engine here gets the same: rebuild it against the
+new Qt as the next pkgrel, with the same series, and raise the PKGBUILD's
+`qt6-base` and `qt6-declarative` to that Qt, so pacman brings the two together.
+
+Never give them an upper bound. Omaweb must not hold back a reader's system
+upgrade, so a Qt minor is answered by rebuilding promptly, not by pinning
+(omaweb#660). Engine 6.11.2 on Qt 6.12.0 was the first: Qt 6.12 has no engine
+of its own, and Arch ships that pairing.
 
 ## Resolving a conflict
 
@@ -200,6 +214,7 @@ The engine installs into `/usr/lib/omaweb`, so the distribution's
 the engine it had.
 
 One constraint the remote script checks before it spends hours: QtWebEngine
-builds against the Qt it belongs to, so the container's `qt6-base` has to be the
-same version as the engine. When Qt has published a release the distribution has
-not packaged yet, that check fails early rather than at link time.
+builds against the Qt it belongs to or a newer one, so the container's
+`qt6-base` cannot be older than the engine. When Qt has published a release the
+distribution has not packaged yet, that check fails early rather than at link
+time.
