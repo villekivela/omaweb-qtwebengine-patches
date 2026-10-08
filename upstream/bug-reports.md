@@ -13,10 +13,9 @@ Four touch `qtwebengine` alone and can go up in any order. The `ExtensionPrefs` 
 change in `qtwebengine-chromium`, so it is two changes with a dependency and is worth sending last,
 once the others have shown the reviewers what this is about.
 
-All six are filed. Four are on Gerrit, and two of those have merged into `dev` and been picked to
-`6.140`. The fifth waits on an answer about where its fix belongs, and the sixth's change is
-ready to push. The patches whose change has
-merged stay in the series until Omaweb's engine is built on a Qt release that carries them, which
+All six are filed. Five are on Gerrit, and two of those have merged into `dev` and been picked to
+`6.140`. The fifth report waits on an answer about where its fix belongs. The patches whose change
+has merged stay in the series until Omaweb's engine is built on a Qt release that carries them, which
 is 6.140.1 at the earliest. Where each stands in 6.140 is below the table.
 
 | Order | Patch | Report | Change | Status | What it is |
@@ -26,7 +25,7 @@ is 6.140.1 at the earliest. Where each stands in 6.140 is below the table.
 | 3 | 0010 | [QTBUG-150592](https://bugreports.qt.io/browse/QTBUG-150592) | [772849](https://codereview.qt-project.org/c/qt/qtwebengine/+/772849) | in review | Loading a loaded extension leaves it dead |
 | 4 | 0011 | [QTBUG-150593](https://bugreports.qt.io/browse/QTBUG-150593) | [772850](https://codereview.qt-project.org/c/qt/qtwebengine/+/772850) | in review | An extension document cannot close its own window |
 | 5 | 0003 | [QTBUG-150594](https://bugreports.qt.io/browse/QTBUG-150594) | waiting | – | `setExtensionEnabled` crashes after a storage path change |
-| 6 | 0019 | [QTBUG-151304](https://bugreports.qt.io/browse/QTBUG-151304) | pending | filed | Creating an offscreen document crashes the browser |
+| 6 | 0019 | [QTBUG-151304](https://bugreports.qt.io/browse/QTBUG-151304) | [778807](https://codereview.qt-project.org/c/qt/qtwebengine/+/778807) | in review | Creating an offscreen document crashes the browser |
 
 Each change carries `Fixes: QTBUG-…` and `Pick-to: 6.140`. Two more changes follow the first report:
 
@@ -51,6 +50,7 @@ touches was listed. Nothing else of the series is upstream.
 | 0011 | 772850, in review | no | no | no | no |
 | 0014 | 772845: `dev` `182770309`, `6.140` `1aa9958ff` (change 773151) | no | no | yes | yes |
 | 0014 follow-up | 773048: `dev` `7bc989efe` | no | no | no | yes |
+| 0019 | 778807, in review | no | no | no | no |
 | 0018 | qtwebengine-chromium 770837 and 772657, through the pin to `1e645e7ec` | no | yes | yes | yes |
 
 The rest, 0003 to 0009, 0012, 0013 and 0015 to 0017, are in none of them. 0018 carries the
@@ -374,13 +374,14 @@ Patch 0019 makes `Hide()` hide the delegate when there is one and otherwise canc
 so a delegate set later does not show a view Chromium hid, and makes `IsShowing()` answer false
 without a delegate. `Hide()` and `IsShowing()` are the same in 6.11.2, 6.140 and `dev`.
 
-The change for Gerrit is
+On Gerrit as [778807](https://codereview.qt-project.org/c/qt/qtwebengine/+/778807), in review,
+against `dev` with `Pick-to: 6.140`, `Fixes: QTBUG-151304` and Change-Id
+`Ieabdf4016943f0aee73c93f11feeee5c2048dc9a`. It was pushed without being compiled against `dev`;
+the same source and test pass on 6.11.2. What went up is
 [`0001-Don-t-crash-hiding-a-view-that-has-no-delegate.patch`](0001-Don-t-crash-hiding-a-view-that-has-no-delegate.patch),
-a `git format-patch` against `dev` at `eafb229` that applies there with `git am`. It carries
-`Fixes: QTBUG-151304` and `Pick-to: 6.140` and no `Change-Id`, which the commit hook adds. The fix
+a `git format-patch` against `dev` at `eafb229`, with the Change-Id the commit hook added. The fix
 and the test are in one commit, using the fixtures and helpers `dev`'s test already has plus one new
-fixture, `offscreen_ext`. It has not been compiled against `dev`; the same source and test pass on
-6.11.2.
+fixture, `offscreen_ext`.
 
 ### Why it went unnoticed
 
