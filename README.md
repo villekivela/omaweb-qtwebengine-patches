@@ -1,15 +1,16 @@
 # QtWebEngine extension patches
 
-Eighteen patches to QtWebEngine. Fourteen let it host a password manager's Chromium extension, two
+Nineteen patches to QtWebEngine. Fourteen let it host a password manager's Chromium extension, two
 add API that Omaweb's content blocking and certificate view ask for, one restores a trace macro that
-slowed every page, and one turns V8's write barriers back on. Base is the released
+slowed every page, one turns V8's write barriers back on, and one keeps an offscreen document from
+crashing the engine. Base is the released
 `qtwebengine-everywhere-src-6.11.2` tarball.
 
 Built for [omaweb#344](https://github.com/villekivela/omaweb/issues/344), which asks whether Omaweb
 can host Bitwarden and 1Password. The findings live in `docs/research/password-manager-extensions.md`
 in that repository.
 
-Six of the eighteen are ordinary bug fixes headed for Gerrit, and 0018 is Qt's own change. The rest
+Seven of the nineteen are ordinary bug fixes headed for Gerrit, and 0018 is Qt's own change. The rest
 wait on one question to Qt, in `upstream/QTBUG-draft.md`. If Qt takes the work, this repository is
 deleted rather than maintained.
 
@@ -139,6 +140,15 @@ Chromium 140's score. On x86_64, turning them on by hand had taken it from 0.718
 [omaweb#356](https://github.com/villekivela/omaweb/issues/356). _Qt's change. It drops when the
 series moves to 6.140.0._
 
+**0019, let an extension create an offscreen document.** `chrome.offscreen.createDocument` crashed
+the engine every time. An offscreen document lives in contents the extension system creates itself,
+so its views have no delegate, and `RenderWidgetHostViewQt::Hide()` dereferenced the missing one
+when Chromium hid the document's first speculative frame. `Hide()` now handles a missing delegate as
+`ShowWithVisibility()` already did, and `IsShowing()` answers false. Bitwarden makes one, and the
+browser crashed on resume from suspend because of it
+([omaweb#646](https://github.com/villekivela/omaweb/issues/646)). _A bug fix with a test. Send it to
+Gerrit; `upstream/bug-reports.md` has the report._
+
 ## The open question
 
 `TabsDelegateQt` is internal, and `ExtensionsBrowserClientQt` fills it by treating every page of the
@@ -150,7 +160,7 @@ one is active. That is what the QTBUG draft asks for. Ask before writing the API
 
 ## Tests
 
-36 tests pass with the series applied. Five of them fail on a stock build, which is why they are
+37 tests pass with the series applied. Six of them fail on a stock build, which is why they are
 worth having:
 
 - `serviceWorkerLocalization` fails
@@ -158,6 +168,7 @@ worth having:
 - `tabsWindowsAndScripting` fails
 - `nativeMessaging` fails
 - `anExtensionOpensAPage` fails
+- `anOffscreenDocumentCanBeCreated` crashes, signal 11
 
 Patch 0016's eight cases live in Qt's own `tst_qwebengineurlrequestinterceptor`, and the gate runs
 only those, beside the extension tests. Patch 0017's case lives in Qt's `tst_certificateerror`, which

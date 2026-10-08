@@ -1,0 +1,171 @@
+From b810ab644040fb8b13da72a407ce0bb732fd4534 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Ville=20Kivel=C3=A4?=
+ <5814559+villekivela@users.noreply.github.com>
+Date: Thu, 8 Oct 2026 18:07:17 +0300
+Subject: [PATCH] extensions: let an extension create an offscreen document
+
+chrome.offscreen.createDocument took the browser down, every time. An
+offscreen document lives in contents the extension system creates
+itself, with no WebContentsAdapter, so WebContentsViewQt has no factory
+client and every RenderWidgetHostViewQt in those contents is made
+without a delegate. The document's first navigation creates a
+speculative main frame, and RenderFrameHostManager::
+CreateSpeculativeRenderFrame hides that frame's view. Hide() asserted a
+delegate in debug builds and dereferenced the null one in release.
+
+ShowWithVisibility() already handles the missing delegate by deferring
+the show to setDelegate(). Hide() now does the same: it hides the
+delegate when there is one and otherwise cancels a deferred show, so a
+delegate that arrives later does not show a view Chromium hid.
+IsShowing() answers false without a delegate.
+
+Bitwarden creates an offscreen document, and that is how this was
+found: the browser crashed on resume from suspend (villekivela/omaweb#646).
+Stock QtWebEngine 6.11.2 crashes the same way, and dev and 6.140 have
+the same Hide().
+
+The test creates an offscreen document from an extension page and waits
+for the document to message back. Without the fix the test program
+dies with SIGSEGV in RenderWidgetHostViewQt::Hide().
+---
+ src/core/render_widget_host_view_qt.cpp          | 11 +++++++----
+ .../resources/offscreen_ext/manifest.json        |  8 ++++++++
+ .../resources/offscreen_ext/offscreen.html       |  7 +++++++
+ .../resources/offscreen_ext/offscreen.js         |  1 +
+ .../extensions/resources/offscreen_ext/page.html |  7 +++++++
+ .../extensions/resources/offscreen_ext/page.js   |  9 +++++++++
+ .../extensions/tst_qwebengineextension.cpp       | 16 ++++++++++++++++
+ 7 files changed, 55 insertions(+), 4 deletions(-)
+ create mode 100644 tests/auto/widgets/extensions/resources/offscreen_ext/manifest.json
+ create mode 100644 tests/auto/widgets/extensions/resources/offscreen_ext/offscreen.html
+ create mode 100644 tests/auto/widgets/extensions/resources/offscreen_ext/offscreen.js
+ create mode 100644 tests/auto/widgets/extensions/resources/offscreen_ext/page.html
+ create mode 100644 tests/auto/widgets/extensions/resources/offscreen_ext/page.js
+
+diff --git a/src/core/render_widget_host_view_qt.cpp b/src/core/render_widget_host_view_qt.cpp
+index cd50ba693d..1ad92f2dad 100644
+--- a/src/core/render_widget_host_view_qt.cpp
++++ b/src/core/render_widget_host_view_qt.cpp
+@@ -384,16 +384,19 @@ void RenderWidgetHostViewQt::ShowWithVisibility(content::PageVisibilityState pag
+ 
+ void RenderWidgetHostViewQt::Hide()
+ {
+-    Q_ASSERT(m_delegate);
+     if (isPopup())
+         m_isPopupInitializing = false;
+-    m_delegate->hide();
++    // A view in contents the extension system created, such as an offscreen document, has no
++    // delegate, and Chromium hides the view of every speculative main frame it creates.
++    if (m_delegate)
++        m_delegate->hide();
++    else
++        m_deferredShow = false;
+ }
+ 
+ bool RenderWidgetHostViewQt::IsShowing()
+ {
+-    Q_ASSERT(m_delegate);
+-    return m_delegate->isVisible();
++    return m_delegate && m_delegate->isVisible();
+ }
+ 
+ // Retrieve the bounds of the View, in screen coordinates.
+diff --git a/tests/auto/widgets/extensions/resources/offscreen_ext/manifest.json b/tests/auto/widgets/extensions/resources/offscreen_ext/manifest.json
+new file mode 100644
+index 0000000000..a41bebfb9b
+--- /dev/null
++++ b/tests/auto/widgets/extensions/resources/offscreen_ext/manifest.json
+@@ -0,0 +1,8 @@
++{
++    "name": "offscreen",
++    "version": "1.0",
++    "manifest_version": 3,
++    "permissions": [
++        "offscreen"
++    ]
++}
+diff --git a/tests/auto/widgets/extensions/resources/offscreen_ext/offscreen.html b/tests/auto/widgets/extensions/resources/offscreen_ext/offscreen.html
+new file mode 100644
+index 0000000000..014e1d9a06
+--- /dev/null
++++ b/tests/auto/widgets/extensions/resources/offscreen_ext/offscreen.html
+@@ -0,0 +1,7 @@
++<!DOCTYPE html>
++<html>
++<head>
++<script src="offscreen.js"></script>
++</head>
++<body></body>
++</html>
+diff --git a/tests/auto/widgets/extensions/resources/offscreen_ext/offscreen.js b/tests/auto/widgets/extensions/resources/offscreen_ext/offscreen.js
+new file mode 100644
+index 0000000000..a500ab8e18
+--- /dev/null
++++ b/tests/auto/widgets/extensions/resources/offscreen_ext/offscreen.js
+@@ -0,0 +1 @@
++chrome.runtime.sendMessage("offscreen ready");
+diff --git a/tests/auto/widgets/extensions/resources/offscreen_ext/page.html b/tests/auto/widgets/extensions/resources/offscreen_ext/page.html
+new file mode 100644
+index 0000000000..e49c5f39bb
+--- /dev/null
++++ b/tests/auto/widgets/extensions/resources/offscreen_ext/page.html
+@@ -0,0 +1,7 @@
++<!DOCTYPE html>
++<html>
++<head>
++<script src="page.js"></script>
++</head>
++<body></body>
++</html>
+diff --git a/tests/auto/widgets/extensions/resources/offscreen_ext/page.js b/tests/auto/widgets/extensions/resources/offscreen_ext/page.js
+new file mode 100644
+index 0000000000..e7ae8f9602
+--- /dev/null
++++ b/tests/auto/widgets/extensions/resources/offscreen_ext/page.js
+@@ -0,0 +1,9 @@
++chrome.runtime.onMessage.addListener((message) => {
++    if (message === "offscreen ready")
++        document.title = "offscreen ready";
++});
++chrome.offscreen.createDocument({
++    url: "offscreen.html",
++    reasons: ["CLIPBOARD"],
++    justification: "test"
++}).catch((error) => document.title = "failed: " + error.message);
+diff --git a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
+index 28c6a16e3f..52c2a26be3 100644
+--- a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
++++ b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
+@@ -61,6 +61,7 @@ private Q_SLOTS:
+     void everyFunctionTheNamespaceDeclaresCanBeCalled();
+     void aPageCanLoadAWebAccessibleResource();
+     void aResourceWithADynamicUrlIsReachableOnlyUnderIt();
++    void anOffscreenDocumentCanBeCreated();
+     void enableAfterStoragePathChange();
+     void tabsWindowsAndScripting();
+     void nativeMessaging();
+@@ -918,6 +919,21 @@ void tst_QWebEngineExtension::aResourceWithADynamicUrlIsReachableOnlyUnderIt()
+     QCOMPARE(evaluateJavaScriptSync(m_page, "window.underFixed"), "threw"_L1);
+ }
+ 
++void tst_QWebEngineExtension::anOffscreenDocumentCanBeCreated()
++{
++    // An offscreen document lives in contents the extension system creates itself, so its view
++    // has no delegate. Its first navigation creates a speculative main frame, whose view Chromium
++    // hides, and hiding a view without a delegate took the browser down.
++    QWebEngineExtensionInfo extension = loadExtensionSync(resourcesPath() + "offscreen_ext"_L1);
++    QVERIFY2(extension.isLoaded(), qPrintable(extension.error()));
++    m_manager->setExtensionEnabled(extension, true);
++
++    QSignalSpy loadSpy(m_page, SIGNAL(loadFinished(bool)));
++    m_page->load(QUrl("chrome-extension://"_L1 + extension.id() + "/page.html"_L1));
++    QTRY_COMPARE(loadSpy.size(), 1);
++    QTRY_COMPARE(m_page->title(), "offscreen ready"_L1);
++}
++
+ void tst_QWebEngineExtension::enableAfterStoragePathChange()
+ {
+     // Changing the storage path after construction rebuilds the profile's PrefService. The
+-- 
+2.55.0
+
