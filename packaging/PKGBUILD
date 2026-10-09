@@ -12,7 +12,7 @@
 
 pkgname=omaweb-qtwebengine
 pkgver=6.11.2
-pkgrel=6
+pkgrel=7
 pkgdesc="QtWebEngine with Omaweb's extension patches, installed beside Omaweb"
 arch=('x86_64' 'aarch64')
 url="https://github.com/villekivela/omaweb-qtwebengine-patches"
@@ -21,24 +21,20 @@ url="https://github.com/villekivela/omaweb-qtwebengine-patches"
 # relinked. Chromium's own code is BSD-3-Clause.
 license=('LGPL-3.0-only' 'BSD-3-Clause')
 # What the engine's own libraries and QtWebEngineProcess link against, from
-# their DT_NEEDED entries, less what glibc, gcc-libs and the Qt packages below
-# already bring. A clean Arch install has none of the media and image
+# their DT_NEEDED entries, less what glibc, gcc-libs and the Qt packages in the
+# list already bring. A clean Arch install has none of the media and image
 # libraries, so leaving one out fails at load time on the reader's machine.
-depends=('qt6-positioning' 'qt6-webchannel' 'nss' 'libxkbcommon'
+depends=('qt6-base' 'qt6-declarative' 'qt6-positioning' 'qt6-webchannel' 'nss' 'libxkbcommon'
          'alsa-lib' 'dbus' 'expat' 'fontconfig' 'freetype2' 'harfbuzz' 'lcms2' 'libglvnd'
          'libjpeg-turbo' 'libpng' 'libtiff' 'libwebp' 'libxml2' 'libxslt' 'mesa' 'minizip'
          'openjpeg2' 'opus' 'snappy' 'systemd-libs' 'zlib')
-# The engine uses Qt's private API, which promises nothing across a Qt minor, so
-# it is built against the Qt it runs on, and pacman brings that Qt along with
-# it. There is no upper bound, on purpose: Omaweb must not hold back a reader's
-# system upgrade (omaweb#660). A new Qt minor is answered by rebuilding the
-# engine promptly, and raising these two to it, as PROCESS.md says.
-#
-# Per architecture, because the two distributions move apart: Arch has Qt 6.12,
-# and Arch Linux ARM is still on 6.11.2, so an aarch64 engine is built against
-# 6.11.2 and a floor of 6.12.0 there could never be met.
-depends_x86_64=('qt6-base>=6.12.0' 'qt6-declarative>=6.12.0')
-depends_aarch64=('qt6-base' 'qt6-declarative')
+# The engine uses Qt's private API, which promises nothing across a Qt minor.
+# It is built against the Qt its readers have, Omarchy's stable mirror on
+# x86_64 and Arch Linux ARM on aarch64, because an engine built against an
+# older Qt runs on a newer one and not the other way round. So Qt carries no
+# version here: a floor at the build's Qt held back every Omarchy reader the
+# day Arch moved ahead of the mirror (omaweb#674), and an upper bound would
+# hold back a reader's system upgrade (omaweb#660).
 # Only Qt Designer loads the QWebEngineView plugin, and it links libQt6Designer.
 optdepends=('qt6-tools: the QWebEngineView plugin for Qt Designer')
 

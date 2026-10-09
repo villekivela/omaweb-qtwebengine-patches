@@ -18,11 +18,26 @@ if [ "$OMAWEB_ENGINE_TOOLCHAIN" = "clang" ]; then
     toolchain_packages="clang lld llvm"
 fi
 
+# Built against the Qt Omaweb's readers have, because an engine built against an
+# older Qt runs on a newer one and not the other way round (omaweb#674). On
+# x86_64 that is Omarchy's stable mirror, a delayed snapshot of Arch that
+# Omarchy machines install from. Arch Linux ARM is already the readers' own on
+# aarch64. The image can be newer than the snapshot: `-yy` because pacman keeps
+# a database newer than the mirror's and then asks the mirror for packages it
+# never had, and `-uu` so the container is the snapshot rather than half image.
+upgrade="-Syu"
+if [ "$(uname -m)" = "x86_64" ]; then
+    # shellcheck disable=SC2016 # pacman expands $repo and $arch, not the shell
+    echo 'Server = https://stable-mirror.omarchy.org/$repo/os/$arch' \
+        > /etc/pacman.d/mirrorlist
+    upgrade="-Syyuu"
+fi
+
 # One transaction. The upgrade can bring a newer pacman, and pacman 7.1's
 # download sandbox fails in a Docker container on macOS, so a second call
 # would stop the build there.
 # shellcheck disable=SC2086 # the toolchain's packages are separate words
-pacman -Syu --noconfirm --needed \
+pacman "$upgrade" --noconfirm --needed \
     base-devel git cmake ninja python python-html5lib nodejs npm gperf \
     qt6-base qt6-declarative qt6-tools qt6-websockets qt6-webchannel \
     qt6-positioning qt6-svg libxkbcommon libxkbcommon-x11 libxcomposite \
@@ -30,12 +45,10 @@ pacman -Syu --noconfirm --needed \
     libxslt libvpx re2 snappy minizip jsoncpp ffmpeg opus \
     $toolchain_packages > /dev/null
 
-# Up to 6.11, QtWebEngine builds against the Qt it belongs to or a newer one: Arch
-# builds engine 6.11.2 against Qt 6.12.0, because Qt 6.12 has no engine of its
-# own (omaweb#660). An older Qt fails late and confusingly, so fail early and
-# clearly instead. From 6.140 the engine is released on its own and names the
-# oldest Qt it builds against, which its configure step checks and `refresh.sh`
-# reports.
+# Up to 6.11, QtWebEngine builds against the Qt it belongs to or a newer one. An
+# older Qt fails late and confusingly, so fail early and clearly instead. From
+# 6.140 the engine is released on its own and names the oldest Qt it builds
+# against, which its configure step checks and `refresh.sh` reports.
 system_qt="$(qmake6 -query QT_VERSION)"
 engine_minor="$(echo "$version" | cut -d. -f2)"
 oldest="$(printf '%s\n%s\n' "$system_qt" "$version" | sort -V | head -n 1)"

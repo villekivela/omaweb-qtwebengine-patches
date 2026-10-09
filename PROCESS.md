@@ -58,20 +58,19 @@ the log.
 ## When Qt moves a minor
 
 The engine uses Qt's private API, which promises nothing from one Qt minor to
-the next, so Arch rebuilds every user of it when Qt moves a minor, its own
-`qt6-webengine` included. The engine here gets the same: rebuild it against the
-new Qt as the next pkgrel, with the same series, and raise the PKGBUILD's
-`qt6-base` and `qt6-declarative` to that Qt, so pacman brings the two together.
+the next. An engine built against an older Qt runs on a newer one, and not the
+other way round, so it is built against the Qt Omaweb's readers have: Omarchy's
+stable mirror on x86_64, a delayed snapshot of Arch, and Arch Linux ARM on
+aarch64. `build-inside.sh` installs from the mirror on x86_64, here and on
+Hetzner alike (omaweb#674).
 
-Never give them an upper bound. Omaweb must not hold back a reader's system
-upgrade, so a Qt minor is answered by rebuilding promptly, not by pinning
-(omaweb#660). Engine 6.11.2 on Qt 6.12.0 was the first: Qt 6.12 has no engine
-of its own, and Arch ships that pairing.
-
-The floor is per architecture, in `depends_x86_64` and `depends_aarch64`,
-because Arch Linux ARM moves Qt later than Arch. Each architecture's floor is
-the Qt its engine was built against, and an architecture still on the older Qt
-keeps the older floor until its distribution moves.
+The PKGBUILD gives `qt6-base` and `qt6-declarative` no version at all. A floor
+at the build's Qt held every Omarchy reader back the day Arch moved to Qt 6.12
+and the mirror had not (omaweb#674), and an upper bound would hold back a
+reader's system upgrade (omaweb#660). When the readers' Qt moves a minor,
+rebuild the engine against it promptly as the next pkgrel, with the same
+series. Omaweb's own CI keeps building against Arch's current Qt, so breakage
+from the next Qt shows there first.
 
 ## Resolving a conflict
 

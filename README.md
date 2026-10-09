@@ -151,8 +151,10 @@ Gerrit; `upstream/bug-reports.md` has the report._
 
 **0020, build the widget tests against Qt 6.12.** Qt 6.12 removed `QTEST_DISABLE_KEYPAD_NAVIGATION`,
 which did nothing, so `W_QTEST_MAIN` stopped compiling and took every widget test program with it,
-the extension tests the gate runs among them. Engine 6.11.2 is built against Qt 6.12, as Arch builds
-its own ([omaweb#660](https://github.com/villekivela/omaweb/issues/660)). Qt removed the same line in
+the extension tests the gate runs among them. Engine 6.11.2-6 was built against Qt 6.12, as Arch
+builds its own ([omaweb#660](https://github.com/villekivela/omaweb/issues/660)), and the series keeps
+building on 6.11.2, which readers have
+([omaweb#674](https://github.com/villekivela/omaweb/issues/674)). Qt removed the same line in
 qtwebengine c9300848e28e for QTBUG-147006, and 0020 is that change backported with its Change-Id. It
 touches only the tests, so the engine a reader installs is the same with or without it. _Qt's change.
 It drops when the series moves to 6.140.0._
