@@ -21,8 +21,8 @@ url="https://github.com/villekivela/omaweb-qtwebengine-patches"
 # relinked. Chromium's own code is BSD-3-Clause.
 license=('LGPL-3.0-only' 'BSD-3-Clause')
 # What the engine's own libraries and QtWebEngineProcess link against, from
-# their DT_NEEDED entries, less what glibc, gcc-libs and the Qt packages
-# already bring. A clean Arch install has none of the media and image
+# their DT_NEEDED entries, less what glibc, gcc-libs and the Qt packages in the
+# list already bring. A clean Arch install has none of the media and image
 # libraries, so leaving one out fails at load time on the reader's machine.
 depends=('qt6-base' 'qt6-declarative' 'qt6-positioning' 'qt6-webchannel' 'nss' 'libxkbcommon'
          'alsa-lib' 'dbus' 'expat' 'fontconfig' 'freetype2' 'harfbuzz' 'lcms2' 'libglvnd'
