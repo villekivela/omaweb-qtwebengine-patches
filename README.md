@@ -317,6 +317,7 @@ stays after 0018 drops, so a later Qt that turns the barriers off again is notic
 | 6.11.2-8, series grown to 21 | 20 already applied, 1 more, no conflicts | incremental | 54 of 54 | none |
 | 6.11.2-9, series grown to 22 | 20 already applied, 2 more, no conflicts | incremental | 63 of 63 | none |
 | 6.11.2-10, series grown to 23 | 21 already applied, 2 more, no conflicts | incremental | 71 of 71 | none |
+| 6.11.2-11, series grown to 24 | 21 already applied, 3 more, no conflicts | incremental | 72 of 72 | none |
 
 The rows after the first are the series growing, and the last is the same series rebuilt with each
 architecture's toolchain and published as 6.11.2-5 (omaweb#576), rather than Qt moving. They
