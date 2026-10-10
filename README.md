@@ -220,11 +220,11 @@ extension tests and do not compile without the patch either. Taking the four num
 third. Patch 0024's case, `aProfileMayGoWhileAMessageWaitsForTheWorker`, crashes on every run
 without it: its worker's script runs for a second and a half before the worker can be registered,
 and its content script messages the worker as the page loads, so `cleanup()` deletes the profile
-with the message still waiting behind the registration. A message from an extension page to a worker
-that registers quickly was caught waiting in five runs of thirty. Answering true from
-`IsValidContext` again crashes it, and so does leaving the set at the end of `~ProfileQt` rather
-than at the start. It compiles against a stock build, which has the same `IsValidContext`, but no
-stock engine was at hand to run it on.
+with the message still waiting behind the registration. With `late_listener_ext`, whose content
+script pings the same way but whose worker script runs at once, the unfixed engine crashed in
+fifteen runs of thirty. Answering true from `IsValidContext` again crashes it, and so does leaving
+the set at the end of `~ProfileQt` rather than at the start. The fix touches only stock Qt code, but
+the case's fixture comes with 0009, so the case does not exist on a stock build.
 
 Patch 0018 has no test case, because what it changes is how V8 is compiled. The gate reads that
 instead. `scripts/check-write-barriers.sh` fails a tree whose V8 is compiled with
