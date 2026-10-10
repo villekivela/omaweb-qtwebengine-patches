@@ -1,4 +1,4 @@
-From eea07eeb9cac0593f4fc14303d0e32ba73de848b Mon Sep 17 00:00:00 2001
+From 4ec342975ddfef422ec32b1d5af3d3fe5baf871b Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivel=C3=A4?= <vkivela@hotmail.com>
 Date: Sat, 10 Oct 2026 13:44:21 +0000
 Subject: [PATCH] extensions: tell an extension the window it opened closed
@@ -64,12 +64,12 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  .../resources/window_closing_ext/control.html |   6 +
  .../resources/window_closing_ext/control.js   |  10 +
  .../window_closing_ext/manifest.json          |   9 +
- .../window_closing_ext/service_worker.js      |  25 +
+ .../window_closing_ext/service_worker.js      |  42 ++
  .../window_watcher_ext/manifest.json          |   6 +
  .../resources/window_watcher_ext/watch.html   |   6 +
  .../resources/window_watcher_ext/watch.js     |  22 +
- .../extensions/tst_qwebengineextension.cpp    | 448 ++++++++++++++++++
- 19 files changed, 947 insertions(+), 82 deletions(-)
+ .../extensions/tst_qwebengineextension.cpp    | 450 ++++++++++++++++++
+ 19 files changed, 966 insertions(+), 82 deletions(-)
  create mode 100644 tests/auto/widgets/extensions/resources/window_closing_ext/blank.html
  create mode 100644 tests/auto/widgets/extensions/resources/window_closing_ext/control.html
  create mode 100644 tests/auto/widgets/extensions/resources/window_closing_ext/control.js
@@ -928,7 +928,7 @@ index 0000000000..c66a877835
 +}
 diff --git a/tests/auto/widgets/extensions/resources/window_closing_ext/manifest.json b/tests/auto/widgets/extensions/resources/window_closing_ext/manifest.json
 new file mode 100644
-index 0000000000..ed1f31b90c
+index 0000000000..65efaec382
 --- /dev/null
 +++ b/tests/auto/widgets/extensions/resources/window_closing_ext/manifest.json
 @@ -0,0 +1,9 @@
@@ -936,25 +936,38 @@ index 0000000000..ed1f31b90c
 +    "name": "window closing",
 +    "version": "1.0",
 +    "manifest_version": 3,
-+    "permissions": ["tabs", "storage"],
++    "permissions": ["tabs"],
 +    "background": {
 +        "service_worker": "service_worker.js"
 +    }
 +}
 diff --git a/tests/auto/widgets/extensions/resources/window_closing_ext/service_worker.js b/tests/auto/widgets/extensions/resources/window_closing_ext/service_worker.js
 new file mode 100644
-index 0000000000..d89eecc031
+index 0000000000..895e806477
 --- /dev/null
 +++ b/tests/auto/widgets/extensions/resources/window_closing_ext/service_worker.js
-@@ -0,0 +1,25 @@
+@@ -0,0 +1,42 @@
 +// A password manager listens in its worker for the window it opened to close,
 +// and ends the request it was showing there when it does.
 +const heard = []
 +
-+// Each start of the worker is counted where a page can read it without waking
-+// the worker, so a test can tell a woken worker from one that kept running.
-+chrome.storage.session.get("starts").then(({ starts = 0 }) =>
-+    chrome.storage.session.set({ starts: starts + 1 }))
++// Which run of the worker this is. A stopped worker that is woken starts
++// afresh, so a test tells a woken worker from one that kept running by asking
++// before and after. It is kept in memory rather than in storage: an extension
++// API call that finishes while the worker is being activated leaves Chromium
++// 140 never scheduling the worker's idle stop.
++const run = `${Date.now()}-${Math.random()}`
++
++// Answered once the worker is active, so the question is not the call that
++// finishes during activation either.
++const activated = new Promise(resolve => {
++    if (self.serviceWorker.state === "activated")
++        return resolve()
++    self.serviceWorker.addEventListener("statechange", () => {
++        if (self.serviceWorker.state === "activated")
++            resolve()
++    })
++})
 +chrome.tabs.onRemoved.addListener((tabId, removeInfo) => {
 +    heard.push({
 +        event: "tabs.onRemoved",
@@ -967,6 +980,10 @@ index 0000000000..d89eecc031
 +    heard.push({ event: "windows.onRemoved", windowId })
 +})
 +chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
++    if (message === "run") {
++        activated.then(() => sendResponse(run))
++        return true
++    }
 +    if (message !== "heard")
 +        return false
 +    sendResponse(heard)
@@ -1025,7 +1042,7 @@ index 0000000000..ceb8255ed5
 +chrome.windows.onRemoved.addListener(windowId => window.heardOfNormalWindows.push(windowId),
 +                                     { windowTypes: ["normal"] })
 diff --git a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
-index 1290b685fb..84c1f053fd 100644
+index 1290b685fb..1c920b01a1 100644
 --- a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
 +++ b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
 @@ -69,6 +69,13 @@ private Q_SLOTS:
@@ -1042,7 +1059,7 @@ index 1290b685fb..84c1f053fd 100644
  
  private:
      int installedFiles();
-@@ -1233,5 +1240,446 @@ void tst_QWebEngineExtension::aProviderCanReplaceItselfWhileItIsAsked()
+@@ -1233,5 +1240,448 @@ void tst_QWebEngineExtension::aProviderCanReplaceItselfWhileItIsAsked()
      QCOMPARE(placeOf(result["getCurrent"_L1]), QRect(0, 0, 320, 240));
  }
  
@@ -1464,13 +1481,14 @@ index 1290b685fb..84c1f053fd 100644
 +    QTRY_VERIFY(opened);
 +    QTRY_COMPARE(opened->url().path(), "/blank.html"_L1);
 +
-+    const auto starts = [&control] {
-+        return askExtension(&control, "starts"_L1,
-+                            "chrome.storage.session.get('starts').then(found => found.starts)"_L1)
++    // Which run of the worker answers. The worker answers once it is active.
++    const auto run = [&control] {
++        return askExtension(&control, "run"_L1, "chrome.runtime.sendMessage('run')"_L1)
 +                .value("value"_L1)
-+                .toInt();
++                .toString();
 +    };
-+    QTRY_COMPARE(starts(), 1);
++    const QString first = run();
++    QVERIFY(!first.isEmpty());
 +    // The worker stops once it has been idle for its timeout, thirty seconds in Chromium. Asking
 +    // for the running contexts from a page does not wake it.
 +    const auto running = [&control] {
@@ -1483,8 +1501,9 @@ index 1290b685fb..84c1f053fd 100644
 +    QTRY_COMPARE_WITH_TIMEOUT(running(), 0, 90000);
 +
 +    opened.reset();
-+    QTRY_COMPARE(starts(), 2);
 +    QTRY_COMPARE(heardByWorker(&control), removalOf(tabId, windowId));
++    // A worker that never stopped would have heard them too; this one is a new run.
++    QVERIFY(run() != first);
 +}
 +
  QTEST_MAIN(tst_QWebEngineExtension)
