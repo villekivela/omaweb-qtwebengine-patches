@@ -1,6 +1,6 @@
 # QtWebEngine extension patches
 
-Twenty patches to QtWebEngine. Fourteen let it host a password manager's Chromium extension, two
+Twenty-one patches to QtWebEngine. Fifteen let it host a password manager's Chromium extension, two
 add API that Omaweb's content blocking and certificate view ask for, one restores a trace macro that
 slowed every page, one turns V8's write barriers back on, one keeps an offscreen document from
 crashing the engine, and one builds the tests against Qt 6.12. Base is the released
@@ -10,9 +10,9 @@ Built for [omaweb#344](https://github.com/villekivela/omaweb/issues/344), which 
 can host Bitwarden and 1Password. The findings live in `docs/research/password-manager-extensions.md`
 in that repository.
 
-Seven of the twenty are ordinary bug fixes headed for Gerrit, and 0018 and 0020 are Qt's own changes. The rest
-wait on one question to Qt, in `upstream/QTBUG-draft.md`. If Qt takes the work, this repository is
-deleted rather than maintained.
+Seven of the twenty-one are ordinary bug fixes headed for Gerrit, and 0018 and 0020 are Qt's own
+changes. The rest wait on one question to Qt, in `upstream/QTBUG-draft.md`. If Qt takes the work,
+this repository is deleted rather than maintained.
 
 ## Running it
 
@@ -159,6 +159,17 @@ qtwebengine c9300848e28e for QTBUG-147006, and 0020 is that change backported wi
 touches only the tests, so the engine a reader installs is the same with or without it. _Qt's change.
 It drops when the series moves to 6.140.0._
 
+**0021, report where a window is, as the application says.** `chrome.windows` answered with one
+window carrying no `left`, `top`, `width` or `height`, and Chrome always reports all four. Bitwarden
+places its passkey prompt at `window.left + window.width - popupWidth - 15`, which without them is
+`NaN`, and the schema refuses the `windows.create` that follows. Only the application knows where
+the window holding a page is, so `QWebEngineExtensionManager::setWindowGeometryProvider` lets it
+say: the engine calls it with the page the call came from, or with null for a worker's call, and
+puts the answer in every window it reports, `windows.create`'s and populated ones included. Without
+a provider the window is at `0, 0` with the size of the asking view. See
+[omaweb#684](https://github.com/villekivela/omaweb/issues/684) and ADR 0064. _Part of the tab model
+the open question below is about. Propose it with 0004._
+
 ## The open question
 
 `TabsDelegateQt` is internal, and `ExtensionsBrowserClientQt` fills it by treating every page of the
@@ -170,7 +181,7 @@ one is active. That is what the QTBUG draft asks for. Ask before writing the API
 
 ## Tests
 
-37 tests pass with the series applied. Six of them fail on a stock build, which is why they are
+40 tests pass with the series applied. Six of them fail on a stock build, which is why they are
 worth having:
 
 - `serviceWorkerLocalization` fails
@@ -185,6 +196,11 @@ only those, beside the extension tests. Patch 0017's case lives in Qt's `tst_cer
 has the test server's certificate, and the gate runs it the same way. `scripts/verify.sh` runs all
 three and reports them. Neither compiles against a stock build, which has no API for them to call,
 so there is no stock run to compare: removing the line that keeps the chain fails 0017's case.
+Patch 0021's three cases, `aWindowIsWhereTheApplicationSaysItIs`,
+`withoutAnAnswerAWindowIsWhereItsViewIs` and `aProviderCanReplaceItselfWhileItIsAsked`, are in the
+extension tests and do not compile without the patch either. Taking the four numbers out of
+`windows_api.cc` fails the first two, and calling the stored provider rather than a copy fails the
+third.
 
 Patch 0018 has no test case, because what it changes is how V8 is compiled. The gate reads that
 instead. `scripts/check-write-barriers.sh` fails a tree whose V8 is compiled with
@@ -201,6 +217,7 @@ stays after 0018 drops, so a later Qt that turns the barriers off again is notic
 | 6.11.2, series grown to 18 | 1 more, no conflicts | incremental | 50 of 50 | none |
 | 6.11.2-5, rebuilt for speed | already applied | incremental | 50 of 50 | none |
 | 6.11.2-6, on Qt 6.12, series grown to 20 | 19 already applied, 1 more, no conflicts | incremental | 51 of 51 | minutes: 0020, after the tests did not build |
+| 6.11.2-8, series grown to 21 | 20 already applied, 1 more, no conflicts | incremental | 54 of 54 | none |
 
 The rows after the first are the series growing, and the last is the same series rebuilt with each
 architecture's toolchain and published as 6.11.2-5 (omaweb#576), rather than Qt moving. They

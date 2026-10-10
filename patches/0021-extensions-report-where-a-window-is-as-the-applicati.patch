@@ -1,0 +1,620 @@
+From bd2946da642cadbb88c0623ea7cb2f02b88ab3f2 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Ville=20Kivel=C3=A4?= <vkivela@hotmail.com>
+Date: Sat, 10 Oct 2026 10:55:47 +0300
+Subject: [PATCH] extensions: report where a window is, as the application says
+
+chrome.windows answered with one window carrying an id, focus, incognito,
+type, state and tabs, and no left, top, width or height. Chrome always
+reports all four. Bitwarden places its passkey prompt at
+window.left + window.width - popupWidth - 15, which without them is NaN,
+and the schema refuses the windows.create that follows:
+
+  Error at property 'left': Invalid type: expected integer, found number.
+
+Where a window is on screen is only the application's to know, so the
+engine asks it. QWebEngineExtensionManager::setWindowGeometryProvider
+takes a function that is called with the page the call came from, a
+QWebEnginePage or a WebEngineView, or with null for a call no page is
+behind, such as a worker's. Every window the engine reports carries the
+four numbers, windows.create's and populated ones included.
+
+Without a provider, or with an invalid answer, the window is at 0, 0 and
+as large as the asking view, or the active tab's view for a worker, so an
+extension always gets four integers.
+
+The engine calls a copy of the provider, so a provider that replaces
+itself while it is called is not destroyed under its own call.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../extensions/api/windows/windows_api.cc     |  40 +++--
+ .../browser/extensions/tab_registry_qt.cc     |   7 +
+ .../browser/extensions/tab_registry_qt.h      |   7 +
+ src/core/api/qwebengineextensionmanager.cpp   |  25 +++
+ src/core/api/qwebengineextensionmanager.h     |   5 +
+ src/core/extensions/extension_manager.h       |  12 ++
+ .../extensions_browser_client_qt.cpp          |  47 ++++++
+ .../extensions/extensions_browser_client_qt.h |   2 +
+ .../resources/windows_ext/blank.html          |   2 +
+ .../resources/windows_ext/manifest.json       |   8 +
+ .../resources/windows_ext/page.html           |   6 +
+ .../extensions/resources/windows_ext/page.js  |  31 ++++
+ .../resources/windows_ext/service_worker.js   |   8 +
+ .../extensions/tst_qwebengineextension.cpp    | 150 ++++++++++++++++++
+ 14 files changed, 337 insertions(+), 13 deletions(-)
+ create mode 100644 tests/auto/widgets/extensions/resources/windows_ext/blank.html
+ create mode 100644 tests/auto/widgets/extensions/resources/windows_ext/manifest.json
+ create mode 100644 tests/auto/widgets/extensions/resources/windows_ext/page.html
+ create mode 100644 tests/auto/widgets/extensions/resources/windows_ext/page.js
+ create mode 100644 tests/auto/widgets/extensions/resources/windows_ext/service_worker.js
+
+diff --git a/src/3rdparty/chromium/qtwebengine/browser/extensions/api/windows/windows_api.cc b/src/3rdparty/chromium/qtwebengine/browser/extensions/api/windows/windows_api.cc
+index 6c923085b0..04edbc61a9 100644
+--- a/src/3rdparty/chromium/qtwebengine/browser/extensions/api/windows/windows_api.cc
++++ b/src/3rdparty/chromium/qtwebengine/browser/extensions/api/windows/windows_api.cc
+@@ -20,8 +20,11 @@ namespace {
+ 
+ constexpr int kWindowIdCurrent = -2;
+ 
+-base::Value::Dict CreateWindowValue(content::BrowserContext* context,
+-                                    const std::optional<windows::QueryOptions>& options) {
++// The one window, placed where the application says the window holding |asking| is. |asking| is
++// the page the call came from, or null when no page is behind it. Chrome always reports the four
++// numbers, and an extension that places a window of its own from them gets NaN without them,
++// which windows.create then refuses.
++windows::Window DescribeWindow(content::BrowserContext* context, content::WebContents* asking) {
+   windows::Window window;
+   window.id = TabRegistryQt::kWindowId;
+   window.focused = true;
+@@ -29,6 +32,18 @@ base::Value::Dict CreateWindowValue(content::BrowserContext* context,
+   window.type = windows::WindowType::kNormal;
+   window.state = windows::WindowState::kNormal;
+   window.always_on_top = false;
++  const gfx::Rect bounds = TabRegistryQt::Get()->GetWindowBounds(context, asking);
++  window.left = bounds.x();
++  window.top = bounds.y();
++  window.width = bounds.width();
++  window.height = bounds.height();
++  return window;
++}
++
++base::Value::Dict CreateWindowValue(content::BrowserContext* context,
++                                    content::WebContents* asking,
++                                    const std::optional<windows::QueryOptions>& options) {
++  windows::Window window = DescribeWindow(context, asking);
+   if (options && options->populate && *options->populate) {
+     std::vector<api::tabs::Tab> tabs;
+     for (content::WebContents* tab : TabRegistryQt::Get()->GetTabs(context))
+@@ -79,13 +94,8 @@ ExtensionFunction::ResponseAction WindowsCreateFunction::Run() {
+       opened = contents;
+   }
+ 
+-  windows::Window window;
+-  window.id = TabRegistryQt::kWindowId;
+-  window.focused = true;
+-  window.incognito = browser_context()->IsOffTheRecord();
+-  window.type = windows::WindowType::kNormal;
+-  window.state = windows::WindowState::kNormal;
+-  window.always_on_top = false;
++  // The window the new page went to, which is the application's to say.
++  windows::Window window = DescribeWindow(browser_context(), opened);
+   std::vector<api::tabs::Tab> tabs;
+   tabs.push_back(TabRegistryQt::Get()->CreateTab(opened));
+   window.tabs = std::move(tabs);
+@@ -97,28 +107,32 @@ ExtensionFunction::ResponseAction WindowsGetFunction::Run() {
+   EXTENSION_FUNCTION_VALIDATE(params);
+   if (params->window_id != TabRegistryQt::kWindowId && params->window_id != kWindowIdCurrent)
+     return RespondNow(Error(NoWindowError(params->window_id)));
+-  return RespondNow(WithArguments(CreateWindowValue(browser_context(), params->query_options)));
++  return RespondNow(WithArguments(
++      CreateWindowValue(browser_context(), GetSenderWebContents(), params->query_options)));
+ }
+ 
+ ExtensionFunction::ResponseAction WindowsGetCurrentFunction::Run() {
+   std::optional<windows::GetCurrent::Params> params =
+       windows::GetCurrent::Params::Create(args());
+   EXTENSION_FUNCTION_VALIDATE(params);
+-  return RespondNow(WithArguments(CreateWindowValue(browser_context(), params->query_options)));
++  return RespondNow(WithArguments(
++      CreateWindowValue(browser_context(), GetSenderWebContents(), params->query_options)));
+ }
+ 
+ ExtensionFunction::ResponseAction WindowsGetLastFocusedFunction::Run() {
+   std::optional<windows::GetLastFocused::Params> params =
+       windows::GetLastFocused::Params::Create(args());
+   EXTENSION_FUNCTION_VALIDATE(params);
+-  return RespondNow(WithArguments(CreateWindowValue(browser_context(), params->query_options)));
++  return RespondNow(WithArguments(
++      CreateWindowValue(browser_context(), GetSenderWebContents(), params->query_options)));
+ }
+ 
+ ExtensionFunction::ResponseAction WindowsGetAllFunction::Run() {
+   std::optional<windows::GetAll::Params> params = windows::GetAll::Params::Create(args());
+   EXTENSION_FUNCTION_VALIDATE(params);
+   base::Value::List result;
+-  result.Append(CreateWindowValue(browser_context(), params->query_options));
++  result.Append(
++      CreateWindowValue(browser_context(), GetSenderWebContents(), params->query_options));
+   return RespondNow(WithArguments(std::move(result)));
+ }
+ 
+diff --git a/src/3rdparty/chromium/qtwebengine/browser/extensions/tab_registry_qt.cc b/src/3rdparty/chromium/qtwebengine/browser/extensions/tab_registry_qt.cc
+index b62b4a76fc..fd1c428e9a 100644
+--- a/src/3rdparty/chromium/qtwebengine/browser/extensions/tab_registry_qt.cc
++++ b/src/3rdparty/chromium/qtwebengine/browser/extensions/tab_registry_qt.cc
+@@ -106,6 +106,13 @@ content::WebContents* TabRegistryQt::OpenPage(content::BrowserContext* context,
+   return delegate_->OpenPage(context, url, active);
+ }
+ 
++gfx::Rect TabRegistryQt::GetWindowBounds(content::BrowserContext* context,
++                                         content::WebContents* web_contents) {
++  if (!delegate_)
++    return gfx::Rect();
++  return delegate_->GetWindowBounds(context, web_contents);
++}
++
+ ScriptExecutor* TabRegistryQt::GetScriptExecutor(content::WebContents* web_contents) {
+   if (!web_contents)
+     return nullptr;
+diff --git a/src/3rdparty/chromium/qtwebengine/browser/extensions/tab_registry_qt.h b/src/3rdparty/chromium/qtwebengine/browser/extensions/tab_registry_qt.h
+index 46803949ad..4dbcb5b531 100644
+--- a/src/3rdparty/chromium/qtwebengine/browser/extensions/tab_registry_qt.h
++++ b/src/3rdparty/chromium/qtwebengine/browser/extensions/tab_registry_qt.h
+@@ -7,6 +7,7 @@
+ #include <vector>
+ 
+ #include "base/values.h"
++#include "ui/gfx/geometry/rect.h"
+ #include "qtwebengine/common/extensions/api/tabs.h"
+ 
+ class GURL;
+@@ -40,6 +41,11 @@ class TabsDelegateQt {
+   // waiting for.
+   virtual content::WebContents* OpenPage(content::BrowserContext* context, const GURL& url,
+                                          bool active) = 0;
++  // Where the window holding |web_contents| is on screen, frame included, as chrome.windows
++  // reports it. Only the application knows that. |web_contents| is the page a call came from, or
++  // null for one no page is behind, such as an extension's worker.
++  virtual gfx::Rect GetWindowBounds(content::BrowserContext* context,
++                                    content::WebContents* web_contents) = 0;
+ };
+ 
+ class TabRegistryQt {
+@@ -57,6 +63,7 @@ class TabRegistryQt {
+   std::vector<content::WebContents*> GetTabs(content::BrowserContext* context);
+   content::WebContents* GetActiveTab(content::BrowserContext* context);
+   content::WebContents* OpenPage(content::BrowserContext* context, const GURL& url, bool active);
++  gfx::Rect GetWindowBounds(content::BrowserContext* context, content::WebContents* web_contents);
+ 
+   // The script executor of |web_contents|, created on first use and owned by it. Injecting a
+   // script into a tab goes through this, so a WebContents the delegate does not list as a tab
+diff --git a/src/core/api/qwebengineextensionmanager.cpp b/src/core/api/qwebengineextensionmanager.cpp
+index f2f0914899..70b18f3e53 100644
+--- a/src/core/api/qwebengineextensionmanager.cpp
++++ b/src/core/api/qwebengineextensionmanager.cpp
+@@ -183,5 +183,30 @@ bool QWebEngineExtensionManager::event(QEvent *e)
+     return QObject::event(e);
+ }
+ 
++/*!
++    Sets the function that answers where the window holding a page is on screen,
++    for the windows an extension reads through \c chrome.windows.
++
++    \a provider is called with the object holding the page the extension's call
++    came from: a QWebEnginePage, or a WebEngineView in Qt Quick. It is called with
++    \c nullptr for a call that no page is behind, such as one from an extension's
++    service worker. It answers with the window's frame geometry in device-independent
++    pixels. A platform that cannot tell a window its position answers \c 0 for
++    \c x and \c y.
++
++    The provider is called on the thread the profile lives on, while the extension
++    waits for its answer, so it must answer at once.
++
++    Without a provider, or when it answers with an invalid QRect, a window is reported
++    at \c{0, 0} with the size of the view the call came from.
++
++    Pass an empty function to stop answering.
++*/
++void QWebEngineExtensionManager::setWindowGeometryProvider(
++        std::function<QRect(const QObject *page)> provider)
++{
++    d_ptr->setWindowGeometryProvider(std::move(provider));
++}
++
+ QT_END_NAMESPACE
+ #endif // QT_CONFIG(webengine_extensions)
+diff --git a/src/core/api/qwebengineextensionmanager.h b/src/core/api/qwebengineextensionmanager.h
+index da2d9f201f..29ec98dac0 100644
+--- a/src/core/api/qwebengineextensionmanager.h
++++ b/src/core/api/qwebengineextensionmanager.h
+@@ -12,8 +12,11 @@
+ #include <QtCore/qlist.h>
+ #include <QtCore/qstring.h>
+ #include <QtCore/qobject.h>
++#include <QtCore/qrect.h>
+ #include <QtWebEngineCore/qwebengineextensioninfo.h>
+ 
++#include <functional>
++
+ namespace QtWebEngineCore {
+ class ExtensionManager;
+ class ProfileAdapter;
+@@ -37,6 +40,8 @@ public:
+     QString installPath() const;
+     QList<QWebEngineExtensionInfo> extensions() const;
+ 
++    void setWindowGeometryProvider(std::function<QRect(const QObject *page)> provider);
++
+ Q_SIGNALS:
+     void loadFinished(const QWebEngineExtensionInfo &extension);
+     void installFinished(const QWebEngineExtensionInfo &extension);
+diff --git a/src/core/extensions/extension_manager.h b/src/core/extensions/extension_manager.h
+index a0e620fd28..471bab7166 100644
+--- a/src/core/extensions/extension_manager.h
++++ b/src/core/extensions/extension_manager.h
+@@ -16,6 +16,9 @@
+ #include <QObject>
+ #include <QtWebEngineCore/private/qtwebenginecoreglobal_p.h>
+ 
++#include <QRect>
++
++#include <functional>
+ #include <memory>
+ 
+ namespace content {
+@@ -58,6 +61,14 @@ public:
+     QString installDirectory() const;
+     QList<QWebEngineExtensionInfo> extensions();
+ 
++    // Where the application says the window holding a page is. Empty until it says.
++    using WindowGeometryProvider = std::function<QRect(const QObject *page)>;
++    const WindowGeometryProvider &windowGeometryProvider() const { return m_windowGeometryProvider; }
++    void setWindowGeometryProvider(WindowGeometryProvider provider)
++    {
++        m_windowGeometryProvider = std::move(provider);
++    }
++
+     void onExtensionLoaded(const extensions::Extension *);
+     void onExtensionInstalled(const extensions::Extension *);
+     void onExtensionUninstalled(const std::string &id);
+@@ -69,6 +80,7 @@ private:
+     std::unique_ptr<ExtensionLoader> m_loader;
+     std::unique_ptr<ExtensionInstaller> m_installer;
+     content::BrowserContext *m_context;
++    WindowGeometryProvider m_windowGeometryProvider;
+ };
+ } // namespace QtWebEngineCore
+ 
+diff --git a/src/core/extensions/extensions_browser_client_qt.cpp b/src/core/extensions/extensions_browser_client_qt.cpp
+index 3de7934ac9..6dda1a4882 100644
+--- a/src/core/extensions/extensions_browser_client_qt.cpp
++++ b/src/core/extensions/extensions_browser_client_qt.cpp
+@@ -57,6 +57,7 @@
+ #include "extensions_api_client_qt.h"
+ #include "extensions_browser_client_qt.h"
+ #include "extension_host_delegate_qt.h"
++#include "extension_manager.h"
+ #include "content/public/browser/web_contents.h"
+ #include "profile_adapter.h"
+ #include "profile_adapter_client.h"
+@@ -438,6 +439,52 @@ content::WebContents *ExtensionsBrowserClientQt::OpenPage(content::BrowserContex
+     return contents;
+ }
+ 
++// The page object the application knows |web_contents| by, or null when the
++// application holds no page for it.
++static QtWebEngineCore::WebContentsAdapterClient *
++clientFor(QtWebEngineCore::ProfileAdapter *adapter, content::WebContents *web_contents)
++{
++    if (!adapter || !web_contents)
++        return nullptr;
++    for (QtWebEngineCore::WebContentsAdapterClient *client : adapter->webContentsAdapterClients()) {
++        QtWebEngineCore::WebContentsAdapter *contents = client->webContentsAdapter();
++        if (contents && contents->isInitialized() && contents->webContents() == web_contents)
++            return client;
++    }
++    return nullptr;
++}
++
++// Where a window is on screen is the application's to say: it is asked about
++// the view or page holding |web_contents|, or about none when no page is behind
++// the call. Without an answer the window is at the top left of the screen and
++// as large as the view the call came from, or the active tab's for a call with
++// no page, so an extension always has four numbers to place a window with.
++gfx::Rect ExtensionsBrowserClientQt::GetWindowBounds(content::BrowserContext *context,
++                                                     content::WebContents *web_contents)
++{
++    auto *profile = static_cast<QtWebEngineCore::ProfileQt *>(context);
++    QtWebEngineCore::ProfileAdapter *adapter = profile->profileAdapter();
++    QtWebEngineCore::WebContentsAdapterClient *asking = clientFor(adapter, web_contents);
++
++    // A copy, because a provider may replace itself while it is called.
++    QtWebEngineCore::ExtensionManager *manager = profile->extensionManager();
++    const QtWebEngineCore::ExtensionManager::WindowGeometryProvider provider =
++            manager ? manager->windowGeometryProvider()
++                    : QtWebEngineCore::ExtensionManager::WindowGeometryProvider();
++    if (provider) {
++        const QRect answer = provider(asking ? asking->holdingQObject() : nullptr);
++        if (answer.isValid())
++            return gfx::Rect(answer.x(), answer.y(), answer.width(), answer.height());
++    }
++
++    // A call from contents the application holds no page for, a worker's or the extension
++    // system's own, is sized like the tab on show.
++    if (!asking)
++        asking = clientFor(adapter, GetActiveTab(context));
++    const QSize size = asking ? asking->viewportRect().size().toSize() : QSize(0, 0);
++    return gfx::Rect(0, 0, size.width(), size.height());
++}
++
+ ScriptExecutor *ExtensionsBrowserClientQt::GetScriptExecutorForTab(content::WebContents &web_contents)
+ {
+     return TabRegistryQt::Get()->GetScriptExecutor(&web_contents);
+diff --git a/src/core/extensions/extensions_browser_client_qt.h b/src/core/extensions/extensions_browser_client_qt.h
+index b8f878ae28..96fb57fe09 100644
+--- a/src/core/extensions/extensions_browser_client_qt.h
++++ b/src/core/extensions/extensions_browser_client_qt.h
+@@ -43,6 +43,8 @@ public:
+     content::WebContents *GetActiveTab(content::BrowserContext *context) override;
+     content::WebContents *OpenPage(content::BrowserContext *context, const GURL &url,
+                                    bool active) override;
++    gfx::Rect GetWindowBounds(content::BrowserContext *context,
++                              content::WebContents *web_contents) override;
+ 
+     void GetTabAndWindowIdForWebContents(content::WebContents *web_contents, int *tab_id,
+                                          int *window_id) override;
+diff --git a/tests/auto/widgets/extensions/resources/windows_ext/blank.html b/tests/auto/widgets/extensions/resources/windows_ext/blank.html
+new file mode 100644
+index 0000000000..8ba582f935
+--- /dev/null
++++ b/tests/auto/widgets/extensions/resources/windows_ext/blank.html
+@@ -0,0 +1,2 @@
++<!DOCTYPE html>
++<html><body></body></html>
+diff --git a/tests/auto/widgets/extensions/resources/windows_ext/manifest.json b/tests/auto/widgets/extensions/resources/windows_ext/manifest.json
+new file mode 100644
+index 0000000000..a1fecde872
+--- /dev/null
++++ b/tests/auto/widgets/extensions/resources/windows_ext/manifest.json
+@@ -0,0 +1,8 @@
++{
++    "name": "windows",
++    "version": "1.0",
++    "manifest_version": 3,
++    "background": {
++        "service_worker": "service_worker.js"
++    }
++}
+diff --git a/tests/auto/widgets/extensions/resources/windows_ext/page.html b/tests/auto/widgets/extensions/resources/windows_ext/page.html
+new file mode 100644
+index 0000000000..61273da469
+--- /dev/null
++++ b/tests/auto/widgets/extensions/resources/windows_ext/page.html
+@@ -0,0 +1,6 @@
++<!DOCTYPE html>
++<html>
++<body>
++<script src="page.js"></script>
++</body>
++</html>
+diff --git a/tests/auto/widgets/extensions/resources/windows_ext/page.js b/tests/auto/widgets/extensions/resources/windows_ext/page.js
+new file mode 100644
+index 0000000000..5e8bd4468d
+--- /dev/null
++++ b/tests/auto/widgets/extensions/resources/windows_ext/page.js
+@@ -0,0 +1,31 @@
++// Every answer that carries a window says where it is, as Chrome's does. An
++// extension places a window of its own from these four numbers, and one that is
++// missing makes the arithmetic NaN, which windows.create refuses.
++const place = window => ({
++    left: window.left,
++    top: window.top,
++    width: window.width,
++    height: window.height,
++    integers: [window.left, window.top, window.width, window.height].every(Number.isInteger),
++})
++
++;(async () => {
++    const result = {}
++    result.get = place(await chrome.windows.get(chrome.windows.WINDOW_ID_CURRENT))
++    result.getCurrent = place(await chrome.windows.getCurrent())
++    result.getLastFocused = place(await chrome.windows.getLastFocused())
++    result.getAll = place((await chrome.windows.getAll({ populate: true }))[0])
++    result.worker = place(await chrome.runtime.sendMessage("getCurrent"))
++    if (location.hash === "#create")
++        result.create = place(await chrome.windows.create({ url: "blank.html" }))
++    result.integers = Object.values(result).every(window => window.integers)
++    const node = document.createElement("div")
++    node.id = "result"
++    node.textContent = JSON.stringify(result)
++    document.body.appendChild(node)
++})().catch(error => {
++    const node = document.createElement("div")
++    node.id = "result"
++    node.textContent = JSON.stringify({ error: String(error) })
++    document.body.appendChild(node)
++})
+diff --git a/tests/auto/widgets/extensions/resources/windows_ext/service_worker.js b/tests/auto/widgets/extensions/resources/windows_ext/service_worker.js
+new file mode 100644
+index 0000000000..8447b884ae
+--- /dev/null
++++ b/tests/auto/widgets/extensions/resources/windows_ext/service_worker.js
+@@ -0,0 +1,8 @@
++// A worker has no tab behind it, so the window it is told about is the one the
++// application answers for no page at all.
++chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
++    if (message !== "getCurrent")
++        return false;
++    chrome.windows.getCurrent().then(sendResponse)
++    return true;
++})
+diff --git a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
+index 52c2a26be3..1290b685fb 100644
+--- a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
++++ b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
+@@ -66,6 +66,9 @@ private Q_SLOTS:
+     void tabsWindowsAndScripting();
+     void nativeMessaging();
+     void anExtensionOpensAPage();
++    void aWindowIsWhereTheApplicationSaysItIs();
++    void withoutAnAnswerAWindowIsWhereItsViewIs();
++    void aProviderCanReplaceItselfWhileItIsAsked();
+ 
+ private:
+     int installedFiles();
+@@ -1083,5 +1086,152 @@ void tst_QWebEngineExtension::anExtensionOpensAPage()
+     QTRY_COMPARE(opened->url().path(), "/index.html"_L1);
+ }
+ 
++// Where a window the extension was told about is, from the four numbers chrome.windows reports.
++static QRect placeOf(const QVariant &window)
++{
++    const QVariantMap map = window.toMap();
++    return QRect(map["left"_L1].toInt(), map["top"_L1].toInt(), map["width"_L1].toInt(),
++                 map["height"_L1].toInt());
++}
++
++static QVariantMap windowsReport(QWebEnginePage *page)
++{
++    if (!QTest::qWaitFor([page] {
++            return evaluateJavaScriptSync(page, "!!document.getElementById('result')").toBool();
++        }))
++        return {};
++    return evaluateJavaScriptSync(page, "JSON.parse(document.getElementById('result').textContent)")
++            .toMap();
++}
++
++void tst_QWebEngineExtension::aWindowIsWhereTheApplicationSaysItIs()
++{
++    // chrome.windows reports a window's position and size, and only the application knows them,
++    // so the engine asks it: about the page the call came from, or about no page for a worker.
++    // Every answer that carries a window carries the four numbers, windows.create's included.
++    HttpServer server;
++    server.setResourceDirs({ resourcesPath() });
++    QVERIFY(server.start());
++
++    QWebEngineExtensionInfo extension = loadExtensionSync(resourcesPath() + "windows_ext"_L1);
++    QVERIFY(extension.isLoaded());
++    m_manager->setExtensionEnabled(extension, true);
++
++    QList<const QObject *> asked;
++    m_manager->setWindowGeometryProvider([&asked](const QObject *page) {
++        asked.append(page);
++        return page ? QRect(11, 22, 640, 480) : QRect(33, 44, 1024, 768);
++    });
++    auto forget = qScopeGuard([this] { m_manager->setWindowGeometryProvider({}); });
++
++    // windows.create opens its page through a tab, the way a page's own window.open() does.
++    QSignalSpy loadSpy(m_page, SIGNAL(loadFinished(bool)));
++    m_page->load(server.url("/index.html"_L1));
++    QTRY_COMPARE(loadSpy.size(), 1);
++    std::unique_ptr<QWebEnginePage> opened;
++    connect(m_page, &QWebEnginePage::newWindowRequested, this,
++            [&opened, this](QWebEngineNewWindowRequest &request) {
++                opened = std::make_unique<QWebEnginePage>(m_profile);
++                request.openIn(opened.get());
++            });
++
++    QWebEnginePage extensionPage(m_profile);
++    extensionPage.load(QUrl("chrome-extension://"_L1 + extension.id() + "/page.html#create"_L1));
++    const QVariantMap result = windowsReport(&extensionPage);
++    QVERIFY2(!result.isEmpty(), "the extension page never reported");
++    QVERIFY2(!result.contains("error"_L1), qPrintable(result.value("error"_L1).toString()));
++    QVERIFY(result["integers"_L1].toBool());
++    QCOMPARE(placeOf(result["get"_L1]), QRect(11, 22, 640, 480));
++    QCOMPARE(placeOf(result["getCurrent"_L1]), QRect(11, 22, 640, 480));
++    QCOMPARE(placeOf(result["getLastFocused"_L1]), QRect(11, 22, 640, 480));
++    QCOMPARE(placeOf(result["getAll"_L1]), QRect(11, 22, 640, 480));
++    QCOMPARE(placeOf(result["create"_L1]), QRect(11, 22, 640, 480));
++    QCOMPARE(placeOf(result["worker"_L1]), QRect(33, 44, 1024, 768));
++    QVERIFY(asked.contains(&extensionPage));
++    QVERIFY(opened);
++    QVERIFY(asked.contains(opened.get()));
++    QVERIFY(asked.contains(nullptr));
++}
++
++void tst_QWebEngineExtension::withoutAnAnswerAWindowIsWhereItsViewIs()
++{
++    // An application that does not answer still gets numbers an extension can place a window
++    // with: the top left of the screen, and the size of the view the call came from. A worker's
++    // call comes from no view, so it gets the size of the tab on show.
++    HttpServer server;
++    server.setResourceDirs({ resourcesPath() });
++    QVERIFY(server.start());
++
++    QWebEngineExtensionInfo extension = loadExtensionSync(resourcesPath() + "windows_ext"_L1);
++    QVERIFY(extension.isLoaded());
++    m_manager->setExtensionEnabled(extension, true);
++
++    QWebEnginePage tab(m_profile);
++    QWebEngineView tabView;
++    tabView.setPage(&tab);
++    tabView.resize(400, 300);
++    tabView.show();
++    QVERIFY(QTest::qWaitForWindowExposed(&tabView));
++    QSignalSpy loadSpy(&tab, SIGNAL(loadFinished(bool)));
++    tab.load(server.url("/index.html"_L1));
++    QTRY_COMPARE(loadSpy.size(), 1);
++
++    QWebEnginePage extensionPage(m_profile);
++    QWebEngineView view;
++    view.setPage(&extensionPage);
++    view.resize(320, 240);
++    view.show();
++    QVERIFY(QTest::qWaitForWindowExposed(&view));
++    extensionPage.load(QUrl("chrome-extension://"_L1 + extension.id() + "/page.html"_L1));
++    const QVariantMap result = windowsReport(&extensionPage);
++    QVERIFY2(!result.isEmpty(), "the extension page never reported");
++    QVERIFY2(!result.contains("error"_L1), qPrintable(result.value("error"_L1).toString()));
++    QVERIFY(result["integers"_L1].toBool());
++    QCOMPARE(placeOf(result["get"_L1]), QRect(0, 0, 320, 240));
++    QCOMPARE(placeOf(result["getCurrent"_L1]), QRect(0, 0, 320, 240));
++    QCOMPARE(placeOf(result["getLastFocused"_L1]), QRect(0, 0, 320, 240));
++    QCOMPARE(placeOf(result["getAll"_L1]), QRect(0, 0, 320, 240));
++    QCOMPARE(placeOf(result["worker"_L1]), QRect(0, 0, 400, 300));
++}
++
++// Outside the provider, because the provider is gone by the time it reads them.
++static std::weak_ptr<int> s_providerCapture;
++static bool s_providerOutlivedItsReplacement = false;
++
++void tst_QWebEngineExtension::aProviderCanReplaceItselfWhileItIsAsked()
++{
++    // An application may change its answer from inside it, such as on its first call. The engine
++    // holds on to the provider it is calling, so what the provider captured outlives the call.
++    QWebEngineExtensionInfo extension = loadExtensionSync(resourcesPath() + "windows_ext"_L1);
++    QVERIFY(extension.isLoaded());
++    m_manager->setExtensionEnabled(extension, true);
++
++    auto capture = std::make_shared<int>(0);
++    s_providerCapture = capture;
++    s_providerOutlivedItsReplacement = false;
++    QWebEngineExtensionManager *manager = m_manager;
++    m_manager->setWindowGeometryProvider([manager, capture](const QObject *) {
++        manager->setWindowGeometryProvider({});
++        s_providerOutlivedItsReplacement = !s_providerCapture.expired();
++        return QRect(11, 22, 640, 480);
++    });
++    capture.reset();
++    auto forget = qScopeGuard([this] { m_manager->setWindowGeometryProvider({}); });
++
++    QWebEnginePage extensionPage(m_profile);
++    QWebEngineView view;
++    view.setPage(&extensionPage);
++    view.resize(320, 240);
++    view.show();
++    QVERIFY(QTest::qWaitForWindowExposed(&view));
++    extensionPage.load(QUrl("chrome-extension://"_L1 + extension.id() + "/page.html"_L1));
++    const QVariantMap result = windowsReport(&extensionPage);
++    QVERIFY2(!result.isEmpty(), "the extension page never reported");
++    QVERIFY2(!result.contains("error"_L1), qPrintable(result.value("error"_L1).toString()));
++    QVERIFY(s_providerOutlivedItsReplacement);
++    QCOMPARE(placeOf(result["get"_L1]), QRect(11, 22, 640, 480));
++    QCOMPARE(placeOf(result["getCurrent"_L1]), QRect(0, 0, 320, 240));
++}
++
+ QTEST_MAIN(tst_QWebEngineExtension)
+ #include "tst_qwebengineextension.moc"
+-- 
+2.55.0
+
