@@ -234,6 +234,7 @@ stays after 0018 drops, so a later Qt that turns the barriers off again is notic
 | 6.11.2-5, rebuilt for speed | already applied | incremental | 50 of 50 | none |
 | 6.11.2-6, on Qt 6.12, series grown to 20 | 19 already applied, 1 more, no conflicts | incremental | 51 of 51 | minutes: 0020, after the tests did not build |
 | 6.11.2-8, series grown to 21 | 20 already applied, 1 more, no conflicts | incremental | 54 of 54 | none |
+| 6.11.2-10, series grown to 22 | 21 already applied, 1 more, no conflicts | incremental | 58 of 58 | none |
 
 The rows after the first are the series growing, and the last is the same series rebuilt with each
 architecture's toolchain and published as 6.11.2-5 (omaweb#576), rather than Qt moving. They
