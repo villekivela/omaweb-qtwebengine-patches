@@ -9,7 +9,7 @@ this file is for.
 
 ## What changed
 
-Twenty-two patches, applied in order to the released source. Fourteen add the part of Chromium's
+Twenty-three patches, applied in order to the released source. Fourteen add the part of Chromium's
 extension runtime that QtWebEngine compiles out: renderer bindings, the `tabs`, `windows`,
 `permissions`, `scripting`, `notifications` and `webNavigation` namespaces behind an embedder
 delegate, native messaging, and web accessible resources. Five of those are bug fixes in Qt's own
@@ -25,7 +25,9 @@ where the window holding a page is, and the `windows` namespace reports it to an
 twenty-second keeps the content scripts an extension registers to persist across a restart, in the
 profile's storage path, forgets them when another version of the extension is loaded, holds a
 page they are for until they are read, and fixes Chromium's `scripting` namespace keeping one only
-for the session after an update that leaves its persistence out.
+for the session after an update that leaves its persistence out. The last adds one more piece of
+the extension runtime: a page an extension opens is a window of its own, and the extension is told
+when it closes.
 
 On x86_64 the engine is built with clang and LLD, with ThinLTO and Chrome's own PGO profile for its
 Chromium, where Qt's build would use GCC. On aarch64 it is built with GCC, as Qt's is.
