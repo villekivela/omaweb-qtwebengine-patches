@@ -22,8 +22,8 @@ extension that creates an offscreen document no longer crashes the engine. The t
 own change to the engine's tests, so that they build against Qt 6.12; it changes nothing that is
 installed. The twenty-first adds one more piece of the extension runtime: the application says
 where the window holding a page is, and the `windows` namespace reports it to an extension. The
-last is a bug fix in Qt's own code: deleting a profile while an extension's message waits for its
-worker no longer crashes the application.
+twenty-second is a bug fix in Qt's own code: deleting a profile while an extension's message waits
+for its worker no longer crashes the application.
 
 On x86_64 the engine is built with clang and LLD, with ThinLTO and Chrome's own PGO profile for its
 Chromium, where Qt's build would use GCC. On aarch64 it is built with GCC, as Qt's is.

@@ -172,16 +172,17 @@ a provider the window is at `0, 0` with the size of the asking view. See
 the open question below is about. Propose it with 0004._
 
 **0024, let a profile go while a message waits for a worker.** A message to an extension's worker
-waits in the worker's task queue until the worker is started for it, and every message does, because
-the start is a round trip even for a running worker. Deleting the profile in that wait crashed the
-application on a `CHECK`: the queue drops its messages as the profile's services are deleted, and
-each message's port then asked `ExtensionsBrowserClientQt::IsValidContext` whether to report to
-`MessageTracker`. That answered true for any pointer, so the port looked a service up on a destroyed
-context. Chrome answers from its `ProfileManager`, which a profile leaves before it is destroyed. Now
-`ProfileQt` keeps the set of profiles whose destruction has not begun and leaves it first, and
-`IsValidContext` answers from that set without following the pointer. It is what made 0012's
-`theReadersAnswerToANotificationReachesTheExtension` crash in about one run in fifteen. 0022 and 0023
-are held for [omaweb#686](https://github.com/villekivela/omaweb/issues/686) and
+waits in the worker's task queue until the worker is registered and started for it, and every
+message does, because the start is a round trip even for a running worker. Deleting the profile in
+that wait crashed the application on a `CHECK`: the queue drops its messages as the profile's
+services are deleted, and each message's port then asked `ExtensionsBrowserClientQt::IsValidContext`
+whether to report to `MessageTracker`. That answered true for any pointer, so the port looked a
+service up on a destroyed context. Chrome answers from its `ProfileManager`, which a profile leaves
+before it is destroyed. Now `ProfileQt` keeps the set of profiles whose destruction has not begun
+and leaves it first, and `IsValidContext` answers from that set without following the pointer. It is
+what made 0012's `theReadersAnswerToANotificationReachesTheExtension` crash in about one run in
+fifteen alone and one full-suite run in thirty: its last poll leaves a message waiting. 0022 and
+0023 are held for [omaweb#686](https://github.com/villekivela/omaweb/issues/686) and
 [omaweb#687](https://github.com/villekivela/omaweb/issues/687). See
 [omaweb#696](https://github.com/villekivela/omaweb/issues/696). _A bug fix with a test. Submit as
 is._
@@ -208,18 +209,22 @@ worth having:
 - `anOffscreenDocumentCanBeCreated` crashes, signal 11
 
 Patch 0016's eight cases live in Qt's own `tst_qwebengineurlrequestinterceptor`, and the gate runs
-only those, beside the extension tests. Patch 0017's case lives in Qt's `tst_certificateerror`, which
-has the test server's certificate, and the gate runs it the same way. `scripts/verify.sh` runs all
-three and reports them. Neither compiles against a stock build, which has no API for them to call,
-so there is no stock run to compare: removing the line that keeps the chain fails 0017's case.
+only those, beside the extension tests. Patch 0017's case lives in Qt's `tst_certificateerror`,
+which has the test server's certificate, and the gate runs it the same way. `scripts/verify.sh` runs
+all three and reports them. Neither compiles against a stock build, which has no API for them to
+call, so there is no stock run to compare: removing the line that keeps the chain fails 0017's case.
 Patch 0021's three cases, `aWindowIsWhereTheApplicationSaysItIs`,
 `withoutAnAnswerAWindowIsWhereItsViewIs` and `aProviderCanReplaceItselfWhileItIsAsked`, are in the
 extension tests and do not compile without the patch either. Taking the four numbers out of
 `windows_api.cc` fails the first two, and calling the stored provider rather than a copy fails the
 third. Patch 0024's case, `aProfileMayGoWhileAMessageWaitsForTheWorker`, crashes on every run
-without it: its worker is slow to start, so `cleanup()` deletes the profile with the content script's
-message still waiting. Answering true from `IsValidContext` again crashes it, and so does leaving the
-set at the end of `~ProfileQt` rather than at the start.
+without it: its worker's script runs for a second and a half before the worker can be registered,
+and its content script messages the worker as the page loads, so `cleanup()` deletes the profile
+with the message still waiting behind the registration. A message from an extension page to a worker
+that registers quickly was caught waiting in five runs of thirty. Answering true from
+`IsValidContext` again crashes it, and so does leaving the set at the end of `~ProfileQt` rather
+than at the start. It compiles against a stock build, which has the same `IsValidContext`, but no
+stock engine was at hand to run it on.
 
 Patch 0018 has no test case, because what it changes is how V8 is compiled. The gate reads that
 instead. `scripts/check-write-barriers.sh` fails a tree whose V8 is compiled with

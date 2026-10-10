@@ -1,12 +1,13 @@
-From 32d9541fd947fd816b7523ad0bca99122ab236cc Mon Sep 17 00:00:00 2001
+From a2b469d1485bcc747b96822a69b7630f8150ba91 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivel=C3=A4?= <vkivela@hotmail.com>
-Date: Sat, 10 Oct 2026 18:22:20 +0000
+Date: Sat, 10 Oct 2026 18:30:44 +0000
 Subject: [PATCH] extensions: let a profile go while a message waits for a
  worker
 
 A message to an extension's service worker waits in the worker's task
-queue until the worker is started for it, and every message does: the
-start is a round trip even when the worker is already running. Deleting
+queue until the worker is registered and started for it, and every
+message does: the start is a round trip even when the worker is already
+running. Deleting
 the profile in that wait crashed the application on a CHECK.
 
 ~ProfileQt destroys the profile's keyed services, and marks the context
@@ -32,9 +33,11 @@ Every caller of IsValidContext in the extensions layer uses it to skip
 work for a context that is going, as it does in Chrome.
 
 The notification case, theReadersAnswerToANotificationReachesTheExtension,
-crashed this way in about one run in fifteen: its last poll sends the
-worker a message that cleanup() can catch still waiting. The new case
-holds a message there every time, with a worker that is slow to start.
+crashed this way in about one run in fifteen alone, and one full-suite
+run in thirty: its last poll sends the worker a message that cleanup()
+can catch still waiting. The new case holds a message there every time:
+its worker's script runs for a second and a half before the worker can
+be registered, and its content script messages the worker meanwhile.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
@@ -124,7 +127,7 @@ index bc8007a94a..197ed71ea8 100644
  
      // BrowserContext implementation:
 diff --git a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
-index 1290b685fb..4fd97f1d45 100644
+index 1290b685fb..499f34914f 100644
 --- a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
 +++ b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
 @@ -58,6 +58,7 @@ private Q_SLOTS:
@@ -141,11 +144,11 @@ index 1290b685fb..4fd97f1d45 100644
  
 +void tst_QWebEngineExtension::aProfileMayGoWhileAMessageWaitsForTheWorker()
 +{
-+    // A message to an extension's worker waits in a queue until the worker is started for it. A
-+    // profile deleted in that wait, as one is when the reader closes a window while an extension
-+    // is mid-conversation, has to drop the message rather than crash on it. This fixture's worker
-+    // spends its first moments busy, and its content script messages it as the page loads, so
-+    // cleanup() deletes the profile with the message still waiting.
++    // A message to an extension's worker waits in a queue until the worker is registered and
++    // started for it. A profile deleted in that wait has to drop the message rather than crash on
++    // it. This fixture's worker script runs for a while before the worker can be registered, and
++    // its content script messages the worker as the page loads, so cleanup() deletes the profile
++    // with the message still waiting.
 +    QWebEngineExtensionInfo extension = loadExtensionSync(resourcesPath() + "slow_worker_ext"_L1);
 +    QVERIFY2(extension.isLoaded(), qPrintable(extension.error()));
 +    m_manager->setExtensionEnabled(extension, true);
