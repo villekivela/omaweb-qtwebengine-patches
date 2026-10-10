@@ -1,17 +1,18 @@
 # QtWebEngine extension patches
 
-Twenty-two patches to QtWebEngine. Fifteen let it host a password manager's Chromium extension, two
-add API that Omaweb's content blocking and certificate view ask for, one restores a trace macro that
-slowed every page, one turns V8's write barriers back on, one keeps an offscreen document from
-crashing the engine, one builds the tests against Qt 6.12, and one keeps a profile from crashing as
-it is deleted with an extension's message still waiting. Base is the released
-`qtwebengine-everywhere-src-6.11.2` tarball.
+Twenty-four patches to QtWebEngine. Sixteen let it host a password manager's Chromium extension,
+two add API that Omaweb's content blocking and certificate view ask for, one restores a trace macro
+that slowed every page, one turns V8's write barriers back on, one keeps an offscreen document from
+crashing the engine, one builds the tests against Qt 6.12, one keeps the content scripts any
+extension registers across a restart, and one keeps a profile from crashing as it is deleted with an
+extension's message still waiting. Base is the released `qtwebengine-everywhere-src-6.11.2`
+tarball.
 
 Built for [omaweb#344](https://github.com/villekivela/omaweb/issues/344), which asks whether Omaweb
 can host Bitwarden and 1Password. The findings live in `docs/research/password-manager-extensions.md`
 in that repository.
 
-Eight of the twenty-two are ordinary bug fixes headed for Gerrit, and 0018 and 0020 are Qt's own
+Eight of the twenty-four are ordinary bug fixes headed for Gerrit, and 0018 and 0020 are Qt's own
 changes. The rest wait on one question to Qt, in `upstream/QTBUG-draft.md`. If Qt takes the work,
 this repository is deleted rather than maintained.
 
@@ -171,6 +172,42 @@ a provider the window is at `0, 0` with the size of the asking view. See
 [omaweb#684](https://github.com/villekivela/omaweb/issues/684) and ADR 0064. _Part of the tab model
 the open question below is about. Propose it with 0004._
 
+**0022, keep registered content scripts across a restart.** A content script an extension registers
+with `chrome.scripting` persists across sessions unless it says otherwise, and every one was gone
+after a restart, because `ExtensionSystemQt` had no store to keep them in. A regular profile now has
+Chrome's, under `Extension Scripts` in its storage path. An off-the-record profile has none, and its
+loader refuses an extension anyway. A navigation to a page an enabled extension's scripts are for
+waits until they are read, as Chrome's `UserScriptListener` makes it, which Qt's tree does not
+carry. Kept scripts count only for an extension with the `scripting` or `userScripts` permission, as
+the manager reads them only then, so a tab restored as the extension is turned on runs them on its
+first load. Loading a version other than the one loaded last is an update, and forgets what the old
+version registered, as Chrome's install does. Uninstalling now tells the registry's observers, as
+Chrome's registrar does, so the store forgets what an uninstalled extension registered, the patterns
+kept for it are cleared, and the extension's service worker registration is deleted too; unloading
+keeps both, as disabling does in Chrome. Kept scripts live in two stores, the scripts in the LevelDB
+and their patterns in the extension's prefs, which are written in batches, so a crash between the
+two writes loses them, as in Chrome. The patch also fixes Chromium's `updateContentScripts`, which
+turned a persistent script into a session one whenever the update left `persistAcrossSessions` out,
+because it looked the old value up in a set it had not filled yet. Chromium's `main` has the same
+code. See [omaweb#686](https://github.com/villekivela/omaweb/issues/686). _Follows 0005. Report the
+update bug to Chromium._
+
+**0023, tell an extension the window it opened closed.** `windows.create` answered with the one id
+every window call reports, so the page an extension opened had no id of its own, and the series
+raised none of the `tabs` and `windows` events it declares. Bitwarden ends a passkey request, and
+lets the site fall back, when its prompt's window is removed, so a reader who closed the prompt
+waited out the site's timeout. Now that page is a window of its own, holding one tab, under an id
+unique for the session. `windows` and `tabs`, `tabs.query` included, report it in that window, so
+an extension finds its prompt by address and removes it, as Bitwarden does. When its `WebContents`
+goes, however it went, every extension listening hears `tabs.onRemoved` and then
+`windows.onRemoved`, as in Chrome, and a stopped worker is woken to hear them. `windows.remove` and
+`tabs.remove` close such a page the way its own `window.close()` does, and refuse the browser's
+window and the reader's tabs. The engine cannot see where the application shows the page, so one
+it shows as a tab is still reported as a window of its own
+([omaweb#694](https://github.com/villekivela/omaweb/issues/694)). See
+[omaweb#687](https://github.com/villekivela/omaweb/issues/687). _Part of the tab model the open
+question below is about. Propose it with 0004._
+
 **0024, let a profile go while a message waits for a worker.** A message to an extension's worker
 waits in the worker's task queue until the worker is registered and started for it, and every
 message does, because the start is a round trip even for a running worker. Deleting the profile in
@@ -181,9 +218,7 @@ service up on a destroyed context. Chrome answers from its `ProfileManager`, whi
 before it is destroyed. Now `ProfileQt` keeps the set of profiles whose destruction has not begun
 and leaves it first, and `IsValidContext` answers from that set without following the pointer. It is
 what made 0012's `theReadersAnswerToANotificationReachesTheExtension` crash in about one run in
-fifteen alone and one full-suite run in thirty: its last poll leaves a message waiting. 0022 and
-0023 are held for [omaweb#686](https://github.com/villekivela/omaweb/issues/686) and
-[omaweb#687](https://github.com/villekivela/omaweb/issues/687). See
+fifteen alone and one full-suite run in thirty: its last poll leaves a message waiting. See
 [omaweb#696](https://github.com/villekivela/omaweb/issues/696). _A bug fix with a test. Submit as
 is._
 
@@ -198,7 +233,7 @@ one is active. That is what the QTBUG draft asks for. Ask before writing the API
 
 ## Tests
 
-41 tests pass with the series applied. Six of them fail on a stock build, which is why they are
+58 tests pass with the series applied. Six of them fail on a stock build, which is why they are
 worth having:
 
 - `serviceWorkerLocalization` fails
@@ -217,14 +252,52 @@ Patch 0021's three cases, `aWindowIsWhereTheApplicationSaysItIs`,
 `withoutAnAnswerAWindowIsWhereItsViewIs` and `aProviderCanReplaceItselfWhileItIsAsked`, are in the
 extension tests and do not compile without the patch either. Taking the four numbers out of
 `windows_api.cc` fails the first two, and calling the stored provider rather than a copy fails the
-third. Patch 0024's case, `aProfileMayGoWhileAMessageWaitsForTheWorker`, crashes on every run
-without it: its worker's script runs for a second and a half before the worker can be registered,
-and its content script messages the worker as the page loads, so `cleanup()` deletes the profile
-with the message still waiting behind the registration. With `late_listener_ext`, whose content
-script pings the same way but whose worker script runs at once, the unfixed engine crashed in
-fifteen runs of thirty. Answering true from `IsValidContext` again crashes it, and so does leaving
-the set at the end of `~ProfileQt` rather than at the start. The fix touches only stock Qt code, but
-the case's fixture comes with 0009, so the case does not exist on a stock build.
+third. Patch 0023's cases, `anExtensionIsToldTheWindowItOpenedClosed`,
+`everyWayTheWindowClosesIsReported`, `anExtensionFindsItsWindowByAddressAndClosesIt` and
+`aWindowClosedWhileTheNextPageOpensIsNotAnswered`, fail on the series without it: `windows.create`
+answers with the browser's window, no event arrives, `tabs.query` cannot find the window's tab, and
+`windows.remove` and `tabs.remove` are refused. `aStoppedWorkerIsWokenToHearItsWindowClosed` waits
+for the worker's thirty-second idle stop, and fails when the router does not wake it.
+
+Patch 0022's nine cases restart a profile on the same storage path, disable and enable the
+extension, or load it again changed. They compile on the series without 0022. Five of the first six,
+all but the disabled case, were run there, and each failed, because no store is written. The update
+and restored-tab cases came with the patch's second version and failed on its first, which kept the
+old version's script and let a page load before the kept script was read. The lost-permission case
+came with the third and failed on the second, whose throttle waited for good. With the patch, each
+is red with its part broken:
+
+- `aRegisteredContentScriptIsKeptAcrossARestart` fails without the store
+- `aScriptNotPersistedAcrossSessionsIsGoneAfterARestart` fails when every registered script is
+  made to persist
+- `whatIsKeptFollowsUnregisterAndUpdate` fails when an unregistered script is not written out, and
+  when an update looks up the old persistence where Chromium does
+- `anUninstalledExtensionTakesItsKeptScriptsWithIt` fails without telling the registry
+- `aDisabledExtensionKeepsItsScripts` fails when disabling forgets the scripts as uninstalling does
+- `anOffTheRecordProfileKeepsNoScriptStore` fails when the off-the-record loader accepts an
+  extension
+- `anUpdateForgetsWhatTheOldVersionRegistered` fails when loading an extension does not compare its
+  version with the one whose scripts are kept
+- `aPageOpenedAsTheExtensionIsEnabledRunsItsKeptScripts` fails without the navigation throttle. Its
+  script carries 32 MB of comment, because a small one is read before a page from this machine
+  arrives and the case passes without the throttle; at 8 MB it still passed
+- `aPageDoesNotWaitForScriptsTheExtensionMayNoLongerRun` fails when the throttle waits for kept
+  scripts of an extension without the `scripting` or `userScripts` permission, which the manager
+  never reads
+
+`anOffTheRecordProfileKeepsNoScriptStore` pins the loader's refusal because that is what keeps an
+off-the-record profile off the disk: past it, the extension's pages do not run their scripts, so
+nothing could register. The patch's own check that such a profile gets no store has no case that can
+fail today for the same reason.
+
+Patch 0024's case, `aProfileMayGoWhileAMessageWaitsForTheWorker`, crashes on every run without it:
+its worker's script runs for a second and a half before the worker can be registered, and its
+content script messages the worker as the page loads, so `cleanup()` deletes the profile with the
+message still waiting behind the registration. With `late_listener_ext`, whose content script pings
+the same way but whose worker script runs at once, the unfixed engine crashed in fifteen runs of
+thirty. Answering true from `IsValidContext` again crashes it, and so does leaving the set at the
+end of `~ProfileQt` rather than at the start. The fix touches only stock Qt code, but the case's
+fixture comes with 0009, so the case does not exist on a stock build.
 
 Patch 0018 has no test case, because what it changes is how V8 is compiled. The gate reads that
 instead. `scripts/check-write-barriers.sh` fails a tree whose V8 is compiled with
@@ -242,6 +315,8 @@ stays after 0018 drops, so a later Qt that turns the barriers off again is notic
 | 6.11.2-5, rebuilt for speed | already applied | incremental | 50 of 50 | none |
 | 6.11.2-6, on Qt 6.12, series grown to 20 | 19 already applied, 1 more, no conflicts | incremental | 51 of 51 | minutes: 0020, after the tests did not build |
 | 6.11.2-8, series grown to 21 | 20 already applied, 1 more, no conflicts | incremental | 54 of 54 | none |
+| 6.11.2-9, series grown to 22 | 20 already applied, 2 more, no conflicts | incremental | 63 of 63 | none |
+| 6.11.2-10, series grown to 23 | 21 already applied, 2 more, no conflicts | incremental | 71 of 71 | none |
 
 The rows after the first are the series growing, and the last is the same series rebuilt with each
 architecture's toolchain and published as 6.11.2-5 (omaweb#576), rather than Qt moving. They
