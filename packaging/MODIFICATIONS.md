@@ -9,7 +9,7 @@ this file is for.
 
 ## What changed
 
-Twenty patches, applied in order to the released source. Fourteen add the part of Chromium's
+Twenty-one patches, applied in order to the released source. Fourteen add the part of Chromium's
 extension runtime that QtWebEngine compiles out: renderer bindings, the `tabs`, `windows`,
 `permissions`, `scripting`, `notifications` and `webNavigation` namespaces behind an embedder
 delegate, native messaging, and web accessible resources. Five of those are bug fixes in Qt's own
@@ -20,7 +20,8 @@ on `QWebEngineLoadingInfo`. The eighteenth turns V8's write barriers back on, wh
 build turns off and its 6.140.0 turns on again. The nineteenth is a bug fix in Qt's own code: an
 extension that creates an offscreen document no longer crashes the engine. The twentieth is Qt's
 own change to the engine's tests, so that they build against Qt 6.12; it changes nothing that is
-installed.
+installed. The twenty-first adds one more piece of the extension runtime: the application says
+where the window holding a page is, and the `windows` namespace reports it to an extension.
 
 On x86_64 the engine is built with clang and LLD, with ThinLTO and Chrome's own PGO profile for its
 Chromium, where Qt's build would use GCC. On aarch64 it is built with GCC, as Qt's is.
