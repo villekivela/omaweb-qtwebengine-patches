@@ -181,7 +181,8 @@ goes, however it went, every extension listening hears `tabs.onRemoved` and then
 `windows.onRemoved`, as in Chrome, and a stopped worker is woken to hear them. `windows.remove` and
 `tabs.remove` close such a page the way its own `window.close()` does, and refuse the browser's
 window and the reader's tabs. The engine cannot see where the application shows the page, so one
-it shows as a tab is still reported as a window of its own. 0022 is held for
+it shows as a tab is still reported as a window of its own
+([omaweb#694](https://github.com/villekivela/omaweb/issues/694)). 0022 is held for
 [omaweb#686](https://github.com/villekivela/omaweb/issues/686). See
 [omaweb#687](https://github.com/villekivela/omaweb/issues/687). _Part of the tab model the open
 question below is about. Propose it with 0004._
