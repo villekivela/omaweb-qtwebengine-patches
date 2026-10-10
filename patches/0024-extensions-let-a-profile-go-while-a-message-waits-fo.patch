@@ -1,0 +1,166 @@
+From a2b469d1485bcc747b96822a69b7630f8150ba91 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Ville=20Kivel=C3=A4?= <vkivela@hotmail.com>
+Date: Sat, 10 Oct 2026 18:30:44 +0000
+Subject: [PATCH] extensions: let a profile go while a message waits for a
+ worker
+
+A message to an extension's service worker waits in the worker's task
+queue until the worker is registered and started for it, and every
+message does: the start is a round trip even when the worker is already
+running. Deleting
+the profile in that wait crashed the application on a CHECK.
+
+~ProfileQt destroys the profile's keyed services, and marks the context
+destroyed between shutting them down and deleting them. The task queue
+drops its waiting messages as it is deleted, so each message's port is
+destroyed after the mark. ~ExtensionMessagePort asks the browser client
+whether the context is still valid before reporting to MessageTracker,
+and ExtensionsBrowserClientQt::IsValidContext answered true for any
+pointer, so the port looked MessageTracker up on a destroyed context:
+
+  DependencyManager::AssertContextWasntDestroyed
+  KeyedServiceTemplatedFactory::GetServiceForContext
+  ExtensionMessagePort::~ExtensionMessagePort
+  MessageService::OpenChannelParams::~OpenChannelParams
+  (the task queue's pending tasks, erased)
+
+Chrome answers from ProfileManager::IsValidProfile, which a profile
+leaves before it is destroyed. ProfileQt now keeps the set of profiles
+whose destruction has not begun, and leaves it on the first line of its
+destructor; IsValidContext answers from that set. Callers pass pointers
+that may already be freed, so it compares addresses and follows none.
+Every caller of IsValidContext in the extensions layer uses it to skip
+work for a context that is going, as it does in Chrome.
+
+The notification case, theReadersAnswerToANotificationReachesTheExtension,
+crashed this way in about one run in fifteen alone, and one full-suite
+run in thirty: its last poll sends the worker a message that cleanup()
+can catch still waiting. The new case holds a message there every time:
+its worker's script runs for a second and a half before the worker can
+be registered, and its content script messages the worker meanwhile.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../extensions_browser_client_qt.cpp          |  4 ++--
+ src/core/profile_qt.cpp                       | 20 +++++++++++++++++++
+ src/core/profile_qt.h                         |  4 ++++
+ .../extensions/tst_qwebengineextension.cpp    | 17 ++++++++++++++++
+ 4 files changed, 43 insertions(+), 2 deletions(-)
+
+diff --git a/src/core/extensions/extensions_browser_client_qt.cpp b/src/core/extensions/extensions_browser_client_qt.cpp
+index 6dda1a4882..0df306aef8 100644
+--- a/src/core/extensions/extensions_browser_client_qt.cpp
++++ b/src/core/extensions/extensions_browser_client_qt.cpp
+@@ -529,9 +529,9 @@ bool ExtensionsBrowserClientQt::AreExtensionsDisabled(const base::CommandLine &c
+     return false;
+ }
+ 
+-bool ExtensionsBrowserClientQt::IsValidContext(void *)
++bool ExtensionsBrowserClientQt::IsValidContext(void *context)
+ {
+-    return true;
++    return QtWebEngineCore::ProfileQt::isLive(context);
+ }
+ 
+ bool ExtensionsBrowserClientQt::IsSameContext(BrowserContext *first,
+diff --git a/src/core/profile_qt.cpp b/src/core/profile_qt.cpp
+index 7e715a9131..99caacc8b3 100644
+--- a/src/core/profile_qt.cpp
++++ b/src/core/profile_qt.cpp
+@@ -18,6 +18,8 @@
+ #include "web_engine_library_info.h"
+ 
+ #include "base/base_paths.h"
++#include "base/containers/flat_set.h"
++#include "base/no_destructor.h"
+ #include "base/path_service.h"
+ #include "base/files/file_util.h"
+ #include "base/task/thread_pool.h"
+@@ -47,9 +49,23 @@ enum {
+     PATH_QT_END = 1999
+ };
+ 
++// Every ProfileQt from its construction until its destruction begins. Chrome answers the same
++// question from its ProfileManager, which a profile leaves before it is destroyed.
++static base::flat_set<const void *> &liveProfiles()
++{
++    static base::NoDestructor<base::flat_set<const void *>> profiles;
++    return *profiles;
++}
++
++bool ProfileQt::isLive(const void *context)
++{
++    return liveProfiles().contains(context);
++}
++
+ ProfileQt::ProfileQt(ProfileAdapter *profileAdapter)
+     : m_profileIOData(new ProfileIODataQt(this)), m_profileAdapter(profileAdapter)
+ {
++    liveProfiles().insert(this);
+     profile_metrics::SetBrowserProfileType(this, IsOffTheRecord()
+         ? profile_metrics::BrowserProfileType::kIncognito
+         : profile_metrics::BrowserProfileType::kRegular);
+@@ -73,6 +89,10 @@ ProfileQt::ProfileQt(ProfileAdapter *profileAdapter)
+ ProfileQt::~ProfileQt()
+ {
+     DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
++    // First, so that what the services below drop as they go is told the profile is going and
++    // does not reach back into it: a message still waiting for an extension's worker is dropped
++    // with the worker's task queue, after the services it would report to are gone.
++    liveProfiles().erase(this);
+     m_prefServiceAdapter.commit();
+     BrowserContextDependencyManager::GetInstance()->DestroyBrowserContextServices(this);
+     // Remembering push subscriptions and not persisting notification permissions would
+diff --git a/src/core/profile_qt.h b/src/core/profile_qt.h
+index bc8007a94a..197ed71ea8 100644
+--- a/src/core/profile_qt.h
++++ b/src/core/profile_qt.h
+@@ -28,6 +28,10 @@ public:
+ 
+     virtual ~ProfileQt();
+ 
++    // Whether |context| is a ProfileQt whose destruction has not begun. Callers ask about
++    // pointers that may already be freed, so this compares addresses and follows none.
++    static bool isLive(const void *context);
++
+     base::FilePath GetCachePath() const;
+ 
+     // BrowserContext implementation:
+diff --git a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
+index 1290b685fb..499f34914f 100644
+--- a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
++++ b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
+@@ -58,6 +58,7 @@ private Q_SLOTS:
+     void anExtensionNotificationReachesTheProfilesPresenter();
+     void anExtensionKeepsTrackOfTheNotificationsItIsShowing();
+     void theReadersAnswerToANotificationReachesTheExtension();
++    void aProfileMayGoWhileAMessageWaitsForTheWorker();
+     void everyFunctionTheNamespaceDeclaresCanBeCalled();
+     void aPageCanLoadAWebAccessibleResource();
+     void aResourceWithADynamicUrlIsReachableOnlyUnderIt();
+@@ -937,6 +938,22 @@ void tst_QWebEngineExtension::anOffscreenDocumentCanBeCreated()
+     QTRY_COMPARE(m_page->title(), "offscreen ready"_L1);
+ }
+ 
++void tst_QWebEngineExtension::aProfileMayGoWhileAMessageWaitsForTheWorker()
++{
++    // A message to an extension's worker waits in a queue until the worker is registered and
++    // started for it. A profile deleted in that wait has to drop the message rather than crash on
++    // it. This fixture's worker script runs for a while before the worker can be registered, and
++    // its content script messages the worker as the page loads, so cleanup() deletes the profile
++    // with the message still waiting.
++    QWebEngineExtensionInfo extension = loadExtensionSync(resourcesPath() + "slow_worker_ext"_L1);
++    QVERIFY2(extension.isLoaded(), qPrintable(extension.error()));
++    m_manager->setExtensionEnabled(extension, true);
++
++    QSignalSpy loadSpy(m_page, SIGNAL(loadFinished(bool)));
++    m_page->load(QUrl("qrc:///resources/index.html"));
++    QTRY_COMPARE(loadSpy.size(), 1);
++}
++
+ void tst_QWebEngineExtension::enableAfterStoragePathChange()
+ {
+     // Changing the storage path after construction rebuilds the profile's PrefService. The
+-- 
+2.55.0
+

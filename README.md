@@ -1,17 +1,18 @@
 # QtWebEngine extension patches
 
-Twenty-three patches to QtWebEngine. Sixteen let it host a password manager's Chromium extension,
+Twenty-four patches to QtWebEngine. Sixteen let it host a password manager's Chromium extension,
 two add API that Omaweb's content blocking and certificate view ask for, one restores a trace macro
 that slowed every page, one turns V8's write barriers back on, one keeps an offscreen document from
-crashing the engine, one builds the tests against Qt 6.12, and one keeps the content scripts any
-extension registers across a restart. Base is the released `qtwebengine-everywhere-src-6.11.2`
+crashing the engine, one builds the tests against Qt 6.12, one keeps the content scripts any
+extension registers across a restart, and one keeps a profile from crashing as it is deleted with an
+extension's message still waiting. Base is the released `qtwebengine-everywhere-src-6.11.2`
 tarball.
 
 Built for [omaweb#344](https://github.com/villekivela/omaweb/issues/344), which asks whether Omaweb
 can host Bitwarden and 1Password. The findings live in `docs/research/password-manager-extensions.md`
 in that repository.
 
-Seven of the twenty-three are ordinary bug fixes headed for Gerrit, and 0018 and 0020 are Qt's own
+Eight of the twenty-four are ordinary bug fixes headed for Gerrit, and 0018 and 0020 are Qt's own
 changes. The rest wait on one question to Qt, in `upstream/QTBUG-draft.md`. If Qt takes the work,
 this repository is deleted rather than maintained.
 
@@ -207,6 +208,20 @@ it shows as a tab is still reported as a window of its own
 [omaweb#687](https://github.com/villekivela/omaweb/issues/687). _Part of the tab model the open
 question below is about. Propose it with 0004._
 
+**0024, let a profile go while a message waits for a worker.** A message to an extension's worker
+waits in the worker's task queue until the worker is registered and started for it, and every
+message does, because the start is a round trip even for a running worker. Deleting the profile in
+that wait crashed the application on a `CHECK`: the queue drops its messages as the profile's
+services are deleted, and each message's port then asked `ExtensionsBrowserClientQt::IsValidContext`
+whether to report to `MessageTracker`. That answered true for any pointer, so the port looked a
+service up on a destroyed context. Chrome answers from its `ProfileManager`, which a profile leaves
+before it is destroyed. Now `ProfileQt` keeps the set of profiles whose destruction has not begun
+and leaves it first, and `IsValidContext` answers from that set without following the pointer. It is
+what made 0012's `theReadersAnswerToANotificationReachesTheExtension` crash in about one run in
+fifteen alone and one full-suite run in thirty: its last poll leaves a message waiting. See
+[omaweb#696](https://github.com/villekivela/omaweb/issues/696). _A bug fix with a test. Submit as
+is._
+
 ## The open question
 
 `TabsDelegateQt` is internal, and `ExtensionsBrowserClientQt` fills it by treating every page of the
@@ -218,7 +233,7 @@ one is active. That is what the QTBUG draft asks for. Ask before writing the API
 
 ## Tests
 
-57 tests pass with the series applied. Six of them fail on a stock build, which is why they are
+58 tests pass with the series applied. Six of them fail on a stock build, which is why they are
 worth having:
 
 - `serviceWorkerLocalization` fails
@@ -229,10 +244,10 @@ worth having:
 - `anOffscreenDocumentCanBeCreated` crashes, signal 11
 
 Patch 0016's eight cases live in Qt's own `tst_qwebengineurlrequestinterceptor`, and the gate runs
-only those, beside the extension tests. Patch 0017's case lives in Qt's `tst_certificateerror`, which
-has the test server's certificate, and the gate runs it the same way. `scripts/verify.sh` runs all
-three and reports them. Neither compiles against a stock build, which has no API for them to call,
-so there is no stock run to compare: removing the line that keeps the chain fails 0017's case.
+only those, beside the extension tests. Patch 0017's case lives in Qt's `tst_certificateerror`,
+which has the test server's certificate, and the gate runs it the same way. `scripts/verify.sh` runs
+all three and reports them. Neither compiles against a stock build, which has no API for them to
+call, so there is no stock run to compare: removing the line that keeps the chain fails 0017's case.
 Patch 0021's three cases, `aWindowIsWhereTheApplicationSaysItIs`,
 `withoutAnAnswerAWindowIsWhereItsViewIs` and `aProviderCanReplaceItselfWhileItIsAsked`, are in the
 extension tests and do not compile without the patch either. Taking the four numbers out of
@@ -275,6 +290,15 @@ off-the-record profile off the disk: past it, the extension's pages do not run t
 nothing could register. The patch's own check that such a profile gets no store has no case that can
 fail today for the same reason.
 
+Patch 0024's case, `aProfileMayGoWhileAMessageWaitsForTheWorker`, crashes on every run without it:
+its worker's script runs for a second and a half before the worker can be registered, and its
+content script messages the worker as the page loads, so `cleanup()` deletes the profile with the
+message still waiting behind the registration. With `late_listener_ext`, whose content script pings
+the same way but whose worker script runs at once, the unfixed engine crashed in fifteen runs of
+thirty. Answering true from `IsValidContext` again crashes it, and so does leaving the set at the
+end of `~ProfileQt` rather than at the start. The fix touches only stock Qt code, but the case's
+fixture comes with 0009, so the case does not exist on a stock build.
+
 Patch 0018 has no test case, because what it changes is how V8 is compiled. The gate reads that
 instead. `scripts/check-write-barriers.sh` fails a tree whose V8 is compiled with
 `-DV8_DISABLE_WRITE_BARRIERS`, as 6.11.2 is without the patch, and names the ninja file it read. It
@@ -293,6 +317,7 @@ stays after 0018 drops, so a later Qt that turns the barriers off again is notic
 | 6.11.2-8, series grown to 21 | 20 already applied, 1 more, no conflicts | incremental | 54 of 54 | none |
 | 6.11.2-9, series grown to 22 | 20 already applied, 2 more, no conflicts | incremental | 63 of 63 | none |
 | 6.11.2-10, series grown to 23 | 21 already applied, 2 more, no conflicts | incremental | 71 of 71 | none |
+| 6.11.2-11, series grown to 24 | 21 already applied, 3 more, no conflicts | incremental | 72 of 72 | none |
 
 The rows after the first are the series growing, and the last is the same series rebuilt with each
 architecture's toolchain and published as 6.11.2-5 (omaweb#576), rather than Qt moving. They
