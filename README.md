@@ -1,6 +1,6 @@
 # QtWebEngine extension patches
 
-Twenty-one patches to QtWebEngine. Fifteen let it host a password manager's Chromium extension, two
+Twenty-two patches to QtWebEngine. Sixteen let it host a password manager's Chromium extension, two
 add API that Omaweb's content blocking and certificate view ask for, one restores a trace macro that
 slowed every page, one turns V8's write barriers back on, one keeps an offscreen document from
 crashing the engine, and one builds the tests against Qt 6.12. Base is the released
@@ -10,7 +10,7 @@ Built for [omaweb#344](https://github.com/villekivela/omaweb/issues/344), which 
 can host Bitwarden and 1Password. The findings live in `docs/research/password-manager-extensions.md`
 in that repository.
 
-Seven of the twenty-one are ordinary bug fixes headed for Gerrit, and 0018 and 0020 are Qt's own
+Seven of the twenty-two are ordinary bug fixes headed for Gerrit, and 0018 and 0020 are Qt's own
 changes. The rest wait on one question to Qt, in `upstream/QTBUG-draft.md`. If Qt takes the work,
 this repository is deleted rather than maintained.
 
@@ -170,6 +170,20 @@ a provider the window is at `0, 0` with the size of the asking view. See
 [omaweb#684](https://github.com/villekivela/omaweb/issues/684) and ADR 0064. _Part of the tab model
 the open question below is about. Propose it with 0004._
 
+**0023, tell an extension the window it opened closed.** `windows.create` answered with the one id
+every window call reports, so the page an extension opened had no id of its own, and the series
+raised none of the `tabs` and `windows` events it declares. Bitwarden ends a passkey request, and
+lets the site fall back, when its prompt's window is removed, so a reader who closed the prompt
+waited out the site's timeout. Now that page is a window of its own, holding one tab, under an id
+unique for the session, and `windows.get`, `getCurrent` from the page itself and `getAll` answer
+for it while it is open. When its `WebContents` goes, however it went, every extension listening
+hears `tabs.onRemoved` and then `windows.onRemoved`, as in Chrome. `windows.remove` and
+`tabs.remove` close such a page the way its own `window.close()` does, and refuse the browser's
+window and the reader's tabs. 0022 is held for
+[omaweb#686](https://github.com/villekivela/omaweb/issues/686). See
+[omaweb#687](https://github.com/villekivela/omaweb/issues/687). _Part of the tab model the open
+question below is about. Propose it with 0004._
+
 ## The open question
 
 `TabsDelegateQt` is internal, and `ExtensionsBrowserClientQt` fills it by treating every page of the
@@ -181,7 +195,7 @@ one is active. That is what the QTBUG draft asks for. Ask before writing the API
 
 ## Tests
 
-40 tests pass with the series applied. Six of them fail on a stock build, which is why they are
+44 tests pass with the series applied. Six of them fail on a stock build, which is why they are
 worth having:
 
 - `serviceWorkerLocalization` fails
@@ -200,7 +214,9 @@ Patch 0021's three cases, `aWindowIsWhereTheApplicationSaysItIs`,
 `withoutAnAnswerAWindowIsWhereItsViewIs` and `aProviderCanReplaceItselfWhileItIsAsked`, are in the
 extension tests and do not compile without the patch either. Taking the four numbers out of
 `windows_api.cc` fails the first two, and calling the stored provider rather than a copy fails the
-third.
+third. Patch 0023's two, `anExtensionIsToldTheWindowItOpenedClosed` and
+`everyWayTheWindowClosesIsReported`, fail on the series without it: `windows.create` answers with
+the browser's window, no event arrives, and `windows.remove` and `tabs.remove` are refused.
 
 Patch 0018 has no test case, because what it changes is how V8 is compiled. The gate reads that
 instead. `scripts/check-write-barriers.sh` fails a tree whose V8 is compiled with
