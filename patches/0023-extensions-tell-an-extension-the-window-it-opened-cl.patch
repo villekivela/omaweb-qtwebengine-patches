@@ -1,61 +1,75 @@
-From f25f2427470de02b3d85cf91810bef28c44c39b3 Mon Sep 17 00:00:00 2001
+From eea07eeb9cac0593f4fc14303d0e32ba73de848b Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivel=C3=A4?= <vkivela@hotmail.com>
 Date: Sat, 10 Oct 2026 13:44:21 +0000
 Subject: [PATCH] extensions: tell an extension the window it opened closed
 
 windows.create answered with the one id every window call reports, so
-the page an extension opened had no id of its own, and the series raised
-none of the tabs and windows events it declares. Bitwarden ends a
-passkey request, and lets the site fall back, when its prompt's window
-is removed. A reader who closed the prompt waited out the site's timeout
-instead.
+the page an extension opened had no id of its own, and the series
+raised none of the tabs and windows events it declares. Bitwarden ends
+a passkey request, and lets the site fall back, when its prompt's
+window is removed. A reader who closed the prompt waited out the
+site's timeout instead.
 
 A page an extension opens with windows.create is now a window of its
 own, holding that one tab, under an id no other window of the session
-has. windows.create answers with it, and windows.get, getCurrent from
-the page itself, and getAll answer for it while the page is open, with
-the type the extension asked for. After the page closes, windows.get
-fails with "No window with id".
+has. windows.create answers with it. windows.get answers for it while
+the page is open, and fails with "No window with id" after. getAll
+lists it after the browser's window, and it carries the type the
+extension asked for. Asked from inside the page, getCurrent,
+getLastFocused, tabs.getCurrent, and tabs.query with currentWindow or
+lastFocusedWindow all answer that window. The engine does not know
+which window the reader last focused, so the last focused window is
+the one the call came from, as the current window is.
+
+tabs.query reports every window's tabs under their own window id,
+extension pages in a window of their own included, so an extension
+finds its prompt by address and removes it, as Bitwarden does. The
+browser's window lists its tabs less those pages, and its active tab
+is never one of them.
 
 When the page's WebContents goes, however it went, every extension
 listening hears tabs.onRemoved for its tab, with isWindowClosing set,
 and then windows.onRemoved for the window, as Chrome raises them. A
-listener that filters by window type hears about the window only if it
-asked for the window's type, and hears it once. The page can close
-because the application deleted it, because it called window.close(), or
-because the extension called windows.remove or tabs.remove, which now
-ask the page to close the way window.close() does.
+stopped worker is woken to hear them. A listener that filters by
+window type hears about the window only if it asked for that type,
+and hears it once. The page can close because the application deleted
+it, because it called window.close(), or because the extension called
+windows.remove or tabs.remove, which ask the page to close the way
+window.close() does.
 
-windows.remove refuses the browser's own window, and tabs.remove refuses
-a tab that is not a window of its own. The reader's tabs and the
-browser's window stay the application's to close, and no other tabs or
-windows event is raised.
+windows.remove refuses the browser's own window, and tabs.remove
+refuses a tab that is not a window of its own. The reader's tabs and
+the browser's window stay the application's to close, and no other
+tabs or windows event is raised.
 
-OpenPage now notices an application that lets the page go while it is
-handed over, rather than loading into a page that is gone.
+windows.create registers its first page as soon as it opens and holds
+it weakly, because opening a further page runs the application, which
+may close the first; the call then fails rather than answering with a
+page that is gone. OpenPage likewise notices an application that lets
+the page go while it is handed over.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
- .../browser/extensions/api/tabs/tabs_api.cc   |  28 +++
+ .../browser/extensions/api/tabs/tabs_api.cc   | 119 +++--
  .../browser/extensions/api/tabs/tabs_api.h    |   6 +
- .../extensions/api/windows/windows_api.cc     | 100 ++++++--
+ .../extensions/api/windows/windows_api.cc     | 109 ++++-
  .../extensions/api/windows/windows_api.h      |   9 +-
- .../browser/extensions/tab_registry_qt.cc     | 163 ++++++++++++-
- .../browser/extensions/tab_registry_qt.h      |  34 ++-
+ .../browser/extensions/tab_registry_qt.cc     | 188 +++++++-
+ .../browser/extensions/tab_registry_qt.h      |  41 +-
  .../common/extensions/api/tabs.json           |   3 +-
  .../common/extensions/api/windows.json        |   3 +-
  src/core/extensions/extension_system_qt.cpp   |   6 +-
- .../extensions_browser_client_qt.cpp          |   7 +-
+ .../extensions_browser_client_qt.cpp          |  11 +-
  .../resources/window_closing_ext/blank.html   |   2 +
  .../resources/window_closing_ext/control.html |   6 +
  .../resources/window_closing_ext/control.js   |  10 +
  .../window_closing_ext/manifest.json          |   9 +
- .../window_closing_ext/service_worker.js      |  20 ++
+ .../window_closing_ext/service_worker.js      |  25 +
  .../window_watcher_ext/manifest.json          |   6 +
  .../resources/window_watcher_ext/watch.html   |   6 +
- .../resources/window_watcher_ext/watch.js     |  22 ++
- .../extensions/tst_qwebengineextension.cpp    | 222 ++++++++++++++++++
- 19 files changed, 623 insertions(+), 39 deletions(-)
+ .../resources/window_watcher_ext/watch.js     |  22 +
+ .../extensions/tst_qwebengineextension.cpp    | 448 ++++++++++++++++++
+ 19 files changed, 947 insertions(+), 82 deletions(-)
  create mode 100644 tests/auto/widgets/extensions/resources/window_closing_ext/blank.html
  create mode 100644 tests/auto/widgets/extensions/resources/window_closing_ext/control.html
  create mode 100644 tests/auto/widgets/extensions/resources/window_closing_ext/control.js
@@ -66,10 +80,21 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  create mode 100644 tests/auto/widgets/extensions/resources/window_watcher_ext/watch.js
 
 diff --git a/src/3rdparty/chromium/qtwebengine/browser/extensions/api/tabs/tabs_api.cc b/src/3rdparty/chromium/qtwebengine/browser/extensions/api/tabs/tabs_api.cc
-index bb52d21705..ef83536d25 100644
+index bb52d21705..a83648fbd7 100644
 --- a/src/3rdparty/chromium/qtwebengine/browser/extensions/api/tabs/tabs_api.cc
 +++ b/src/3rdparty/chromium/qtwebengine/browser/extensions/api/tabs/tabs_api.cc
-@@ -162,6 +162,34 @@ ExtensionFunction::ResponseAction TabsGetCurrentFunction::Run() {
+@@ -155,6 +155,10 @@ ExtensionFunction::ResponseAction TabsGetCurrentFunction::Run() {
+   if (!contents)
+     return RespondNow(NoArguments());
+   contents = guest_view::GuestViewBase::GetTopLevelWebContents(contents);
++  // A page an extension opened is the one tab of its window, as a popup window's page is in
++  // Chrome.
++  if (TabRegistryQt::Get()->IsWindowOfItsOwn(contents))
++    return RespondNow(WithArguments(TabRegistryQt::Get()->CreateTabValue(contents)));
+   for (content::WebContents* tab : TabRegistryQt::Get()->GetTabs(browser_context())) {
+     if (tab == contents)
+       return RespondNow(WithArguments(TabRegistryQt::Get()->CreateTabValue(contents)));
+@@ -162,16 +166,51 @@ ExtensionFunction::ResponseAction TabsGetCurrentFunction::Run() {
    return RespondNow(NoArguments());
  }
  
@@ -104,6 +129,113 @@ index bb52d21705..ef83536d25 100644
  ExtensionFunction::ResponseAction TabsQueryFunction::Run() {
    std::optional<tabs::Query::Params> params = tabs::Query::Params::Create(args());
    EXTENSION_FUNCTION_VALIDATE(params);
+   const tabs::Query::Params::QueryInfo& query = params->query_info;
+ 
+-  // Every tab of the context lives in the one window, so currentWindow, lastFocusedWindow and
+-  // windowId all select it or nothing.
+-  if (query.window_id && *query.window_id != TabRegistryQt::kWindowId &&
+-      *query.window_id != -2 /* WINDOW_ID_CURRENT */) {
+-    return RespondNow(WithArguments(base::Value::List()));
++  TabRegistryQt* registry = TabRegistryQt::Get();
++  // The window the call came from: a window of its own for a page an extension opened, and the
++  // browser's for any other page or for a worker. The engine does not know which window the
++  // reader last focused, so lastFocusedWindow is the same window, as windows.getLastFocused is.
++  content::WebContents* sender = GetSenderWebContents();
++  const int current_window =
++      sender ? registry->GetWindowId(guest_view::GuestViewBase::GetTopLevelWebContents(sender))
++             : TabRegistryQt::kWindowId;
++  std::optional<int> only_window;
++  if (query.window_id) {
++    only_window =
++        *query.window_id == -2 /* WINDOW_ID_CURRENT */ ? current_window : *query.window_id;
+   }
+ 
+   std::vector<URLPattern> url_patterns;
+@@ -189,45 +228,53 @@ ExtensionFunction::ResponseAction TabsQueryFunction::Run() {
+     }
+   }
+ 
+-  TabRegistryQt* registry = TabRegistryQt::Get();
+   content::WebContents* active_tab = registry->GetActiveTab(browser_context());
+   base::Value::List result;
+-  int index = -1;
+-  for (content::WebContents* tab : registry->GetTabs(browser_context())) {
+-    ++index;
+-    const bool active = tab == active_tab;
+-    if (query.active && *query.active != active)
+-      continue;
+-    if (query.highlighted && *query.highlighted != active)
+-      continue;
+-    if (query.pinned && *query.pinned)
+-      continue;
+-    if (query.audible && *query.audible != tab->IsCurrentlyAudible())
++  for (int window_id : registry->GetWindowIds(browser_context())) {
++    if (only_window && *only_window != window_id)
+       continue;
+-    if (query.discarded && *query.discarded)
++    if (query.current_window && *query.current_window != (window_id == current_window))
+       continue;
+-    if (query.frozen && *query.frozen)
++    if (query.last_focused_window && *query.last_focused_window != (window_id == current_window))
+       continue;
+-    if (query.index && *query.index != index)
+-      continue;
+-    if (query.status != tabs::TabStatus::kNone) {
+-      const bool loading = tab->IsLoading();
+-      if ((query.status == tabs::TabStatus::kLoading) != loading)
++    int index = -1;
++    for (content::WebContents* tab : registry->GetTabsInWindow(browser_context(), window_id)) {
++      ++index;
++      // A window of its own holds one tab, and it is that window's active tab.
++      const bool active = window_id != TabRegistryQt::kWindowId || tab == active_tab;
++      if (query.active && *query.active != active)
+         continue;
+-    }
+-    if (query.title &&
+-        !base::MatchPattern(base::UTF16ToUTF8(tab->GetTitle()), *query.title)) {
+-      continue;
+-    }
+-    if (!url_patterns.empty()) {
+-      const GURL& url = tab->GetLastCommittedURL();
+-      bool matched = false;
+-      for (const URLPattern& pattern : url_patterns)
+-        matched = matched || pattern.MatchesURL(url);
+-      if (!matched)
++      if (query.highlighted && *query.highlighted != active)
++        continue;
++      if (query.pinned && *query.pinned)
++        continue;
++      if (query.audible && *query.audible != tab->IsCurrentlyAudible())
++        continue;
++      if (query.discarded && *query.discarded)
++        continue;
++      if (query.frozen && *query.frozen)
++        continue;
++      if (query.index && *query.index != index)
++        continue;
++      if (query.status != tabs::TabStatus::kNone) {
++        const bool loading = tab->IsLoading();
++        if ((query.status == tabs::TabStatus::kLoading) != loading)
++          continue;
++      }
++      if (query.title &&
++          !base::MatchPattern(base::UTF16ToUTF8(tab->GetTitle()), *query.title)) {
+         continue;
++      }
++      if (!url_patterns.empty()) {
++        const GURL& url = tab->GetLastCommittedURL();
++        bool matched = false;
++        for (const URLPattern& pattern : url_patterns)
++          matched = matched || pattern.MatchesURL(url);
++        if (!matched)
++          continue;
++      }
++      result.Append(registry->CreateTabValue(tab));
+     }
+-    result.Append(registry->CreateTabValue(tab));
+   }
+   return RespondNow(WithArguments(std::move(result)));
+ }
 diff --git a/src/3rdparty/chromium/qtwebengine/browser/extensions/api/tabs/tabs_api.h b/src/3rdparty/chromium/qtwebengine/browser/extensions/api/tabs/tabs_api.h
 index 48fef788ad..f729e9f129 100644
 --- a/src/3rdparty/chromium/qtwebengine/browser/extensions/api/tabs/tabs_api.h
@@ -122,7 +254,7 @@ index 48fef788ad..f729e9f129 100644
   public:
    TabsUpdateFunction();
 diff --git a/src/3rdparty/chromium/qtwebengine/browser/extensions/api/windows/windows_api.cc b/src/3rdparty/chromium/qtwebengine/browser/extensions/api/windows/windows_api.cc
-index 04edbc61a9..ba6b432285 100644
+index 04edbc61a9..8f58ecc32c 100644
 --- a/src/3rdparty/chromium/qtwebengine/browser/extensions/api/windows/windows_api.cc
 +++ b/src/3rdparty/chromium/qtwebengine/browser/extensions/api/windows/windows_api.cc
 @@ -20,19 +20,26 @@ namespace {
@@ -160,7 +292,7 @@ index 04edbc61a9..ba6b432285 100644
    window.left = bounds.x();
    window.top = bounds.y();
    window.width = bounds.width();
-@@ -41,13 +48,22 @@ windows::Window DescribeWindow(content::BrowserContext* context, content::WebCon
+@@ -41,13 +48,15 @@ windows::Window DescribeWindow(content::BrowserContext* context, content::WebCon
  }
  
  base::Value::Dict CreateWindowValue(content::BrowserContext* context,
@@ -174,46 +306,56 @@ index 04edbc61a9..ba6b432285 100644
      std::vector<api::tabs::Tab> tabs;
 -    for (content::WebContents* tab : TabRegistryQt::Get()->GetTabs(context))
 -      tabs.push_back(TabRegistryQt::Get()->CreateTab(tab));
-+    if (holding && registry->IsWindowOfItsOwn(holding)) {
-+      tabs.push_back(registry->CreateTab(holding));
-+    } else {
-+      // The browser's window holds every tab but the pages that are windows of their own.
-+      for (content::WebContents* tab : registry->GetTabs(context)) {
-+        if (!registry->IsWindowOfItsOwn(tab))
-+          tabs.push_back(registry->CreateTab(tab));
-+      }
-+    }
++    for (content::WebContents* tab : registry->GetTabsInWindow(context, *window.id))
++      tabs.push_back(registry->CreateTab(tab));
      window.tabs = std::move(tabs);
    }
    return window.ToValue();
-@@ -77,6 +93,11 @@ ExtensionFunction::ResponseAction WindowsCreateFunction::Run() {
+@@ -77,7 +86,14 @@ ExtensionFunction::ResponseAction WindowsCreateFunction::Run() {
    if (urls.empty())
      urls.push_back(url::kAboutBlankURL);
  
+-  content::WebContents* opened = nullptr;
 +  const windows::WindowType type =
 +      params->create_data && params->create_data->type == windows::CreateType::kPopup
 +          ? windows::WindowType::kPopup
 +          : windows::WindowType::kNormal;
 +
-   content::WebContents* opened = nullptr;
++  // Held weakly: opening each further page runs the application, which may close this one.
++  base::WeakPtr<content::WebContents> opened;
++  bool first = true;
    for (const std::string& candidate : urls) {
      GURL url = GURL(candidate);
-@@ -94,8 +115,12 @@ ExtensionFunction::ResponseAction WindowsCreateFunction::Run() {
-       opened = contents;
+     if (!url.is_valid() && extension())
+@@ -90,14 +106,22 @@ ExtensionFunction::ResponseAction WindowsCreateFunction::Run() {
+         TabRegistryQt::Get()->OpenPage(browser_context(), url, true);
+     if (!contents)
+       return RespondNow(Error("The application did not open a window."));
+-    if (!opened)
+-      opened = contents;
++    // The first page is a window of its own from the moment it opens, so the extension is told
++    // when it closes, even before this call answers. Any further page is opened as the
++    // application chose, as before.
++    if (first) {
++      first = false;
++      opened = contents->GetWeakPtr();
++      TabRegistryQt::Get()->OpenWindow(contents, type);
++    }
    }
++  if (!opened)
++    return RespondNow(Error("The application closed the window it opened."));
  
 -  // The window the new page went to, which is the application's to say.
 -  windows::Window window = DescribeWindow(browser_context(), opened);
-+  // The first page is a window of its own, so the extension can be told when it closes. Any
-+  // further page is opened as the application chose, as before.
-+  TabRegistryQt::Get()->OpenWindow(opened, type);
-+
 +  // Where the new page went is the application's to say.
-+  windows::Window window = DescribeWindow(browser_context(), opened, opened);
++  windows::Window window = DescribeWindow(browser_context(), opened.get(), opened.get());
    std::vector<api::tabs::Tab> tabs;
-   tabs.push_back(TabRegistryQt::Get()->CreateTab(opened));
+-  tabs.push_back(TabRegistryQt::Get()->CreateTab(opened));
++  tabs.push_back(TabRegistryQt::Get()->CreateTab(opened.get()));
    window.tabs = std::move(tabs);
-@@ -105,35 +130,66 @@ ExtensionFunction::ResponseAction WindowsCreateFunction::Run() {
+   return RespondNow(WithArguments(window.ToValue()));
+ }
+@@ -105,35 +129,68 @@ ExtensionFunction::ResponseAction WindowsCreateFunction::Run() {
  ExtensionFunction::ResponseAction WindowsGetFunction::Run() {
    std::optional<windows::Get::Params> params = windows::Get::Params::Create(args());
    EXTENSION_FUNCTION_VALIDATE(params);
@@ -251,7 +393,9 @@ index 04edbc61a9..ba6b432285 100644
    EXTENSION_FUNCTION_VALIDATE(params);
 -  return RespondNow(WithArguments(
 -      CreateWindowValue(browser_context(), GetSenderWebContents(), params->query_options)));
-+  return RespondNow(WithArguments(CreateWindowValue(browser_context(), nullptr,
++  // The engine does not know which window the reader last focused, so it answers the window the
++  // call came from, as getCurrent does, rather than one getCurrent would contradict.
++  return RespondNow(WithArguments(CreateWindowValue(browser_context(), GetSenderWebContents(),
 +                                                    GetSenderWebContents(),
 +                                                    params->query_options)));
  }
@@ -317,7 +461,7 @@ index 2d61fcf489..2c7aa0094e 100644
  
  #endif  // QTWEBENGINE_BROWSER_EXTENSIONS_API_WINDOWS_API_H_
 diff --git a/src/3rdparty/chromium/qtwebengine/browser/extensions/tab_registry_qt.cc b/src/3rdparty/chromium/qtwebengine/browser/extensions/tab_registry_qt.cc
-index fd1c428e9a..17587126e4 100644
+index fd1c428e9a..923c4e6504 100644
 --- a/src/3rdparty/chromium/qtwebengine/browser/extensions/tab_registry_qt.cc
 +++ b/src/3rdparty/chromium/qtwebengine/browser/extensions/tab_registry_qt.cc
 @@ -3,13 +3,18 @@
@@ -426,7 +570,7 @@ index fd1c428e9a..17587126e4 100644
  }
  
  content::WebContents* TabRegistryQt::GetWebContents(content::BrowserContext* context,
-@@ -84,9 +152,89 @@ content::WebContents* TabRegistryQt::GetWebContents(content::BrowserContext* con
+@@ -84,13 +152,116 @@ content::WebContents* TabRegistryQt::GetWebContents(content::BrowserContext* con
      if (GetTabId(tab) == tab_id)
        return tab;
    }
@@ -516,28 +660,61 @@ index fd1c428e9a..17587126e4 100644
  std::vector<content::WebContents*> TabRegistryQt::GetTabs(content::BrowserContext* context) {
    if (!delegate_)
      return {};
-@@ -129,12 +277,17 @@ api::tabs::Tab TabRegistryQt::CreateTab(content::WebContents* web_contents) {
+-  return delegate_->GetTabs(context);
++  // A web page an extension opened is one of the application's pages too, so the delegate lists
++  // it, but it is in a window of its own.
++  std::vector<content::WebContents*> tabs = delegate_->GetTabs(context);
++  std::erase_if(tabs, [this](content::WebContents* tab) { return IsWindowOfItsOwn(tab); });
++  return tabs;
++}
++
++std::vector<int> TabRegistryQt::GetWindowIds(content::BrowserContext* context) const {
++  std::vector<int> ids = {kWindowId};
++  for (const auto& [window_id, window] : windows_) {
++    if (window->context() == context)
++      ids.push_back(window_id);
++  }
++  return ids;
++}
++
++std::vector<content::WebContents*> TabRegistryQt::GetTabsInWindow(
++    content::BrowserContext* context,
++    int window_id) {
++  if (window_id == kWindowId)
++    return GetTabs(context);
++  if (content::WebContents* page = GetWindowContents(context, window_id))
++    return {page};
++  return {};
+ }
+ 
+ content::WebContents* TabRegistryQt::GetActiveTab(content::BrowserContext* context) {
+@@ -123,18 +294,21 @@ ScriptExecutor* TabRegistryQt::GetScriptExecutor(content::WebContents* web_conte
+ api::tabs::Tab TabRegistryQt::CreateTab(content::WebContents* web_contents) {
+   api::tabs::Tab tab;
+   content::BrowserContext* context = web_contents->GetBrowserContext();
+-  std::vector<content::WebContents*> tabs = GetTabs(context);
++  const int window_id = GetWindowId(web_contents);
++  std::vector<content::WebContents*> tabs = GetTabsInWindow(context, window_id);
+   int index = -1;
+   for (size_t i = 0; i < tabs.size(); ++i) {
      if (tabs[i] == web_contents)
        index = static_cast<int>(i);
    }
 -  const bool active = GetActiveTab(context) == web_contents;
-+  bool active = GetActiveTab(context) == web_contents;
 +  // The one tab of a window of its own is that window's active tab.
-+  if (IsWindowOfItsOwn(web_contents)) {
-+    index = 0;
-+    active = true;
-+  }
++  const bool active =
++      window_id != kWindowId || GetActiveTab(context) == web_contents;
  
    tab.id = GetTabId(web_contents);
    tab.index = index;
    tab.group_id = -1;
 -  tab.window_id = kWindowId;
-+  tab.window_id = GetWindowId(web_contents);
++  tab.window_id = window_id;
    tab.selected = active;
    tab.highlighted = active;
    tab.active = active;
 diff --git a/src/3rdparty/chromium/qtwebengine/browser/extensions/tab_registry_qt.h b/src/3rdparty/chromium/qtwebengine/browser/extensions/tab_registry_qt.h
-index 4dbcb5b531..c985441bfb 100644
+index 4dbcb5b531..7bf421f6bd 100644
 --- a/src/3rdparty/chromium/qtwebengine/browser/extensions/tab_registry_qt.h
 +++ b/src/3rdparty/chromium/qtwebengine/browser/extensions/tab_registry_qt.h
 @@ -4,11 +4,15 @@
@@ -556,7 +733,7 @@ index 4dbcb5b531..c985441bfb 100644
  
  class GURL;
  
-@@ -56,10 +60,26 @@ class TabRegistryQt {
+@@ -56,11 +60,34 @@ class TabRegistryQt {
  
    // The id of |web_contents|, assigned on first sight. Never -1 for a live WebContents.
    int GetTabId(content::WebContents* web_contents);
@@ -580,10 +757,18 @@ index 4dbcb5b531..c985441bfb 100644
 +  // Drops the windows of |context| without telling anyone, because it is going away.
 +  void ForgetContext(content::BrowserContext* context);
 +
++  // The tabs of the browser's window, in tab order: the delegate's tabs, less the pages that are
++  // windows of their own.
    std::vector<content::WebContents*> GetTabs(content::BrowserContext* context);
++  // The browser's window, then every window of its own of |context|, oldest first.
++  std::vector<int> GetWindowIds(content::BrowserContext* context) const;
++  // The tabs of the window |window_id| of |context|, in tab order, or none for a window it lacks.
++  std::vector<content::WebContents*> GetTabsInWindow(content::BrowserContext* context,
++                                                     int window_id);
    content::WebContents* GetActiveTab(content::BrowserContext* context);
    content::WebContents* OpenPage(content::BrowserContext* context, const GURL& url, bool active);
-@@ -74,13 +94,23 @@ class TabRegistryQt {
+   gfx::Rect GetWindowBounds(content::BrowserContext* context, content::WebContents* web_contents);
+@@ -74,13 +101,23 @@ class TabRegistryQt {
    api::tabs::Tab CreateTab(content::WebContents* web_contents);
    base::Value::Dict CreateTabValue(content::WebContents* web_contents);
  
@@ -664,10 +849,22 @@ index 14187f2a87..6de75b4999 100644
      if (content_verifier_.get())
          content_verifier_->Shutdown();
 diff --git a/src/core/extensions/extensions_browser_client_qt.cpp b/src/core/extensions/extensions_browser_client_qt.cpp
-index 6dda1a4882..e2fe688e09 100644
+index 6dda1a4882..d0b83e5529 100644
 --- a/src/core/extensions/extensions_browser_client_qt.cpp
 +++ b/src/core/extensions/extensions_browser_client_qt.cpp
-@@ -419,7 +419,8 @@ content::WebContents *ExtensionsBrowserClientQt::OpenPage(content::BrowserContex
+@@ -391,8 +391,10 @@ content::WebContents *ExtensionsBrowserClientQt::GetActiveTab(content::BrowserCo
+     content::WebContents *active = nullptr;
+     for (QtWebEngineCore::WebContentsAdapterClient *client : adapter->webContentsAdapterClients()) {
+         QtWebEngineCore::WebContentsAdapter *contents = client->webContentsAdapter();
++        // A page an extension opened in a window of its own is not the browser window's tab.
+         if (!contents || !contents->isInitialized() || !contents->webContents()
+-            || isExtensionPage(contents->webContents()))
++            || isExtensionPage(contents->webContents())
++            || TabRegistryQt::Get()->IsWindowOfItsOwn(contents->webContents()))
+             continue;
+         if (!active || contents->isVisible())
+             active = contents->webContents();
+@@ -419,7 +421,8 @@ content::WebContents *ExtensionsBrowserClientQt::OpenPage(content::BrowserContex
  
      content::WebContents::CreateParams params(context);
      std::unique_ptr<content::WebContents> created = content::WebContents::Create(params);
@@ -677,7 +874,7 @@ index 6dda1a4882..e2fe688e09 100644
  
      // The page is handed over before it goes anywhere. Navigating first builds
      // its render view while the view still has no client, and the adoption then
-@@ -430,13 +431,13 @@ content::WebContents *ExtensionsBrowserClientQt::OpenPage(content::BrowserContex
+@@ -430,13 +433,13 @@ content::WebContents *ExtensionsBrowserClientQt::OpenPage(content::BrowserContex
              active ? WindowOpenDisposition::NEW_FOREGROUND_TAB
                     : WindowOpenDisposition::NEW_BACKGROUND_TAB,
              blink::mojom::WindowFeatures(), /* user_gesture = */ true, &blocked);
@@ -731,7 +928,7 @@ index 0000000000..c66a877835
 +}
 diff --git a/tests/auto/widgets/extensions/resources/window_closing_ext/manifest.json b/tests/auto/widgets/extensions/resources/window_closing_ext/manifest.json
 new file mode 100644
-index 0000000000..65efaec382
+index 0000000000..ed1f31b90c
 --- /dev/null
 +++ b/tests/auto/widgets/extensions/resources/window_closing_ext/manifest.json
 @@ -0,0 +1,9 @@
@@ -739,20 +936,25 @@ index 0000000000..65efaec382
 +    "name": "window closing",
 +    "version": "1.0",
 +    "manifest_version": 3,
-+    "permissions": ["tabs"],
++    "permissions": ["tabs", "storage"],
 +    "background": {
 +        "service_worker": "service_worker.js"
 +    }
 +}
 diff --git a/tests/auto/widgets/extensions/resources/window_closing_ext/service_worker.js b/tests/auto/widgets/extensions/resources/window_closing_ext/service_worker.js
 new file mode 100644
-index 0000000000..ff70deafb6
+index 0000000000..d89eecc031
 --- /dev/null
 +++ b/tests/auto/widgets/extensions/resources/window_closing_ext/service_worker.js
-@@ -0,0 +1,20 @@
+@@ -0,0 +1,25 @@
 +// A password manager listens in its worker for the window it opened to close,
 +// and ends the request it was showing there when it does.
 +const heard = []
++
++// Each start of the worker is counted where a page can read it without waking
++// the worker, so a test can tell a woken worker from one that kept running.
++chrome.storage.session.get("starts").then(({ starts = 0 }) =>
++    chrome.storage.session.set({ starts: starts + 1 }))
 +chrome.tabs.onRemoved.addListener((tabId, removeInfo) => {
 +    heard.push({
 +        event: "tabs.onRemoved",
@@ -823,20 +1025,24 @@ index 0000000000..ceb8255ed5
 +chrome.windows.onRemoved.addListener(windowId => window.heardOfNormalWindows.push(windowId),
 +                                     { windowTypes: ["normal"] })
 diff --git a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
-index 1290b685fb..7be3ef5527 100644
+index 1290b685fb..84c1f053fd 100644
 --- a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
 +++ b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
-@@ -69,6 +69,9 @@ private Q_SLOTS:
+@@ -69,6 +69,13 @@ private Q_SLOTS:
      void aWindowIsWhereTheApplicationSaysItIs();
      void withoutAnAnswerAWindowIsWhereItsViewIs();
      void aProviderCanReplaceItselfWhileItIsAsked();
 +    void anExtensionIsToldTheWindowItOpenedClosed();
 +    void everyWayTheWindowClosesIsReported_data();
 +    void everyWayTheWindowClosesIsReported();
++    void anExtensionFindsItsWindowByAddressAndClosesIt_data();
++    void anExtensionFindsItsWindowByAddressAndClosesIt();
++    void aWindowClosedWhileTheNextPageOpensIsNotAnswered();
++    void aStoppedWorkerIsWokenToHearItsWindowClosed();
  
  private:
      int installedFiles();
-@@ -1233,5 +1236,224 @@ void tst_QWebEngineExtension::aProviderCanReplaceItselfWhileItIsAsked()
+@@ -1233,5 +1240,446 @@ void tst_QWebEngineExtension::aProviderCanReplaceItselfWhileItIsAsked()
      QCOMPARE(placeOf(result["getCurrent"_L1]), QRect(0, 0, 320, 240));
  }
  
@@ -987,11 +1193,13 @@ index 1290b685fb..7be3ef5527 100644
 +    const QVariantMap browserRemoved = askExtension(
 +            &control, "browserRemoved"_L1,
 +            QStringLiteral("chrome.windows.remove(%1)").arg(browserWindowId));
-+    QVERIFY(browserRemoved.contains("error"_L1));
++    QCOMPARE(browserRemoved.value("error"_L1).toString(),
++             "The application keeps its own window open."_L1);
 +    const QVariantMap tabRemoved = askExtension(
 +            &control, "tabRemoved"_L1,
 +            QStringLiteral("chrome.tabs.remove(%1)").arg(tab["id"_L1].toInt()));
-+    QVERIFY(tabRemoved.contains("error"_L1));
++    QCOMPARE(tabRemoved.value("error"_L1).toString(),
++             "The application keeps its own tabs open."_L1);
 +    QCOMPARE(m_page->url(), server.url("/index.html"_L1));
 +}
 +
@@ -1056,6 +1264,226 @@ index 1290b685fb..7be3ef5527 100644
 +        QVERIFY2(!removed.contains("error"_L1), qPrintable(removed.value("error"_L1).toString()));
 +    }
 +    QTRY_VERIFY(!opened);
++    QTRY_COMPARE(heardByWorker(&control), removalOf(tabId, windowId));
++}
++
++void tst_QWebEngineExtension::anExtensionFindsItsWindowByAddressAndClosesIt_data()
++{
++    QTest::addColumn<QString>("path");
++    QTest::addColumn<bool>("extensionPage");
++    QTest::newRow("an extension page") << u"/control.html"_s << true;
++    QTest::newRow("a web page") << u"/index.html"_s << false;
++}
++
++void tst_QWebEngineExtension::anExtensionFindsItsWindowByAddressAndClosesIt()
++{
++    // Bitwarden closes its passkey prompt by finding it with tabs.query by its address and
++    // removing the tab it gets back. The tab is in the window windows.create answered with,
++    // wherever tabs and windows are asked about, and not in the browser's window.
++    QFETCH(QString, path);
++    QFETCH(bool, extensionPage);
++    HttpServer server;
++    server.setResourceDirs({ resourcesPath() });
++    QVERIFY(server.start());
++
++    QWebEngineExtensionInfo opener = loadExtensionSync(resourcesPath() + "window_closing_ext"_L1);
++    QVERIFY(opener.isLoaded());
++    m_manager->setExtensionEnabled(opener, true);
++
++    QSignalSpy loadSpy(m_page, SIGNAL(loadFinished(bool)));
++    m_page->load(server.url("/index.html"_L1));
++    QTRY_COMPARE(loadSpy.size(), 1);
++    std::unique_ptr<QWebEnginePage> opened;
++    connect(m_page, &QWebEnginePage::newWindowRequested, this,
++            [&opened, this](QWebEngineNewWindowRequest &request) {
++                opened = std::make_unique<QWebEnginePage>(m_profile);
++                connect(opened.get(), &QWebEnginePage::windowCloseRequested, this, [&opened, this] {
++                    QTimer::singleShot(0, this, [&opened] { opened.reset(); });
++                });
++                request.openIn(opened.get());
++            });
++
++    QWebEnginePage control(m_profile);
++    QSignalSpy controlSpy(&control, SIGNAL(loadFinished(bool)));
++    control.load(QUrl("chrome-extension://"_L1 + opener.id() + "/control.html"_L1));
++    QTRY_COMPARE(controlSpy.size(), 1);
++
++    const QString address = extensionPage
++            ? "chrome.runtime.getURL('control.html?popout')"_L1
++            : QStringLiteral("'%1'").arg(server.url(path).toString() + "?popout"_L1);
++    const QString pattern = extensionPage
++            ? "chrome.runtime.getURL('control.html') + '?popout*'"_L1
++            : "'*://*/index.html?popout*'"_L1;
++    const QVariantMap created = askExtension(
++            &control, "created"_L1,
++            QStringLiteral("chrome.windows.create({ url: %1, type: 'popup' })").arg(address));
++    QVERIFY2(created.contains("value"_L1), qPrintable(created.value("error"_L1).toString()));
++    const QVariantMap window = created["value"_L1].toMap();
++    const int windowId = window["id"_L1].toInt();
++    const int tabId = window["tabs"_L1].toList().first().toMap()["id"_L1].toInt();
++    QTRY_VERIFY(opened);
++    QTRY_COMPARE(opened->url().path(), path);
++    QTRY_COMPARE(opened->url().query(), "popout"_L1);
++
++    const auto ids = [](const QVariantMap &answer) {
++        QList<int> ids;
++        for (const QVariant &tab : answer.value("value"_L1).toList())
++            ids.append(tab.toMap()["id"_L1].toInt());
++        return ids;
++    };
++    const auto windows = [](const QVariantMap &answer) {
++        QList<int> ids;
++        for (const QVariant &tab : answer.value("value"_L1).toList())
++            ids.append(tab.toMap()["windowId"_L1].toInt());
++        return ids;
++    };
++
++    const QVariantMap found = askExtension(
++            &control, "found"_L1, QStringLiteral("chrome.tabs.query({ url: %1 })").arg(pattern));
++    QCOMPARE(ids(found), QList<int>{ tabId });
++    QCOMPARE(windows(found), QList<int>{ windowId });
++    const QVariantMap inWindow = askExtension(
++            &control, "inWindow"_L1,
++            QStringLiteral("chrome.tabs.query({ windowId: %1 })").arg(windowId));
++    QCOMPARE(ids(inWindow), QList<int>{ tabId });
++
++    // The page on show in the browser's window is still its active tab, and the browser's window
++    // does not hold the new page.
++    const QVariantMap browserActive = askExtension(
++            &control, "browserActive"_L1, "chrome.tabs.query({ active: true, windowId: 1 })"_L1);
++    QCOMPARE(browserActive.value("value"_L1).toList().size(), 1);
++    QCOMPARE(QUrl(browserActive["value"_L1].toList().first().toMap()["url"_L1].toString()),
++             server.url("/index.html"_L1));
++    const QVariantMap browserWindow = askExtension(
++            &control, "browserWindow"_L1, "chrome.tabs.query({ windowId: 1 })"_L1);
++    QVERIFY(!ids(browserWindow).contains(tabId));
++    QVERIFY(!windows(browserWindow).contains(windowId));
++    const QVariantMap populated = askExtension(
++            &control, "populated"_L1, "chrome.windows.get(1, { populate: true })"_L1);
++    QVERIFY(!ids(QVariantMap{ { "value"_L1, populated["value"_L1].toMap()["tabs"_L1] } })
++                     .contains(tabId));
++
++    if (extensionPage) {
++        // Asked from inside, the page's window is its own, whichever way the question is put.
++        QCOMPARE(askExtension(opened.get(), "current"_L1, "chrome.windows.getCurrent()"_L1)
++                         ["value"_L1].toMap()["id"_L1].toInt(),
++                 windowId);
++        QCOMPARE(askExtension(opened.get(), "focused"_L1, "chrome.windows.getLastFocused()"_L1)
++                         ["value"_L1].toMap()["id"_L1].toInt(),
++                 windowId);
++        QCOMPARE(askExtension(opened.get(), "tab"_L1, "chrome.tabs.getCurrent()"_L1)
++                         ["value"_L1].toMap()["id"_L1].toInt(),
++                 tabId);
++        QCOMPARE(ids(askExtension(opened.get(), "here"_L1,
++                                  "chrome.tabs.query({ currentWindow: true })"_L1)),
++                 QList<int>{ tabId });
++        QCOMPARE(ids(askExtension(opened.get(), "lastFocused"_L1,
++                                  "chrome.tabs.query({ lastFocusedWindow: true })"_L1)),
++                 QList<int>{ tabId });
++    }
++
++    const QVariantMap removed = askExtension(
++            &control, "removed"_L1,
++            QStringLiteral("chrome.tabs.query({ url: %1 })"
++                           ".then(tabs => chrome.tabs.remove(tabs.map(tab => tab.id)))")
++                    .arg(pattern));
++    QVERIFY2(!removed.contains("error"_L1), qPrintable(removed.value("error"_L1).toString()));
++    QTRY_VERIFY(!opened);
++    QTRY_COMPARE(heardByWorker(&control), removalOf(tabId, windowId));
++}
++
++void tst_QWebEngineExtension::aWindowClosedWhileTheNextPageOpensIsNotAnswered()
++{
++    // windows.create with several addresses opens them one after another, and the application
++    // runs while each opens. One that closes the first page while the second opens leaves the
++    // call without a window to answer with, and it says so.
++    HttpServer server;
++    server.setResourceDirs({ resourcesPath() });
++    QVERIFY(server.start());
++
++    QWebEngineExtensionInfo opener = loadExtensionSync(resourcesPath() + "window_closing_ext"_L1);
++    QVERIFY(opener.isLoaded());
++    m_manager->setExtensionEnabled(opener, true);
++
++    QSignalSpy loadSpy(m_page, SIGNAL(loadFinished(bool)));
++    m_page->load(server.url("/index.html"_L1));
++    QTRY_COMPARE(loadSpy.size(), 1);
++    std::vector<std::unique_ptr<QWebEnginePage>> opened;
++    connect(m_page, &QWebEnginePage::newWindowRequested, this,
++            [&opened, this](QWebEngineNewWindowRequest &request) {
++                opened.clear();
++                opened.push_back(std::make_unique<QWebEnginePage>(m_profile));
++                request.openIn(opened.back().get());
++            });
++
++    QWebEnginePage control(m_profile);
++    QSignalSpy controlSpy(&control, SIGNAL(loadFinished(bool)));
++    control.load(QUrl("chrome-extension://"_L1 + opener.id() + "/control.html"_L1));
++    QTRY_COMPARE(controlSpy.size(), 1);
++
++    const QVariantMap created = askExtension(
++            &control, "created"_L1,
++            "chrome.windows.create({ url: ['blank.html', 'blank.html?second'] })"_L1);
++    QCOMPARE(created.value("error"_L1).toString(),
++             "The application closed the window it opened."_L1);
++}
++
++void tst_QWebEngineExtension::aStoppedWorkerIsWokenToHearItsWindowClosed()
++{
++    // A reader who leaves the prompt open longer than the worker's idle time closes it to a
++    // worker that has stopped. The events wake it, as Chrome's do, so it still hears them.
++    HttpServer server;
++    server.setResourceDirs({ resourcesPath() });
++    QVERIFY(server.start());
++
++    QWebEngineExtensionInfo opener = loadExtensionSync(resourcesPath() + "window_closing_ext"_L1);
++    QVERIFY(opener.isLoaded());
++    m_manager->setExtensionEnabled(opener, true);
++
++    QSignalSpy loadSpy(m_page, SIGNAL(loadFinished(bool)));
++    m_page->load(server.url("/index.html"_L1));
++    QTRY_COMPARE(loadSpy.size(), 1);
++    std::unique_ptr<QWebEnginePage> opened;
++    connect(m_page, &QWebEnginePage::newWindowRequested, this,
++            [&opened, this](QWebEngineNewWindowRequest &request) {
++                opened = std::make_unique<QWebEnginePage>(m_profile);
++                request.openIn(opened.get());
++            });
++
++    QWebEnginePage control(m_profile);
++    QSignalSpy controlSpy(&control, SIGNAL(loadFinished(bool)));
++    control.load(QUrl("chrome-extension://"_L1 + opener.id() + "/control.html"_L1));
++    QTRY_COMPARE(controlSpy.size(), 1);
++
++    const QVariantMap created = askExtension(
++            &control, "created"_L1, "chrome.windows.create({ url: 'blank.html' })"_L1);
++    QVERIFY2(created.contains("value"_L1), qPrintable(created.value("error"_L1).toString()));
++    const QVariantMap window = created["value"_L1].toMap();
++    const int windowId = window["id"_L1].toInt();
++    const int tabId = window["tabs"_L1].toList().first().toMap()["id"_L1].toInt();
++    QTRY_VERIFY(opened);
++    QTRY_COMPARE(opened->url().path(), "/blank.html"_L1);
++
++    const auto starts = [&control] {
++        return askExtension(&control, "starts"_L1,
++                            "chrome.storage.session.get('starts').then(found => found.starts)"_L1)
++                .value("value"_L1)
++                .toInt();
++    };
++    QTRY_COMPARE(starts(), 1);
++    // The worker stops once it has been idle for its timeout, thirty seconds in Chromium. Asking
++    // for the running contexts from a page does not wake it.
++    const auto running = [&control] {
++        return askExtension(&control, "running"_L1,
++                            "chrome.runtime.getContexts({ contextTypes: ['BACKGROUND'] })"
++                            ".then(contexts => contexts.length)"_L1)
++                .value("value"_L1)
++                .toInt();
++    };
++    QTRY_COMPARE_WITH_TIMEOUT(running(), 0, 90000);
++
++    opened.reset();
++    QTRY_COMPARE(starts(), 2);
 +    QTRY_COMPARE(heardByWorker(&control), removalOf(tabId, windowId));
 +}
 +
