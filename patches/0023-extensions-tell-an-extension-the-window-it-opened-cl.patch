@@ -1,4 +1,4 @@
-From 4ec342975ddfef422ec32b1d5af3d3fe5baf871b Mon Sep 17 00:00:00 2001
+From 4637697b574ae0cd36cba9472b68de870fd2125a Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivel=C3=A4?= <vkivela@hotmail.com>
 Date: Sat, 10 Oct 2026 13:44:21 +0000
 Subject: [PATCH] extensions: tell an extension the window it opened closed
@@ -823,7 +823,7 @@ index 9f889f59d6..c063f76e9a 100644
      ],
      "events": [
 diff --git a/src/core/extensions/extension_system_qt.cpp b/src/core/extensions/extension_system_qt.cpp
-index 14187f2a87..6de75b4999 100644
+index 67e5657c3b..76cbb17a0c 100644
 --- a/src/core/extensions/extension_system_qt.cpp
 +++ b/src/core/extensions/extension_system_qt.cpp
 @@ -10,6 +10,7 @@
@@ -833,8 +833,8 @@ index 14187f2a87..6de75b4999 100644
 +#include "qtwebengine/browser/extensions/tab_registry_qt.h"
  
  #include "extension_manager.h"
- 
-@@ -212,10 +213,11 @@ void ExtensionSystemQt::NotifyExtensionLoaded(const Extension *extension)
+ #include "user_script_listener_qt.h"
+@@ -216,10 +217,11 @@ void ExtensionSystemQt::NotifyExtensionLoaded(const Extension *extension)
  
  void ExtensionSystemQt::Shutdown()
  {
@@ -849,10 +849,10 @@ index 14187f2a87..6de75b4999 100644
      if (content_verifier_.get())
          content_verifier_->Shutdown();
 diff --git a/src/core/extensions/extensions_browser_client_qt.cpp b/src/core/extensions/extensions_browser_client_qt.cpp
-index 6dda1a4882..d0b83e5529 100644
+index 790bf61efe..6aa5cec7d2 100644
 --- a/src/core/extensions/extensions_browser_client_qt.cpp
 +++ b/src/core/extensions/extensions_browser_client_qt.cpp
-@@ -391,8 +391,10 @@ content::WebContents *ExtensionsBrowserClientQt::GetActiveTab(content::BrowserCo
+@@ -393,8 +393,10 @@ content::WebContents *ExtensionsBrowserClientQt::GetActiveTab(content::BrowserCo
      content::WebContents *active = nullptr;
      for (QtWebEngineCore::WebContentsAdapterClient *client : adapter->webContentsAdapterClients()) {
          QtWebEngineCore::WebContentsAdapter *contents = client->webContentsAdapter();
@@ -864,7 +864,7 @@ index 6dda1a4882..d0b83e5529 100644
              continue;
          if (!active || contents->isVisible())
              active = contents->webContents();
-@@ -419,7 +421,8 @@ content::WebContents *ExtensionsBrowserClientQt::OpenPage(content::BrowserContex
+@@ -421,7 +423,8 @@ content::WebContents *ExtensionsBrowserClientQt::OpenPage(content::BrowserContex
  
      content::WebContents::CreateParams params(context);
      std::unique_ptr<content::WebContents> created = content::WebContents::Create(params);
@@ -874,7 +874,7 @@ index 6dda1a4882..d0b83e5529 100644
  
      // The page is handed over before it goes anywhere. Navigating first builds
      // its render view while the view still has no client, and the adoption then
-@@ -430,13 +433,13 @@ content::WebContents *ExtensionsBrowserClientQt::OpenPage(content::BrowserContex
+@@ -432,13 +435,13 @@ content::WebContents *ExtensionsBrowserClientQt::OpenPage(content::BrowserContex
              active ? WindowOpenDisposition::NEW_FOREGROUND_TAB
                     : WindowOpenDisposition::NEW_BACKGROUND_TAB,
              blink::mojom::WindowFeatures(), /* user_gesture = */ true, &blocked);
@@ -1042,10 +1042,10 @@ index 0000000000..ceb8255ed5
 +chrome.windows.onRemoved.addListener(windowId => window.heardOfNormalWindows.push(windowId),
 +                                     { windowTypes: ["normal"] })
 diff --git a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
-index 1290b685fb..1c920b01a1 100644
+index c3e28363e9..cb2793994e 100644
 --- a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
 +++ b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
-@@ -69,6 +69,13 @@ private Q_SLOTS:
+@@ -80,6 +80,13 @@ private Q_SLOTS:
      void aWindowIsWhereTheApplicationSaysItIs();
      void withoutAnAnswerAWindowIsWhereItsViewIs();
      void aProviderCanReplaceItselfWhileItIsAsked();
@@ -1059,7 +1059,7 @@ index 1290b685fb..1c920b01a1 100644
  
  private:
      int installedFiles();
-@@ -1233,5 +1240,448 @@ void tst_QWebEngineExtension::aProviderCanReplaceItselfWhileItIsAsked()
+@@ -1717,5 +1724,448 @@ void tst_QWebEngineExtension::aProviderCanReplaceItselfWhileItIsAsked()
      QCOMPARE(placeOf(result["getCurrent"_L1]), QRect(0, 0, 320, 240));
  }
  
