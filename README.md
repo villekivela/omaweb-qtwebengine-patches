@@ -1,16 +1,17 @@
 # QtWebEngine extension patches
 
-Twenty-one patches to QtWebEngine. Fifteen let it host a password manager's Chromium extension, two
+Twenty-two patches to QtWebEngine. Fifteen let it host a password manager's Chromium extension, two
 add API that Omaweb's content blocking and certificate view ask for, one restores a trace macro that
 slowed every page, one turns V8's write barriers back on, one keeps an offscreen document from
-crashing the engine, and one builds the tests against Qt 6.12. Base is the released
+crashing the engine, one builds the tests against Qt 6.12, and one keeps a profile from crashing as
+it is deleted with an extension's message still waiting. Base is the released
 `qtwebengine-everywhere-src-6.11.2` tarball.
 
 Built for [omaweb#344](https://github.com/villekivela/omaweb/issues/344), which asks whether Omaweb
 can host Bitwarden and 1Password. The findings live in `docs/research/password-manager-extensions.md`
 in that repository.
 
-Seven of the twenty-one are ordinary bug fixes headed for Gerrit, and 0018 and 0020 are Qt's own
+Eight of the twenty-two are ordinary bug fixes headed for Gerrit, and 0018 and 0020 are Qt's own
 changes. The rest wait on one question to Qt, in `upstream/QTBUG-draft.md`. If Qt takes the work,
 this repository is deleted rather than maintained.
 
@@ -170,6 +171,21 @@ a provider the window is at `0, 0` with the size of the asking view. See
 [omaweb#684](https://github.com/villekivela/omaweb/issues/684) and ADR 0064. _Part of the tab model
 the open question below is about. Propose it with 0004._
 
+**0024, let a profile go while a message waits for a worker.** A message to an extension's worker
+waits in the worker's task queue until the worker is started for it, and every message does, because
+the start is a round trip even for a running worker. Deleting the profile in that wait crashed the
+application on a `CHECK`: the queue drops its messages as the profile's services are deleted, and
+each message's port then asked `ExtensionsBrowserClientQt::IsValidContext` whether to report to
+`MessageTracker`. That answered true for any pointer, so the port looked a service up on a destroyed
+context. Chrome answers from its `ProfileManager`, which a profile leaves before it is destroyed. Now
+`ProfileQt` keeps the set of profiles whose destruction has not begun and leaves it first, and
+`IsValidContext` answers from that set without following the pointer. It is what made 0012's
+`theReadersAnswerToANotificationReachesTheExtension` crash in about one run in fifteen. 0022 and 0023
+are held for [omaweb#686](https://github.com/villekivela/omaweb/issues/686) and
+[omaweb#687](https://github.com/villekivela/omaweb/issues/687). See
+[omaweb#696](https://github.com/villekivela/omaweb/issues/696). _A bug fix with a test. Submit as
+is._
+
 ## The open question
 
 `TabsDelegateQt` is internal, and `ExtensionsBrowserClientQt` fills it by treating every page of the
@@ -181,7 +197,7 @@ one is active. That is what the QTBUG draft asks for. Ask before writing the API
 
 ## Tests
 
-40 tests pass with the series applied. Six of them fail on a stock build, which is why they are
+41 tests pass with the series applied. Six of them fail on a stock build, which is why they are
 worth having:
 
 - `serviceWorkerLocalization` fails
@@ -200,7 +216,10 @@ Patch 0021's three cases, `aWindowIsWhereTheApplicationSaysItIs`,
 `withoutAnAnswerAWindowIsWhereItsViewIs` and `aProviderCanReplaceItselfWhileItIsAsked`, are in the
 extension tests and do not compile without the patch either. Taking the four numbers out of
 `windows_api.cc` fails the first two, and calling the stored provider rather than a copy fails the
-third.
+third. Patch 0024's case, `aProfileMayGoWhileAMessageWaitsForTheWorker`, crashes on every run
+without it: its worker is slow to start, so `cleanup()` deletes the profile with the content script's
+message still waiting. Answering true from `IsValidContext` again crashes it, and so does leaving the
+set at the end of `~ProfileQt` rather than at the start.
 
 Patch 0018 has no test case, because what it changes is how V8 is compiled. The gate reads that
 instead. `scripts/check-write-barriers.sh` fails a tree whose V8 is compiled with
