@@ -1,0 +1,599 @@
+From 4da7b02e9cb6e5a4544b584dac8873185c9022b0 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Ville=20Kivel=C3=A4?=
+ <5814559+villekivela@users.noreply.github.com>
+Date: Sat, 10 Oct 2026 12:09:25 +0300
+Subject: [PATCH] extensions: keep registered content scripts across a restart
+
+chrome.scripting.registerContentScripts keeps a script across sessions
+unless the extension says otherwise, and in QtWebEngine every one was
+gone after a restart. ExtensionSystemQt::dynamic_user_scripts_store()
+returned null, so the user-script manager had nowhere to write them.
+An extension that registers its scripts once, on install or on a
+setting change, lost them at the next start (villekivela/omaweb#686).
+
+A regular profile now has the store Chrome has, in its storage path
+under "Extension Scripts". It is made before the user-script manager,
+which registers its key with the store when it is built. An
+off-the-record profile has no store. Its loader refuses every extension
+today, so nothing would reach one, but such a profile can still name a
+storage path, and the store must not be opened there if that changes.
+
+Chrome's store forgets an extension's scripts when the registry says it
+was uninstalled, and Qt's uninstall only unloaded it, so a script came
+back when the same extension was installed again. The extension manager
+now tells the registry. Every observer hears it, as in Chrome, so the
+service worker manager also deletes the extension's worker registration.
+Unloading alone keeps the scripts, as disabling does in Chrome.
+
+An update that leaves persistAcrossSessions out keeps what the script
+had, as the API documents. Chromium looked that up in the set it was
+still filling, which is always empty, so such an update made the script
+last only for the session. It now reads what persists from the loader
+before the update. Chromium's main has the same code.
+
+The store is opened at the storage path the profile has when its
+extension system is made. A path changed later is not followed, as
+chrome.storage's is not.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../extensions/api/scripting/scripting_api.cc |  10 +-
+ .../extensions/api/scripting/scripting_api.h  |   4 +-
+ src/core/extensions/extension_manager.cpp     |   7 +
+ src/core/extensions/extension_system_qt.cpp   |  14 +-
+ src/core/extensions/extension_system_qt.h     |   4 +
+ .../resources/kept_scripts_ext/control.html   |   2 +
+ .../resources/kept_scripts_ext/control.js     |   7 +
+ .../resources/kept_scripts_ext/manifest.json  |  12 +
+ .../resources/kept_scripts_ext/marker.js      |   1 +
+ .../extensions/tst_qwebengineextension.cpp    | 321 ++++++++++++++++++
+ 10 files changed, 378 insertions(+), 4 deletions(-)
+ create mode 100644 tests/auto/widgets/extensions/resources/kept_scripts_ext/control.html
+ create mode 100644 tests/auto/widgets/extensions/resources/kept_scripts_ext/control.js
+ create mode 100644 tests/auto/widgets/extensions/resources/kept_scripts_ext/manifest.json
+ create mode 100644 tests/auto/widgets/extensions/resources/kept_scripts_ext/marker.js
+
+diff --git a/src/3rdparty/chromium/qtwebengine/browser/extensions/api/scripting/scripting_api.cc b/src/3rdparty/chromium/qtwebengine/browser/extensions/api/scripting/scripting_api.cc
+index bdc18a5052..c0ea78bb73 100644
+--- a/src/3rdparty/chromium/qtwebengine/browser/extensions/api/scripting/scripting_api.cc
++++ b/src/3rdparty/chromium/qtwebengine/browser/extensions/api/scripting/scripting_api.cc
+@@ -880,12 +880,17 @@ ExtensionFunction::ResponseAction ScriptingUpdateContentScriptsFunction::Run() {
+           ->user_script_manager()
+           ->GetUserScriptLoaderForExtension(extension()->id());
+ 
++  // An update that leaves the flag out keeps what the script had, so what
++  // persists now is read before the update removes the scripts it replaces.
++  const std::set<std::string> persistent_script_ids =
++      loader->GetPersistentDynamicScriptIDs();
+   std::set<std::string> updated_script_ids_to_persist;
+   UserScriptList parsed_scripts = scripting::UpdateScripts(
+       scripts_to_update, UserScript::Source::kDynamicContentScript, *loader,
+       base::BindRepeating(&CreateRegisteredContentScriptInfo),
+       base::BindRepeating(&ScriptingUpdateContentScriptsFunction::ApplyUpdate,
+-                          this, &updated_script_ids_to_persist),
++                          this, &persistent_script_ids,
++                          &updated_script_ids_to_persist),
+       &error);
+ 
+   if (!error.empty()) {
+@@ -913,6 +918,7 @@ ExtensionFunction::ResponseAction ScriptingUpdateContentScriptsFunction::Run() {
+ }
+ 
+ std::unique_ptr<UserScript> ScriptingUpdateContentScriptsFunction::ApplyUpdate(
++    const std::set<std::string>* persistent_script_ids,
+     std::set<std::string>* script_ids_to_persist,
+     api::scripting::RegisteredContentScript& new_script,
+     api::scripting::RegisteredContentScript& original_script,
+@@ -962,7 +968,7 @@ std::unique_ptr<UserScript> ScriptingUpdateContentScriptsFunction::ApplyUpdate(
+   // original script is persisted and the flag is not specified.
+   if (new_script.persist_across_sessions.value_or(false) ||
+       (!new_script.persist_across_sessions &&
+-       base::Contains(*script_ids_to_persist, new_script.id))) {
++       base::Contains(*persistent_script_ids, new_script.id))) {
+     script_ids_to_persist->insert(new_script.id);
+   }
+ 
+diff --git a/src/3rdparty/chromium/qtwebengine/browser/extensions/api/scripting/scripting_api.h b/src/3rdparty/chromium/qtwebengine/browser/extensions/api/scripting/scripting_api.h
+index faa3caecd6..c45c451393 100644
+--- a/src/3rdparty/chromium/qtwebengine/browser/extensions/api/scripting/scripting_api.h
++++ b/src/3rdparty/chromium/qtwebengine/browser/extensions/api/scripting/scripting_api.h
+@@ -185,8 +185,10 @@ class ScriptingUpdateContentScriptsFunction : public ExtensionFunction {
+ 
+   // Returns a UserScript object by updating the `original_script` with the
+   // `new_script` given delta. If the updated script cannot be parsed, populates
+-  // `parse_error` and returns nullptr.
++  // `parse_error` and returns nullptr. `persistent_script_ids` are the scripts
++  // that persisted before the update.
+   std::unique_ptr<UserScript> ApplyUpdate(
++      const std::set<std::string>* persistent_script_ids,
+       std::set<std::string>* script_ids_to_persist,
+       api::scripting::RegisteredContentScript& new_script,
+       api::scripting::RegisteredContentScript& original_script,
+diff --git a/src/core/extensions/extension_manager.cpp b/src/core/extensions/extension_manager.cpp
+index b7ce987ede..524f6b129a 100644
+--- a/src/core/extensions/extension_manager.cpp
++++ b/src/core/extensions/extension_manager.cpp
+@@ -19,6 +19,8 @@
+ #include "extensions/browser/extension_action.h"
+ #include "extensions/browser/extension_action_manager.h"
+ #include "extensions/browser/extension_file_task_runner.h"
++#include "extensions/browser/extension_registry.h"
++#include "extensions/browser/uninstall_reason.h"
+ 
+ using namespace extensions;
+ 
+@@ -178,6 +180,11 @@ void ExtensionManager::onExtensionUninstalled(const std::string &id)
+ {
+     scoped_refptr<const Extension> extension = m_loader->getExtensionById(id);
+     m_loader->unloadExtension(extension->id());
++    // Chrome's registrar tells the registry's observers once an extension is uninstalled, and
++    // they forget what they kept for it: the content scripts it registered to persist among
++    // them. Unloading alone leaves those to come back if the same extension is installed again.
++    ExtensionRegistry::Get(m_context)->TriggerOnUninstalled(extension.get(),
++                                                            UNINSTALL_REASON_USER_INITIATED);
+ 
+     Q_Q(QWebEngineExtensionManager);
+     Q_EMIT q->uninstallFinished(
+diff --git a/src/core/extensions/extension_system_qt.cpp b/src/core/extensions/extension_system_qt.cpp
+index 14187f2a87..843aa6f92a 100644
+--- a/src/core/extensions/extension_system_qt.cpp
++++ b/src/core/extensions/extension_system_qt.cpp
+@@ -53,6 +53,7 @@
+ #include "extensions/browser/quota_service.h"
+ #include "extensions/browser/renderer_startup_helper.h"
+ #include "extensions/browser/service_worker_manager.h"
++#include "extensions/browser/state_store.h"
+ #include "extensions/browser/task_queue_util.h"
+ #include "extensions/browser/user_script_manager.h"
+ #include "extensions/common/constants.h"
+@@ -253,7 +254,7 @@ StateStore *ExtensionSystemQt::rules_store()
+ 
+ StateStore *ExtensionSystemQt::dynamic_user_scripts_store()
+ {
+-    return nullptr;
++    return dynamic_user_scripts_store_.get();
+ }
+ 
+ scoped_refptr<value_store::ValueStoreFactory> ExtensionSystemQt::store_factory()
+@@ -301,6 +302,17 @@ void ExtensionSystemQt::Init(bool extensions_enabled)
+     initialized_ = true;
+ 
+     service_worker_manager_ = std::make_unique<ServiceWorkerManager>(browser_context_);
++    // Content scripts an extension registers to persist across sessions are kept in the
++    // profile, as Chrome keeps them. The store comes first: the user-script manager tells the
++    // store its key when it is built, and the store clears only the keys it was told of when an
++    // extension is uninstalled. An off-the-record profile has no store, so nothing is ever written
++    // to the storage path it can still name. Its loader refuses every extension today, so this
++    // matters only if that changes.
++    if (!browser_context_->IsOffTheRecord()) {
++        dynamic_user_scripts_store_ = std::make_unique<StateStore>(
++                browser_context_, store_factory_, StateStore::BackendType::SCRIPTS,
++                /*deferred_load=*/false);
++    }
+     user_script_manager_ = std::make_unique<UserScriptManager>(browser_context_);
+     quota_service_ = std::make_unique<QuotaService>();
+ #if QT_CONFIG(webengine_extensions)
+diff --git a/src/core/extensions/extension_system_qt.h b/src/core/extensions/extension_system_qt.h
+index 94a7ef7f1e..462bf0972a 100644
+--- a/src/core/extensions/extension_system_qt.h
++++ b/src/core/extensions/extension_system_qt.h
+@@ -37,6 +37,7 @@ class InfoMap;
+ class ManagementPolicy;
+ class RendererStartupHelper;
+ class ServiceWorkerManager;
++class StateStore;
+ class StateStoreNotificationObserver;
+ 
+ // The ExtensionSystem for ProfileImpl and OffTheRecordProfileImpl.
+@@ -87,6 +88,9 @@ private:
+     void NotifyExtensionLoaded(const Extension *extension);
+     void LoadExtension(const base::Value::Dict &manifest, const base::FilePath &directory);
+ 
++    // Declared before the user-script manager, whose loaders hold it, so it outlives them.
++    std::unique_ptr<StateStore> dynamic_user_scripts_store_;
++
+     // The services that are shared between normal and incognito profiles.
+     std::unique_ptr<ServiceWorkerManager> service_worker_manager_;
+     std::unique_ptr<QuotaService> quota_service_;
+diff --git a/tests/auto/widgets/extensions/resources/kept_scripts_ext/control.html b/tests/auto/widgets/extensions/resources/kept_scripts_ext/control.html
+new file mode 100644
+index 0000000000..4a7f09355f
+--- /dev/null
++++ b/tests/auto/widgets/extensions/resources/kept_scripts_ext/control.html
+@@ -0,0 +1,2 @@
++<!doctype html>
++<script src="control.js"></script>
+diff --git a/tests/auto/widgets/extensions/resources/kept_scripts_ext/control.js b/tests/auto/widgets/extensions/resources/kept_scripts_ext/control.js
+new file mode 100644
+index 0000000000..9d1d83b147
+--- /dev/null
++++ b/tests/auto/widgets/extensions/resources/kept_scripts_ext/control.js
+@@ -0,0 +1,7 @@
++// The test registers scripts from this page, so nothing is registered unless the test asks.
++// An extension that registered again whenever it started would hide a store that keeps nothing.
++window.run = (call) => {
++    window.result = undefined;
++    call().then((value) => (window.result = JSON.stringify(value ?? null)),
++                (error) => (window.result = "error: " + error.message));
++};
+diff --git a/tests/auto/widgets/extensions/resources/kept_scripts_ext/manifest.json b/tests/auto/widgets/extensions/resources/kept_scripts_ext/manifest.json
+new file mode 100644
+index 0000000000..c95b90c167
+--- /dev/null
++++ b/tests/auto/widgets/extensions/resources/kept_scripts_ext/manifest.json
+@@ -0,0 +1,12 @@
++{
++    "name": "kept scripts",
++    "version": "1.0",
++    "manifest_version": 3,
++    "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAmWk2x8MG+QbpUddYp58Yi7zAiUWW2k/2sW1iiSf/Tzpuf7RgrC7ayjXFrcJrMn6kHO0BSMU7PGg9wVadc49X768wesEyAKScLDj3atzcz9rnHtbomfCVj9msBRP90DdHC1rvy48wtuYop5hdIOaMuoD5IM6142ohC9Zbws/MLqmUurwjfZjx25lYTK400dMWaqhGjiBVolsvWxR9kcZWeguxctZ6BpUyRTBneObf3N78pA/Zq0C6x6xQkxr6weaNm+7gqvG2Rua3i4qTnR6uWixRMq/AfBLlLOe+QJWlcWfCk0UPtasJslss2Esws3ONDAn5NYAK4HBjMTaDECLDyQIDAQAB",
++    "permissions": [
++        "scripting"
++    ],
++    "host_permissions": [
++        "<all_urls>"
++    ]
++}
+diff --git a/tests/auto/widgets/extensions/resources/kept_scripts_ext/marker.js b/tests/auto/widgets/extensions/resources/kept_scripts_ext/marker.js
+new file mode 100644
+index 0000000000..3ef78a315d
+--- /dev/null
++++ b/tests/auto/widgets/extensions/resources/kept_scripts_ext/marker.js
+@@ -0,0 +1 @@
++document.documentElement.dataset.kept = "yes";
+diff --git a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
+index 1290b685fb..5e87cf8adf 100644
+--- a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
++++ b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
+@@ -19,6 +19,8 @@
+ #include <QtWebEngineCore/qwebengineprofilebuilder.h>
+ 
+ #include <QDir>
++#include <QDirIterator>
++#include <QJsonDocument>
+ 
+ using namespace Qt::StringLiterals;
+ 
+@@ -46,6 +48,12 @@ private Q_SLOTS:
+     void loadOffTheRecord();
+     void installOffTheRecord();
+     void loadInstalledExtensions();
++    void aRegisteredContentScriptIsKeptAcrossARestart();
++    void aScriptNotPersistedAcrossSessionsIsGoneAfterARestart();
++    void whatIsKeptFollowsUnregisterAndUpdate();
++    void anUninstalledExtensionTakesItsKeptScriptsWithIt();
++    void aDisabledExtensionKeepsItsScripts();
++    void anOffTheRecordProfileKeepsNoScriptStore();
+     void serviceWorkerMessaging();
+     void serviceWorkerLocalization();
+     void extensionLoadedIntoARunningProfile();
+@@ -79,6 +87,25 @@ private:
+     void uninstallExtensionSync(const QWebEngineExtensionInfo &extension);
+     QString resourcesPath();
+     QDir extensionsInstallDir();
++    struct ScriptingSession
++    {
++        std::unique_ptr<QWebEngineProfile> profile;
++        std::unique_ptr<QWebEnginePage> page;
++        // The page goes first: a profile deleted under a page that still uses it is not a
++        // restart but a crash.
++        void close()
++        {
++            page.reset();
++            profile.reset();
++        }
++        ~ScriptingSession() { close(); }
++    };
++    void openScriptingSession(ScriptingSession &session, const QString &storagePath,
++                              bool install = false);
++    void openControlPage(ScriptingSession &session, const QWebEngineExtensionInfo &extension);
++    static QWebEngineExtensionInfo keptScriptsExtension(QWebEngineExtensionManager *manager);
++    QString scripting(QWebEnginePage *page, const QString &call);
++    QStringList registeredIds(QWebEnginePage *page);
+ 
+     QWebEnginePage *m_page;
+     QWebEngineProfile *m_profile;
+@@ -412,6 +439,300 @@ void tst_QWebEngineExtension::loadInstalledExtensions()
+     QTRY_COMPARE(manager2->extensions().size(), extensionCount);
+ }
+ 
++// A profile on `storagePath` with the kept-scripts fixture enabled, and the fixture's own page
++// open to call the scripting namespace from. Deleting the session and opening another on the
++// same path is a restart, as far as anything the profile keeps on disk can tell.
++void tst_QWebEngineExtension::openScriptingSession(ScriptingSession &session,
++                                                   const QString &storagePath, bool install)
++{
++    QWebEngineProfileBuilder profileBuilder;
++    profileBuilder.setPersistentStoragePath(storagePath);
++    session.profile.reset(profileBuilder.createProfile("KeptScripts"_L1));
++    QVERIFY(session.profile);
++    QWebEngineExtensionManager *manager = session.profile->extensionManager();
++
++    QSignalSpy spy(manager,
++                   install ? SIGNAL(installFinished(QWebEngineExtensionInfo))
++                           : SIGNAL(loadFinished(QWebEngineExtensionInfo)));
++    if (install)
++        manager->installExtension(resourcesPath() + "kept_scripts_ext"_L1);
++    else
++        manager->loadExtension(resourcesPath() + "kept_scripts_ext"_L1);
++    QTRY_COMPARE(spy.size(), 1);
++    QWebEngineExtensionInfo extension = spy.takeFirst().at(0).value<QWebEngineExtensionInfo>();
++    QVERIFY2(extension.isLoaded(), qPrintable(extension.error()));
++    manager->setExtensionEnabled(extension, true);
++    openControlPage(session, extension);
++}
++
++// The fixture as the manager has it now, or an empty info when it has none.
++QWebEngineExtensionInfo
++tst_QWebEngineExtension::keptScriptsExtension(QWebEngineExtensionManager *manager)
++{
++    for (const QWebEngineExtensionInfo &extension : manager->extensions()) {
++        if (extension.name() == "kept scripts"_L1)
++            return extension;
++    }
++    return QWebEngineExtensionInfo();
++}
++
++// The fixture's own page, opened in the session's profile in place of any it had.
++void tst_QWebEngineExtension::openControlPage(ScriptingSession &session,
++                                              const QWebEngineExtensionInfo &extension)
++{
++    session.page = std::make_unique<QWebEnginePage>(session.profile.get());
++    QSignalSpy loadSpy(session.page.get(), SIGNAL(loadFinished(bool)));
++    session.page->load(QUrl("chrome-extension://"_L1 + extension.id() + "/control.html"_L1));
++    QTRY_COMPARE(loadSpy.size(), 1);
++}
++
++// What a call to the scripting namespace resolved to, as JSON, or the error it failed with.
++QString tst_QWebEngineExtension::scripting(QWebEnginePage *page, const QString &call)
++{
++    evaluateJavaScriptSync(page, "run(() => "_L1 + call + ")"_L1);
++    if (!QTest::qWaitFor([page] {
++            return evaluateJavaScriptSync(page, "window.result !== undefined"_L1).toBool();
++        }))
++        return "timed out"_L1;
++    return evaluateJavaScriptSync(page, "window.result"_L1).toString();
++}
++
++QStringList tst_QWebEngineExtension::registeredIds(QWebEnginePage *page)
++{
++    const QString ids = scripting(
++            page, "chrome.scripting.getRegisteredContentScripts()"
++                  ".then(scripts => scripts.map(script => script.id).sort())"_L1);
++    return QJsonDocument::fromJson(ids.toUtf8()).toVariant().toStringList();
++}
++
++void tst_QWebEngineExtension::aRegisteredContentScriptIsKeptAcrossARestart()
++{
++    // A script registered without saying otherwise persists across sessions, as in Chrome. An
++    // extension that registers once, when it is installed or a setting changes, relies on that:
++    // it never registers again, and without the store its scripts are gone at the next start.
++    HttpServer server;
++    server.setResourceDirs({ resourcesPath() });
++    QVERIFY(server.start());
++    const QString matches = server.url("/*"_L1).toString();
++    QTemporaryDir storage(QDir::tempPath() + "/tst_QWebEngineExtension-XXXXXX"_L1);
++
++    ScriptingSession session;
++    openScriptingSession(session, storage.path());
++    if (QTest::currentTestFailed())
++        return;
++    QCOMPARE(scripting(session.page.get(),
++                       "chrome.scripting.registerContentScripts([{id: 'kept', matches: ['"_L1
++                               + matches
++                               + "'], js: ['marker.js'], runAt: 'document_end', "
++                                 "world: 'MAIN'}])"_L1),
++             "null"_L1);
++    // The store is written on the extension file thread. Waiting for it here keeps the test about
++    // what is kept rather than about how soon.
++    QTRY_VERIFY(QDir(storage.filePath("Extension Scripts"_L1)).exists());
++
++    session.close();
++    openScriptingSession(session, storage.path());
++    if (QTest::currentTestFailed())
++        return;
++    QTRY_COMPARE(registeredIds(session.page.get()), QStringList("kept"_L1));
++    const QVariantMap kept =
++            QJsonDocument::fromJson(
++                    scripting(session.page.get(),
++                              "chrome.scripting.getRegisteredContentScripts()"
++                              ".then(scripts => scripts[0])"_L1)
++                            .toUtf8())
++                    .toVariant()
++                    .toMap();
++    QCOMPARE(kept["matches"_L1].toStringList(), QStringList(matches));
++    QCOMPARE(kept["js"_L1].toStringList(), QStringList("marker.js"_L1));
++    QCOMPARE(kept["runAt"_L1].toString(), "document_end"_L1);
++    QCOMPARE(kept["world"_L1].toString(), "MAIN"_L1);
++    QCOMPARE(kept["persistAcrossSessions"_L1].toBool(), true);
++
++    // And it runs, which is what the reader would miss.
++    QWebEnginePage page(session.profile.get());
++    QSignalSpy loadSpy(&page, SIGNAL(loadFinished(bool)));
++    page.load(server.url("/index.html"_L1));
++    QTRY_COMPARE(loadSpy.size(), 1);
++    QTRY_COMPARE(evaluateJavaScriptSync(&page, "document.documentElement.dataset.kept"_L1),
++                 "yes"_L1);
++}
++
++void tst_QWebEngineExtension::aScriptNotPersistedAcrossSessionsIsGoneAfterARestart()
++{
++    // The witness persists, so once it is back after the restart the store has been read, and
++    // what is missing is missing because it was not kept.
++    QTemporaryDir storage(QDir::tempPath() + "/tst_QWebEngineExtension-XXXXXX"_L1);
++    ScriptingSession session;
++    openScriptingSession(session, storage.path());
++    if (QTest::currentTestFailed())
++        return;
++    QCOMPARE(scripting(session.page.get(),
++                       "chrome.scripting.registerContentScripts(["
++                       "{id: 'witness', matches: ['http://*/*'], js: ['marker.js']},"
++                       "{id: 'session', matches: ['http://*/*'], js: ['marker.js'], "
++                       "persistAcrossSessions: false}])"_L1),
++             "null"_L1);
++    QCOMPARE(registeredIds(session.page.get()), QStringList({ "session"_L1, "witness"_L1 }));
++    QTRY_VERIFY(QDir(storage.filePath("Extension Scripts"_L1)).exists());
++
++    session.close();
++    openScriptingSession(session, storage.path());
++    if (QTest::currentTestFailed())
++        return;
++    QTRY_VERIFY(registeredIds(session.page.get()).contains("witness"_L1));
++    QCOMPARE(registeredIds(session.page.get()), QStringList("witness"_L1));
++}
++
++void tst_QWebEngineExtension::whatIsKeptFollowsUnregisterAndUpdate()
++{
++    // A script unregistered before the restart stays unregistered, and one updated comes back as
++    // it was updated, not as it was first registered.
++    QTemporaryDir storage(QDir::tempPath() + "/tst_QWebEngineExtension-XXXXXX"_L1);
++    ScriptingSession session;
++    openScriptingSession(session, storage.path());
++    if (QTest::currentTestFailed())
++        return;
++    QCOMPARE(scripting(session.page.get(),
++                       "chrome.scripting.registerContentScripts(["
++                       "{id: 'witness', matches: ['http://*/*'], js: ['marker.js']},"
++                       "{id: 'removed', matches: ['http://*/*'], js: ['marker.js']},"
++                       "{id: 'changed', matches: ['http://*/*'], js: ['marker.js']},"
++                       "{id: 'dropped', matches: ['http://*/*'], js: ['marker.js']}])"_L1),
++             "null"_L1);
++    QCOMPARE(scripting(session.page.get(),
++                       "chrome.scripting.updateContentScripts(["
++                       "{id: 'changed', runAt: 'document_start'},"
++                       "{id: 'dropped', persistAcrossSessions: false}])"_L1),
++             "null"_L1);
++    // Last, so no later write of the store can make up for one the unregistering skipped.
++    QCOMPARE(scripting(session.page.get(),
++                       "chrome.scripting.unregisterContentScripts({ids: ['removed']})"_L1),
++             "null"_L1);
++    QCOMPARE(registeredIds(session.page.get()),
++             QStringList({ "changed"_L1, "dropped"_L1, "witness"_L1 }));
++    QTRY_VERIFY(QDir(storage.filePath("Extension Scripts"_L1)).exists());
++
++    session.close();
++    openScriptingSession(session, storage.path());
++    if (QTest::currentTestFailed())
++        return;
++    QTRY_VERIFY(registeredIds(session.page.get()).contains("witness"_L1));
++    QCOMPARE(registeredIds(session.page.get()), QStringList({ "changed"_L1, "witness"_L1 }));
++    QCOMPARE(scripting(session.page.get(),
++                       "chrome.scripting.getRegisteredContentScripts({ids: ['changed']})"
++                       ".then(scripts => scripts[0].runAt)"_L1),
++             "\"document_start\""_L1);
++}
++
++void tst_QWebEngineExtension::anUninstalledExtensionTakesItsKeptScriptsWithIt()
++{
++    // As in Chrome, uninstalling an extension forgets what it registered, so installing it again
++    // starts with nothing. The extension's key gives both installs the same id, which is what
++    // would bring the old scripts back. Installing again starts a new loader, whose first read of
++    // the store finishes before the witness is registered, so the witness alone shows the read.
++    QTemporaryDir storage(QDir::tempPath() + "/tst_QWebEngineExtension-XXXXXX"_L1);
++    ScriptingSession session;
++    openScriptingSession(session, storage.path(), /*install=*/true);
++    if (QTest::currentTestFailed())
++        return;
++    QCOMPARE(scripting(session.page.get(),
++                       "chrome.scripting.registerContentScripts(["
++                       "{id: 'forgotten', matches: ['http://*/*'], js: ['marker.js']}])"_L1),
++             "null"_L1);
++    QTRY_VERIFY(QDir(storage.filePath("Extension Scripts"_L1)).exists());
++
++    QWebEngineExtensionManager *manager = session.profile->extensionManager();
++    const auto installed = [manager] { return keptScriptsExtension(manager); };
++    QSignalSpy uninstallSpy(manager, SIGNAL(uninstallFinished(QWebEngineExtensionInfo)));
++    manager->uninstallExtension(installed());
++    QTRY_COMPARE(uninstallSpy.size(), 1);
++    QVERIFY(installed().name().isEmpty());
++
++    session.page.reset();
++    QSignalSpy installSpy(manager, SIGNAL(installFinished(QWebEngineExtensionInfo)));
++    manager->installExtension(resourcesPath() + "kept_scripts_ext"_L1);
++    QTRY_COMPARE(installSpy.size(), 1);
++    QWebEngineExtensionInfo extension =
++            installSpy.takeFirst().at(0).value<QWebEngineExtensionInfo>();
++    QVERIFY2(extension.isLoaded(), qPrintable(extension.error()));
++    manager->setExtensionEnabled(extension, true);
++    openControlPage(session, extension);
++    if (QTest::currentTestFailed())
++        return;
++
++    QCOMPARE(scripting(session.page.get(),
++                       "chrome.scripting.registerContentScripts(["
++                       "{id: 'witness', matches: ['http://*/*'], js: ['marker.js']}])"_L1),
++             "null"_L1);
++    QCOMPARE(registeredIds(session.page.get()), QStringList("witness"_L1));
++}
++
++void tst_QWebEngineExtension::aDisabledExtensionKeepsItsScripts()
++{
++    // As in Chrome, only uninstalling forgets what an extension registered. Disabling unloads its
++    // scripts, and enabling it again reads them back from the store.
++    QTemporaryDir storage(QDir::tempPath() + "/tst_QWebEngineExtension-XXXXXX"_L1);
++    ScriptingSession session;
++    openScriptingSession(session, storage.path());
++    if (QTest::currentTestFailed())
++        return;
++    QCOMPARE(scripting(session.page.get(),
++                       "chrome.scripting.registerContentScripts(["
++                       "{id: 'kept', matches: ['http://*/*'], js: ['marker.js']}])"_L1),
++             "null"_L1);
++    QTRY_VERIFY(QDir(storage.filePath("Extension Scripts"_L1)).exists());
++
++    QWebEngineExtensionManager *manager = session.profile->extensionManager();
++    const auto loaded = [manager] { return keptScriptsExtension(manager); };
++    session.page.reset();
++    manager->setExtensionEnabled(loaded(), false);
++    QTRY_VERIFY(!loaded().isEnabled());
++    manager->setExtensionEnabled(loaded(), true);
++    QTRY_VERIFY(loaded().isEnabled());
++    openControlPage(session, loaded());
++    if (QTest::currentTestFailed())
++        return;
++    QTRY_COMPARE(registeredIds(session.page.get()), QStringList("kept"_L1));
++}
++
++void tst_QWebEngineExtension::anOffTheRecordProfileKeepsNoScriptStore()
++{
++    // An off-the-record profile given a storage path, which is the shape of a Private window in
++    // a browser that sets one for every profile. It refuses to load an extension, so nothing can
++    // be registered in it, and nothing of the kind reaches the disk.
++    QTemporaryDir storage(QDir::tempPath() + "/tst_QWebEngineExtension-XXXXXX"_L1);
++    QWebEngineProfileBuilder profileBuilder;
++    profileBuilder.setPersistentStoragePath(storage.path());
++    std::unique_ptr<QWebEngineProfile> profile(profileBuilder.createProfile(QString()));
++    QVERIFY(profile->isOffTheRecord());
++    QWebEngineExtensionManager *manager = profile->extensionManager();
++    QSignalSpy spy(manager, SIGNAL(loadFinished(QWebEngineExtensionInfo)));
++    manager->loadExtension(resourcesPath() + "kept_scripts_ext"_L1);
++    QTRY_COMPARE(spy.size(), 1);
++    QWebEngineExtensionInfo extension = spy.takeFirst().at(0).value<QWebEngineExtensionInfo>();
++    QVERIFY2(!extension.isLoaded(), "an off-the-record profile loaded an extension");
++    QVERIFY(!extension.error().isEmpty());
++    profile.reset();
++
++    // A regular profile's store is written on the same file thread, after anything the
++    // off-the-record profile asked of it, so once that store is there the other would be too.
++    QTemporaryDir regular(QDir::tempPath() + "/tst_QWebEngineExtension-XXXXXX"_L1);
++    ScriptingSession session;
++    openScriptingSession(session, regular.path());
++    if (QTest::currentTestFailed())
++        return;
++    QCOMPARE(scripting(session.page.get(),
++                       "chrome.scripting.registerContentScripts(["
++                       "{id: 'regular', matches: ['http://*/*'], js: ['marker.js']}])"_L1),
++             "null"_L1);
++    QTRY_VERIFY(QDir(regular.filePath("Extension Scripts"_L1)).exists());
++
++    QDirIterator kept(storage.path(), { "Extension Scripts"_L1 }, QDir::Dirs,
++                      QDirIterator::Subdirectories);
++    QVERIFY2(!kept.hasNext(), qPrintable(kept.hasNext() ? kept.next() : QString()));
++}
++
+ void tst_QWebEngineExtension::serviceWorkerMessaging()
+ {
+     int lastExtensionCount = extensionCount();
+-- 
+2.55.0
+

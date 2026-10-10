@@ -106,6 +106,10 @@ Re-copy each from the new Chromium and redo two include rewrites per file: the f
 the generated schema header both move from `chrome/` to `qtwebengine/`. Rebuild and let the compiler
 find whatever else moved.
 
+Patch 0022 changes the copied `scripting_api.{cc,h}` after 0005: an update that leaves
+`persistAcrossSessions` out keeps what the script had. Reapply that change to the new copy until
+Chromium has it, or `whatIsKeptFollowsUnregisterAndUpdate` goes red.
+
 Measured once, across Chromium 140 to 146: those files changed by 4 to 13 lines each, and patch 0003
 lost two of the six calls it makes because those migrations finished upstream. Under an hour. All
 five embedder hooks the design depends on were still there with the same names.
