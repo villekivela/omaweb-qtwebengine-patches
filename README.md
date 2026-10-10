@@ -186,14 +186,14 @@ Chrome's registrar does, so the store forgets what an uninstalled extension regi
 kept for it are cleared, and the extension's service worker registration is deleted too; unloading
 keeps both, as disabling does in Chrome. Kept scripts live in two stores, the scripts in the LevelDB
 and their patterns in the extension's prefs, which are written in batches, so a crash between the
-two writes loses them, as in Chrome. A profile that is deleted now waits until its prefs are
-written: they are written in the background, and a profile made next on the same path, as a restart
-within one process makes it, could read them first and start without the patterns, so the scripts
-it kept were never read. The patch also fixes Chromium's `updateContentScripts`, which
-turned a persistent script into a session one whenever the update left `persistAcrossSessions` out,
-because it looked the old value up in a set it had not filled yet. Chromium's `main` has the same
-code. See [omaweb#686](https://github.com/villekivela/omaweb/issues/686). _Follows 0005. Report the
-update bug to Chromium._
+two writes loses them, as in Chrome. Prefs are written in the background and read as a profile is
+made, so a profile made again on the same path, as the tests restart one, could read them before the
+last write and start without the patterns, and the scripts it kept were never read. A profile now
+waits for that write when it is deleted or set up on another path. The patch also fixes Chromium's
+`updateContentScripts`, which turned a persistent script into a session one whenever the update left
+`persistAcrossSessions` out, because it looked the old value up in a set it had not filled yet.
+Chromium's `main` has the same code. See [omaweb#686](https://github.com/villekivela/omaweb/issues/686).
+_Follows 0005. Report the update bug to Chromium._
 
 **0023, tell an extension the window it opened closed.** `windows.create` answered with the one id
 every window call reports, so the page an extension opened had no id of its own, and the series

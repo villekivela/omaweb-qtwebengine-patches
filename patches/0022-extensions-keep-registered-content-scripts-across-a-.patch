@@ -1,4 +1,4 @@
-From 72943994a293797631d13fa986ff35a5ae38ed3b Mon Sep 17 00:00:00 2001
+From d08de5b32ece87dea411de654c1788425509d5c5 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivel=C3=A4?=
  <5814559+villekivela@users.noreply.github.com>
 Date: Sat, 10 Oct 2026 12:09:25 +0300
@@ -69,8 +69,10 @@ the same path, as the tests restart it, could read the file before the
 last write of the one before it. It then started without the patterns,
 so the user-script manager never read the scripts kept for them, and
 its own next write dropped the patterns for good. PrefServiceAdapter
-now waits for that write as it is destroyed. The aarch64 build lost the
-race on every run, and x86_64 pinned to one CPU in six runs of ten.
+now waits for that write as it is destroyed, and before it makes a new
+store for a profile set up again, which may come back to a path it used
+before. The aarch64 build lost the race on every run, and x86_64 pinned
+to one CPU in six runs of ten.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
@@ -86,14 +88,14 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  .../extensions/extensions_browser_client_qt.h |   1 +
  .../extensions/user_script_listener_qt.cpp    | 146 ++++++
  src/core/extensions/user_script_listener_qt.h |  67 +++
- src/core/pref_service_adapter.cpp             |  23 +
+ src/core/pref_service_adapter.cpp             |  27 +
  src/core/pref_service_adapter.h               |   3 +
  .../resources/kept_scripts_ext/control.html   |   2 +
  .../resources/kept_scripts_ext/control.js     |   7 +
  .../resources/kept_scripts_ext/manifest.json  |  12 +
  .../resources/kept_scripts_ext/marker.js      |   1 +
  .../extensions/tst_qwebengineextension.cpp    | 484 ++++++++++++++++++
- 19 files changed, 868 insertions(+), 4 deletions(-)
+ 19 files changed, 872 insertions(+), 4 deletions(-)
  create mode 100644 src/core/extensions/user_script_listener_qt.cpp
  create mode 100644 src/core/extensions/user_script_listener_qt.h
  create mode 100644 tests/auto/widgets/extensions/resources/kept_scripts_ext/control.html
@@ -669,7 +671,7 @@ index 0000000000..f4f1886b12
 +
 +#endif // USER_SCRIPT_LISTENER_QT_H_
 diff --git a/src/core/pref_service_adapter.cpp b/src/core/pref_service_adapter.cpp
-index 46aa19b4d8..e11c91a117 100644
+index 46aa19b4d8..4efd8b2e7e 100644
 --- a/src/core/pref_service_adapter.cpp
 +++ b/src/core/pref_service_adapter.cpp
 @@ -10,6 +10,8 @@
@@ -681,21 +683,35 @@ index 46aa19b4d8..e11c91a117 100644
  #include "base/threading/thread_restrictions.h"
  #include "chrome/browser/prefs/chrome_command_line_pref_store.h"
  #include "content/public/browser/browser_thread.h"
-@@ -173,6 +175,27 @@ void PrefServiceAdapter::commit()
-     m_prefService->CommitPendingWrite();
- }
+@@ -62,9 +64,17 @@ using namespace Qt::StringLiterals;
+ 
+ namespace QtWebEngineCore {
  
 +PrefServiceAdapter::~PrefServiceAdapter()
 +{
 +    commitAndWait();
 +}
 +
+ void PrefServiceAdapter::setup(const ProfileAdapter &profileAdapter)
+ {
+     DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
++    // A profile set up again may come back to a path it used before, whose file the store made
++    // below reads at once.
++    commitAndWait();
+     PrefServiceFactory factory;
+     factory.set_command_line_prefs(base::MakeRefCounted<ChromeCommandLinePrefStore>(
+             base::CommandLine::ForCurrentProcess()));
+@@ -173,6 +183,23 @@ void PrefServiceAdapter::commit()
+     m_prefService->CommitPendingWrite();
+ }
+ 
 +// Writes what is pending and returns once it is on disk. The file is written in the background and
-+// read on the UI thread, so a profile made next on the same path could otherwise read it before the
-+// last write of the one before it, and start without the preferences that profile kept. The thread
-+// pool outlives every profile, so the write always runs.
++// read on the UI thread, so a store made next on the same path could otherwise read it before the
++// last write of the one before it, and start without the preferences that one kept. The thread pool
++// outlives every profile, so the write always runs.
 +void PrefServiceAdapter::commitAndWait()
 +{
++    DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 +    if (!m_prefService)
 +        return;
 +    base::WaitableEvent written;
