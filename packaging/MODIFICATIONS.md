@@ -23,8 +23,9 @@ own change to the engine's tests, so that they build against Qt 6.12; it changes
 installed. The twenty-first adds one more piece of the extension runtime: the application says
 where the window holding a page is, and the `windows` namespace reports it to an extension. The
 twenty-second keeps the content scripts an extension registers to persist across a restart, in the
-profile's storage path, and fixes Chromium's `scripting` namespace keeping one only for the session
-after an update that leaves its persistence out.
+profile's storage path, forgets them when another version of the extension is loaded, holds a
+page they are for until they are read, and fixes Chromium's `scripting` namespace keeping one only
+for the session after an update that leaves its persistence out.
 
 On x86_64 the engine is built with clang and LLD, with ThinLTO and Chrome's own PGO profile for its
 Chromium, where Qt's build would use GCC. On aarch64 it is built with GCC, as Qt's is.

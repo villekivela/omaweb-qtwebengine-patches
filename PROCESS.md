@@ -110,6 +110,11 @@ Patch 0022 changes the copied `scripting_api.{cc,h}` after 0005: an update that 
 `persistAcrossSessions` out keeps what the script had. Reapply that change to the new copy until
 Chromium has it, or `whatIsKeptFollowsUnregisterAndUpdate` goes red.
 
+0022 also adds `src/core/extensions/user_script_listener_qt.{cpp,h}`, Chrome's
+`chrome/browser/extensions/user_script_listener.cc` rewritten for one profile, because that file is
+not in Qt's tree. Compare it with the new Chromium's, which is where a change to when a navigation
+waits for an extension's scripts would show.
+
 Measured once, across Chromium 140 to 146: those files changed by 4 to 13 lines each, and patch 0003
 lost two of the six calls it makes because those migrations finished upstream. Under an hour. All
 five embedder hooks the design depends on were still there with the same names.
