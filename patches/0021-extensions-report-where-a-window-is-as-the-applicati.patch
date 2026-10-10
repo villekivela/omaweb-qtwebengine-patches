@@ -1,4 +1,4 @@
-From f56f1ad171298e7fb32aca20395750df7e67f88e Mon Sep 17 00:00:00 2001
+From bd2946da642cadbb88c0623ea7cb2f02b88ab3f2 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivel=C3=A4?= <vkivela@hotmail.com>
 Date: Sat, 10 Oct 2026 10:55:47 +0300
 Subject: [PATCH] extensions: report where a window is, as the application says
@@ -22,23 +22,26 @@ Without a provider, or with an invalid answer, the window is at 0, 0 and
 as large as the asking view, or the active tab's view for a worker, so an
 extension always gets four integers.
 
+The engine calls a copy of the provider, so a provider that replaces
+itself while it is called is not destroyed under its own call.
+
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
- .../extensions/api/windows/windows_api.cc     |  40 ++++---
- .../browser/extensions/tab_registry_qt.cc     |   7 ++
- .../browser/extensions/tab_registry_qt.h      |   7 ++
- src/core/api/qwebengineextensionmanager.cpp   |  25 ++++
+ .../extensions/api/windows/windows_api.cc     |  40 +++--
+ .../browser/extensions/tab_registry_qt.cc     |   7 +
+ .../browser/extensions/tab_registry_qt.h      |   7 +
+ src/core/api/qwebengineextensionmanager.cpp   |  25 +++
  src/core/api/qwebengineextensionmanager.h     |   5 +
  src/core/extensions/extension_manager.h       |  12 ++
- .../extensions_browser_client_qt.cpp          |  42 +++++++
+ .../extensions_browser_client_qt.cpp          |  47 ++++++
  .../extensions/extensions_browser_client_qt.h |   2 +
  .../resources/windows_ext/blank.html          |   2 +
- .../resources/windows_ext/manifest.json       |   8 ++
+ .../resources/windows_ext/manifest.json       |   8 +
  .../resources/windows_ext/page.html           |   6 +
- .../extensions/resources/windows_ext/page.js  |  31 +++++
- .../resources/windows_ext/service_worker.js   |   8 ++
- .../extensions/tst_qwebengineextension.cpp    | 110 ++++++++++++++++++
- 14 files changed, 292 insertions(+), 13 deletions(-)
+ .../extensions/resources/windows_ext/page.js  |  31 ++++
+ .../resources/windows_ext/service_worker.js   |   8 +
+ .../extensions/tst_qwebengineextension.cpp    | 150 ++++++++++++++++++
+ 14 files changed, 337 insertions(+), 13 deletions(-)
  create mode 100644 tests/auto/widgets/extensions/resources/windows_ext/blank.html
  create mode 100644 tests/auto/widgets/extensions/resources/windows_ext/manifest.json
  create mode 100644 tests/auto/widgets/extensions/resources/windows_ext/page.html
@@ -283,7 +286,7 @@ index a0e620fd28..471bab7166 100644
  } // namespace QtWebEngineCore
  
 diff --git a/src/core/extensions/extensions_browser_client_qt.cpp b/src/core/extensions/extensions_browser_client_qt.cpp
-index 3de7934ac9..9398af179f 100644
+index 3de7934ac9..6dda1a4882 100644
 --- a/src/core/extensions/extensions_browser_client_qt.cpp
 +++ b/src/core/extensions/extensions_browser_client_qt.cpp
 @@ -57,6 +57,7 @@
@@ -294,7 +297,7 @@ index 3de7934ac9..9398af179f 100644
  #include "content/public/browser/web_contents.h"
  #include "profile_adapter.h"
  #include "profile_adapter_client.h"
-@@ -438,6 +439,47 @@ content::WebContents *ExtensionsBrowserClientQt::OpenPage(content::BrowserContex
+@@ -438,6 +439,52 @@ content::WebContents *ExtensionsBrowserClientQt::OpenPage(content::BrowserContex
      return contents;
  }
  
@@ -325,15 +328,20 @@ index 3de7934ac9..9398af179f 100644
 +    QtWebEngineCore::ProfileAdapter *adapter = profile->profileAdapter();
 +    QtWebEngineCore::WebContentsAdapterClient *asking = clientFor(adapter, web_contents);
 +
++    // A copy, because a provider may replace itself while it is called.
 +    QtWebEngineCore::ExtensionManager *manager = profile->extensionManager();
-+    if (manager && manager->windowGeometryProvider()) {
-+        const QRect answer =
-+                manager->windowGeometryProvider()(asking ? asking->holdingQObject() : nullptr);
++    const QtWebEngineCore::ExtensionManager::WindowGeometryProvider provider =
++            manager ? manager->windowGeometryProvider()
++                    : QtWebEngineCore::ExtensionManager::WindowGeometryProvider();
++    if (provider) {
++        const QRect answer = provider(asking ? asking->holdingQObject() : nullptr);
 +        if (answer.isValid())
 +            return gfx::Rect(answer.x(), answer.y(), answer.width(), answer.height());
 +    }
 +
-+    if (!web_contents)
++    // A call from contents the application holds no page for, a worker's or the extension
++    // system's own, is sized like the tab on show.
++    if (!asking)
 +        asking = clientFor(adapter, GetActiveTab(context));
 +    const QSize size = asking ? asking->viewportRect().size().toSize() : QSize(0, 0);
 +    return gfx::Rect(0, 0, size.width(), size.height());
@@ -441,19 +449,20 @@ index 0000000000..8447b884ae
 +    return true;
 +})
 diff --git a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
-index 52c2a26be3..f17e43d437 100644
+index 52c2a26be3..1290b685fb 100644
 --- a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
 +++ b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
-@@ -66,6 +66,8 @@ private Q_SLOTS:
+@@ -66,6 +66,9 @@ private Q_SLOTS:
      void tabsWindowsAndScripting();
      void nativeMessaging();
      void anExtensionOpensAPage();
 +    void aWindowIsWhereTheApplicationSaysItIs();
 +    void withoutAnAnswerAWindowIsWhereItsViewIs();
++    void aProviderCanReplaceItselfWhileItIsAsked();
  
  private:
      int installedFiles();
-@@ -1083,5 +1085,113 @@ void tst_QWebEngineExtension::anExtensionOpensAPage()
+@@ -1083,5 +1086,152 @@ void tst_QWebEngineExtension::anExtensionOpensAPage()
      QTRY_COMPARE(opened->url().path(), "/index.html"_L1);
  }
  
@@ -563,6 +572,45 @@ index 52c2a26be3..f17e43d437 100644
 +    QCOMPARE(placeOf(result["getLastFocused"_L1]), QRect(0, 0, 320, 240));
 +    QCOMPARE(placeOf(result["getAll"_L1]), QRect(0, 0, 320, 240));
 +    QCOMPARE(placeOf(result["worker"_L1]), QRect(0, 0, 400, 300));
++}
++
++// Outside the provider, because the provider is gone by the time it reads them.
++static std::weak_ptr<int> s_providerCapture;
++static bool s_providerOutlivedItsReplacement = false;
++
++void tst_QWebEngineExtension::aProviderCanReplaceItselfWhileItIsAsked()
++{
++    // An application may change its answer from inside it, such as on its first call. The engine
++    // holds on to the provider it is calling, so what the provider captured outlives the call.
++    QWebEngineExtensionInfo extension = loadExtensionSync(resourcesPath() + "windows_ext"_L1);
++    QVERIFY(extension.isLoaded());
++    m_manager->setExtensionEnabled(extension, true);
++
++    auto capture = std::make_shared<int>(0);
++    s_providerCapture = capture;
++    s_providerOutlivedItsReplacement = false;
++    QWebEngineExtensionManager *manager = m_manager;
++    m_manager->setWindowGeometryProvider([manager, capture](const QObject *) {
++        manager->setWindowGeometryProvider({});
++        s_providerOutlivedItsReplacement = !s_providerCapture.expired();
++        return QRect(11, 22, 640, 480);
++    });
++    capture.reset();
++    auto forget = qScopeGuard([this] { m_manager->setWindowGeometryProvider({}); });
++
++    QWebEnginePage extensionPage(m_profile);
++    QWebEngineView view;
++    view.setPage(&extensionPage);
++    view.resize(320, 240);
++    view.show();
++    QVERIFY(QTest::qWaitForWindowExposed(&view));
++    extensionPage.load(QUrl("chrome-extension://"_L1 + extension.id() + "/page.html"_L1));
++    const QVariantMap result = windowsReport(&extensionPage);
++    QVERIFY2(!result.isEmpty(), "the extension page never reported");
++    QVERIFY2(!result.contains("error"_L1), qPrintable(result.value("error"_L1).toString()));
++    QVERIFY(s_providerOutlivedItsReplacement);
++    QCOMPARE(placeOf(result["get"_L1]), QRect(11, 22, 640, 480));
++    QCOMPARE(placeOf(result["getCurrent"_L1]), QRect(0, 0, 320, 240));
 +}
 +
  QTEST_MAIN(tst_QWebEngineExtension)

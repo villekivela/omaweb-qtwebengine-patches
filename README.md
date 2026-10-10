@@ -181,7 +181,7 @@ one is active. That is what the QTBUG draft asks for. Ask before writing the API
 
 ## Tests
 
-39 tests pass with the series applied. Six of them fail on a stock build, which is why they are
+40 tests pass with the series applied. Six of them fail on a stock build, which is why they are
 worth having:
 
 - `serviceWorkerLocalization` fails
@@ -196,9 +196,11 @@ only those, beside the extension tests. Patch 0017's case lives in Qt's `tst_cer
 has the test server's certificate, and the gate runs it the same way. `scripts/verify.sh` runs all
 three and reports them. Neither compiles against a stock build, which has no API for them to call,
 so there is no stock run to compare: removing the line that keeps the chain fails 0017's case.
-Patch 0021's two cases, `aWindowIsWhereTheApplicationSaysItIs` and
-`withoutAnAnswerAWindowIsWhereItsViewIs`, are in the extension tests and do not compile without the
-patch either. Taking the four numbers out of `windows_api.cc` fails both.
+Patch 0021's three cases, `aWindowIsWhereTheApplicationSaysItIs`,
+`withoutAnAnswerAWindowIsWhereItsViewIs` and `aProviderCanReplaceItselfWhileItIsAsked`, are in the
+extension tests and do not compile without the patch either. Taking the four numbers out of
+`windows_api.cc` fails the first two, and calling the stored provider rather than a copy fails the
+third.
 
 Patch 0018 has no test case, because what it changes is how V8 is compiled. The gate reads that
 instead. `scripts/check-write-barriers.sh` fails a tree whose V8 is compiled with
@@ -215,7 +217,7 @@ stays after 0018 drops, so a later Qt that turns the barriers off again is notic
 | 6.11.2, series grown to 18 | 1 more, no conflicts | incremental | 50 of 50 | none |
 | 6.11.2-5, rebuilt for speed | already applied | incremental | 50 of 50 | none |
 | 6.11.2-6, on Qt 6.12, series grown to 20 | 19 already applied, 1 more, no conflicts | incremental | 51 of 51 | minutes: 0020, after the tests did not build |
-| 6.11.2-8, series grown to 21 | 20 already applied, 1 more, no conflicts | incremental | 53 of 53 | none |
+| 6.11.2-8, series grown to 21 | 20 already applied, 1 more, no conflicts | incremental | 54 of 54 | none |
 
 The rows after the first are the series growing, and the last is the same series rebuilt with each
 architecture's toolchain and published as 6.11.2-5 (omaweb#576), rather than Qt moving. They
