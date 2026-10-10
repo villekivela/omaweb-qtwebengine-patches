@@ -1,8 +1,8 @@
 # QtWebEngine extension patches
 
-Twenty-three patches to QtWebEngine. Sixteen let it host a password manager's Chromium extension, two
-add API that Omaweb's content blocking and certificate view ask for, one restores a trace macro that
-slowed every page, one turns V8's write barriers back on, one keeps an offscreen document from
+Twenty-three patches to QtWebEngine. Sixteen let it host a password manager's Chromium extension,
+two add API that Omaweb's content blocking and certificate view ask for, one restores a trace macro
+that slowed every page, one turns V8's write barriers back on, one keeps an offscreen document from
 crashing the engine, one builds the tests against Qt 6.12, and one keeps the content scripts any
 extension registers across a restart. Base is the released `qtwebengine-everywhere-src-6.11.2`
 tarball.
