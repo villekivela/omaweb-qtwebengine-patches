@@ -177,18 +177,19 @@ after a restart, because `ExtensionSystemQt` had no store to keep them in. A reg
 Chrome's, under `Extension Scripts` in its storage path. An off-the-record profile has none, and its
 loader refuses an extension anyway. A navigation to a page an enabled extension's scripts are for
 waits until they are read, as Chrome's `UserScriptListener` makes it, which Qt's tree does not
-carry, so a tab restored as the extension is turned on runs them on its first load. Loading a
-version other than the one loaded last is an update, and forgets what the old version registered, as
-Chrome's install does. Uninstalling now tells the registry's observers, as Chrome's registrar does,
-so the store forgets what an uninstalled extension registered and the extension's service worker
-registration is deleted too; unloading keeps both, as disabling does in Chrome. Kept scripts live in
-two stores, the scripts in the LevelDB and their patterns in the extension's prefs, which are
-written in batches, so a crash between the two writes loses them, as in Chrome. The patch also fixes
-Chromium's `updateContentScripts`, which turned a persistent script into a session one whenever the
-update left `persistAcrossSessions` out, because it looked the old value up in a set it had not
-filled yet. Chromium's `main` has the same code. See
-[omaweb#686](https://github.com/villekivela/omaweb/issues/686). _Follows 0005. Report the update bug
-to Chromium._
+carry. Kept scripts count only for an extension with the `scripting` or `userScripts` permission, as
+the manager reads them only then, so a tab restored as the extension is turned on runs them on its
+first load. Loading a version other than the one loaded last is an update, and forgets what the old
+version registered, as Chrome's install does. Uninstalling now tells the registry's observers, as
+Chrome's registrar does, so the store forgets what an uninstalled extension registered, the patterns
+kept for it are cleared, and the extension's service worker registration is deleted too; unloading
+keeps both, as disabling does in Chrome. Kept scripts live in two stores, the scripts in the LevelDB
+and their patterns in the extension's prefs, which are written in batches, so a crash between the
+two writes loses them, as in Chrome. The patch also fixes Chromium's `updateContentScripts`, which
+turned a persistent script into a session one whenever the update left `persistAcrossSessions` out,
+because it looked the old value up in a set it had not filled yet. Chromium's `main` has the same
+code. See [omaweb#686](https://github.com/villekivela/omaweb/issues/686). _Follows 0005. Report the
+update bug to Chromium._
 
 ## The open question
 
@@ -201,7 +202,7 @@ one is active. That is what the QTBUG draft asks for. Ask before writing the API
 
 ## Tests
 
-48 tests pass with the series applied. Six of them fail on a stock build, which is why they are
+49 tests pass with the series applied. Six of them fail on a stock build, which is why they are
 worth having:
 
 - `serviceWorkerLocalization` fails
@@ -222,12 +223,13 @@ extension tests and do not compile without the patch either. Taking the four num
 `windows_api.cc` fails the first two, and calling the stored provider rather than a copy fails the
 third.
 
-Patch 0022's eight cases restart a profile on the same storage path, disable and enable the
-extension, or load a new version of it. They compile on the series without 0022. Five of the first
-six, all but the disabled case, were run there, and each failed, because no store is written. The
-update and restored-tab cases came with the patch's second version and failed on its first, which
-kept the old version's script and let a page load before the kept script was read. With the patch,
-each is red with its part broken:
+Patch 0022's nine cases restart a profile on the same storage path, disable and enable the
+extension, or load it again changed. They compile on the series without 0022. Five of the first six,
+all but the disabled case, were run there, and each failed, because no store is written. The update
+and restored-tab cases came with the patch's second version and failed on its first, which kept the
+old version's script and let a page load before the kept script was read. The lost-permission case
+came with the third and failed on the second, whose throttle waited for good. With the patch, each
+is red with its part broken:
 
 - `aRegisteredContentScriptIsKeptAcrossARestart` fails without the store
 - `aScriptNotPersistedAcrossSessionsIsGoneAfterARestart` fails when every registered script is
@@ -243,11 +245,14 @@ each is red with its part broken:
 - `aPageOpenedAsTheExtensionIsEnabledRunsItsKeptScripts` fails without the navigation throttle. Its
   script carries 32 MB of comment, because a small one is read before a page from this machine
   arrives and the case passes without the throttle; at 8 MB it still passed
+- `aPageDoesNotWaitForScriptsTheExtensionMayNoLongerRun` fails when the throttle waits for kept
+  scripts of an extension without the `scripting` or `userScripts` permission, which the manager
+  never reads
 
-The last one pins the loader's refusal because that is what keeps an off-the-record profile off the
-disk: past it, the extension's pages do not run their scripts, so nothing could register. The
-patch's own check that such a profile gets no store has no case that can fail today for the same
-reason.
+`anOffTheRecordProfileKeepsNoScriptStore` pins the loader's refusal because that is what keeps an
+off-the-record profile off the disk: past it, the extension's pages do not run their scripts, so
+nothing could register. The patch's own check that such a profile gets no store has no case that can
+fail today for the same reason.
 
 Patch 0018 has no test case, because what it changes is how V8 is compiled. The gate reads that
 instead. `scripts/check-write-barriers.sh` fails a tree whose V8 is compiled with
@@ -265,7 +270,7 @@ stays after 0018 drops, so a later Qt that turns the barriers off again is notic
 | 6.11.2-5, rebuilt for speed | already applied | incremental | 50 of 50 | none |
 | 6.11.2-6, on Qt 6.12, series grown to 20 | 19 already applied, 1 more, no conflicts | incremental | 51 of 51 | minutes: 0020, after the tests did not build |
 | 6.11.2-8, series grown to 21 | 20 already applied, 1 more, no conflicts | incremental | 54 of 54 | none |
-| 6.11.2-9, series grown to 22 | 20 already applied, 2 more, no conflicts | incremental | 62 of 62 | none |
+| 6.11.2-9, series grown to 22 | 20 already applied, 2 more, no conflicts | incremental | 63 of 63 | none |
 
 The rows after the first are the series growing, and the last is the same series rebuilt with each
 architecture's toolchain and published as 6.11.2-5 (omaweb#576), rather than Qt moving. They

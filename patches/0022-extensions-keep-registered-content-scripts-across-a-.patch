@@ -1,4 +1,4 @@
-From 8a1ff0d5529aefe133190a96e370b0c9b305e573 Mon Sep 17 00:00:00 2001
+From 123c9b5d26b57a50786ab50bf96cd24abde4f5e1 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivel=C3=A4?=
  <5814559+villekivela@users.noreply.github.com>
 Date: Sat, 10 Oct 2026 12:09:25 +0300
@@ -21,9 +21,11 @@ storage path, and the store must not be opened there if that changes.
 Chrome's store forgets an extension's scripts when the registry says it
 was uninstalled, and Qt's uninstall only unloaded it, so a script came
 back when the same extension was installed again. The extension manager
-now tells the registry. Every observer hears it, as in Chrome, so the
-service worker manager also deletes the extension's worker registration.
-Unloading alone keeps the scripts, as disabling does in Chrome.
+now tells the registry, and clears the URL patterns kept for the
+scripts, which Chrome drops with the rest of the extension's prefs.
+Every observer hears it, as in Chrome, so the service worker manager
+also deletes the extension's worker registration. Unloading alone keeps
+the scripts, as disabling does in Chrome.
 
 An update that leaves persistAcrossSessions out keeps what the script
 had, as the API documents. Chromium looked that up in the set it was
@@ -46,9 +48,11 @@ holds it. That file is not in this tree, so UserScriptListenerQt is
 Chrome's for one profile. Kept scripts are read from the store only
 after the extension is enabled, and a page opened at once, such as a
 restored tab, loaded without them. The listener waits for what the
-manager reads: an extension's manifest scripts and the URL patterns of
-the scripts it kept, and the manager signals when every read is done,
-an unloaded extension included.
+manager reads: an extension's manifest scripts, and the URL patterns of
+the scripts it kept if it still has the scripting or userScripts
+permission, which is when the manager reads them. The manager signals
+when every read is done, an unloaded extension included, so a page never
+waits for a read that does not start.
 
 The scripts themselves are in the store and their URL patterns in the
 extension's prefs, which are written separately, so a crash between
@@ -65,19 +69,19 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  src/core/CMakeLists.txt                       |   1 +
  src/core/content_browser_client_qt.cpp        |  14 +
  src/core/extensions/extension_loader.cpp      |   5 +
- src/core/extensions/extension_manager.cpp     |   9 +
- src/core/extensions/extension_system_qt.cpp   |  42 +-
- src/core/extensions/extension_system_qt.h     |  14 +
+ src/core/extensions/extension_manager.cpp     |  13 +
+ src/core/extensions/extension_system_qt.cpp   |  51 +-
+ src/core/extensions/extension_system_qt.h     |  17 +
  .../extensions_browser_client_qt.cpp          |  11 +
  .../extensions/extensions_browser_client_qt.h |   1 +
- .../extensions/user_script_listener_qt.cpp    | 137 ++++++
+ .../extensions/user_script_listener_qt.cpp    | 146 ++++++
  src/core/extensions/user_script_listener_qt.h |  67 +++
  .../resources/kept_scripts_ext/control.html   |   2 +
  .../resources/kept_scripts_ext/control.js     |   7 +
  .../resources/kept_scripts_ext/manifest.json  |  12 +
  .../resources/kept_scripts_ext/marker.js      |   1 +
- .../extensions/tst_qwebengineextension.cpp    | 435 ++++++++++++++++++
- 17 files changed, 768 insertions(+), 4 deletions(-)
+ .../extensions/tst_qwebengineextension.cpp    | 484 ++++++++++++++++++
+ 17 files changed, 842 insertions(+), 4 deletions(-)
  create mode 100644 src/core/extensions/user_script_listener_qt.cpp
  create mode 100644 src/core/extensions/user_script_listener_qt.h
  create mode 100644 tests/auto/widgets/extensions/resources/kept_scripts_ext/control.html
@@ -154,14 +158,15 @@ index 5dc30297c8..4c91675df6 100644
                  renderer/extensions/extensions_renderer_api_provider_qt.cpp renderer/extensions/extensions_renderer_api_provider_qt.h
                  renderer/extensions/extensions_renderer_client_qt.cpp renderer/extensions/extensions_renderer_client_qt.h
 diff --git a/src/core/content_browser_client_qt.cpp b/src/core/content_browser_client_qt.cpp
-index ed29e37461..24c0616975 100644
+index ed29e37461..ce35f4eebd 100644
 --- a/src/core/content_browser_client_qt.cpp
 +++ b/src/core/content_browser_client_qt.cpp
-@@ -135,7 +135,9 @@
+@@ -134,8 +134,10 @@
+ #include "extensions/browser/view_type_utils.h"
  #include "extensions/common/constants.h"
  #include "extensions/common/manifest_handlers/mime_types_handler.h"
- #include "extensions/extension_web_contents_observer_qt.h"
 +#include "extensions/extension_system_qt.h"
+ #include "extensions/extension_web_contents_observer_qt.h"
  #include "extensions/extensions_browser_client_qt.h"
 +#include "extensions/user_script_listener_qt.h"
  #include "net/plugin_response_interceptor_url_loader_throttle.h"
@@ -174,10 +179,10 @@ index ed29e37461..24c0616975 100644
 +#if BUILDFLAG(ENABLE_EXTENSIONS)
 +    // A page an extension's content scripts are for waits until they are read, as in Chrome.
 +    if (content::WebContents *contents = registry.GetNavigationHandle().GetWebContents()) {
++        auto *system = static_cast<extensions::ExtensionSystemQt *>(
++                extensions::ExtensionSystem::Get(contents->GetBrowserContext()));
 +        if (extensions::UserScriptListenerQt *listener =
-+                    static_cast<extensions::ExtensionSystemQt *>(
-+                            extensions::ExtensionSystem::Get(contents->GetBrowserContext()))
-+                            ->user_script_listener()) {
++                    system ? system->user_script_listener() : nullptr) {
 +            listener->CreateAndAddNavigationThrottle(registry);
 +        }
 +    }
@@ -217,10 +222,18 @@ index a40ab37fd3..4a4e8e77ef 100644
      m_manager->onExtensionLoaded(loadingInfo.extension.get());
  }
 diff --git a/src/core/extensions/extension_manager.cpp b/src/core/extensions/extension_manager.cpp
-index b7ce987ede..43994c6b11 100644
+index b7ce987ede..454bc4c7ca 100644
 --- a/src/core/extensions/extension_manager.cpp
 +++ b/src/core/extensions/extension_manager.cpp
-@@ -19,6 +19,8 @@
+@@ -12,6 +12,7 @@
+ #include "api/qwebengineextensionmanager.h"
+ #include "extension_loader.h"
+ #include "extension_installer.h"
++#include "extension_system_qt.h"
+ #include "type_conversion.h"
+ 
+ #include "base/functional/callback.h"
+@@ -19,6 +20,8 @@
  #include "extensions/browser/extension_action.h"
  #include "extensions/browser/extension_action_manager.h"
  #include "extensions/browser/extension_file_task_runner.h"
@@ -229,7 +242,7 @@ index b7ce987ede..43994c6b11 100644
  
  using namespace extensions;
  
-@@ -178,6 +180,13 @@ void ExtensionManager::onExtensionUninstalled(const std::string &id)
+@@ -178,6 +181,16 @@ void ExtensionManager::onExtensionUninstalled(const std::string &id)
  {
      scoped_refptr<const Extension> extension = m_loader->getExtensionById(id);
      m_loader->unloadExtension(extension->id());
@@ -240,11 +253,14 @@ index b7ce987ede..43994c6b11 100644
 +    // and asks to open it, which does nothing only because RuntimeAPIDelegateQt::OpenURL is empty.
 +    ExtensionRegistry::Get(m_context)->TriggerOnUninstalled(extension.get(),
 +                                                            UNINSTALL_REASON_USER_INITIATED);
++    // Qt keeps an uninstalled extension's prefs, where Chrome deletes them, so the patterns kept
++    // for its scripts go too.
++    static_cast<ExtensionSystemQt *>(ExtensionSystem::Get(m_context))->ForgetKeptScripts(id);
  
      Q_Q(QWebEngineExtensionManager);
      Q_EMIT q->uninstallFinished(
 diff --git a/src/core/extensions/extension_system_qt.cpp b/src/core/extensions/extension_system_qt.cpp
-index 14187f2a87..b82fd8d08d 100644
+index 14187f2a87..67e5657c3b 100644
 --- a/src/core/extensions/extension_system_qt.cpp
 +++ b/src/core/extensions/extension_system_qt.cpp
 @@ -12,6 +12,7 @@
@@ -266,7 +282,7 @@ index 14187f2a87..b82fd8d08d 100644
  #include "extensions/browser/task_queue_util.h"
  #include "extensions/browser/user_script_manager.h"
  #include "extensions/common/constants.h"
-@@ -253,7 +257,31 @@ StateStore *ExtensionSystemQt::rules_store()
+@@ -253,7 +257,40 @@ StateStore *ExtensionSystemQt::rules_store()
  
  StateStore *ExtensionSystemQt::dynamic_user_scripts_store()
  {
@@ -296,10 +312,19 @@ index 14187f2a87..b82fd8d08d 100644
 +        scripting::ClearPersistentScriptURLPatterns(browser_context_, extension.id());
 +    }
 +    prefs->UpdateExtensionPref(extension.id(), kKeptScriptsVersionPref, base::Value(version));
++}
++
++void ExtensionSystemQt::ForgetKeptScripts(const ExtensionId &id)
++{
++    if (!dynamic_user_scripts_store_)
++        return;
++    scripting::ClearPersistentScriptURLPatterns(browser_context_, id);
++    ExtensionPrefs::Get(browser_context_)->UpdateExtensionPref(id, kKeptScriptsVersionPref,
++                                                               std::nullopt);
  }
  
  scoped_refptr<value_store::ValueStoreFactory> ExtensionSystemQt::store_factory()
-@@ -301,6 +329,18 @@ void ExtensionSystemQt::Init(bool extensions_enabled)
+@@ -301,6 +338,18 @@ void ExtensionSystemQt::Init(bool extensions_enabled)
      initialized_ = true;
  
      service_worker_manager_ = std::make_unique<ServiceWorkerManager>(browser_context_);
@@ -319,7 +344,7 @@ index 14187f2a87..b82fd8d08d 100644
      quota_service_ = std::make_unique<QuotaService>();
  #if QT_CONFIG(webengine_extensions)
 diff --git a/src/core/extensions/extension_system_qt.h b/src/core/extensions/extension_system_qt.h
-index 94a7ef7f1e..33513592fc 100644
+index 94a7ef7f1e..a2d417203e 100644
 --- a/src/core/extensions/extension_system_qt.h
 +++ b/src/core/extensions/extension_system_qt.h
 @@ -37,7 +37,9 @@ class InfoMap;
@@ -332,7 +357,7 @@ index 94a7ef7f1e..33513592fc 100644
  
  // The ExtensionSystem for ProfileImpl and OffTheRecordProfileImpl.
  // Implementation details: non-shared services are owned by
-@@ -83,10 +85,22 @@ public:
+@@ -83,10 +85,25 @@ public:
      QtWebEngineCore::ExtensionManager *extensionManager();
  #endif
  
@@ -343,6 +368,9 @@ index 94a7ef7f1e..33513592fc 100644
 +    // Called before an extension is added. A version other than the one loaded last is an
 +    // update, and Chrome forgets the scripts the old version registered when it installs one.
 +    void ForgetScriptsOfAnOlderVersion(const Extension &extension);
++    // An uninstalled extension's kept-script URL patterns and the version they were kept for. The
++    // store forgets the scripts themselves when the registry says the extension was uninstalled.
++    void ForgetKeptScripts(const ExtensionId &id);
 +
  private:
      void NotifyExtensionLoaded(const Extension *extension);
@@ -405,10 +433,10 @@ index 96fb57fe09..666ee35e7c 100644
  private:
 diff --git a/src/core/extensions/user_script_listener_qt.cpp b/src/core/extensions/user_script_listener_qt.cpp
 new file mode 100644
-index 0000000000..3b01205335
+index 0000000000..3184f044b9
 --- /dev/null
 +++ b/src/core/extensions/user_script_listener_qt.cpp
-@@ -0,0 +1,137 @@
+@@ -0,0 +1,146 @@
 +// Copyright (C) 2026 The Qt Company Ltd.
 +// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 +// Qt-Security score:significant reason:default
@@ -424,6 +452,8 @@ index 0000000000..3b01205335
 +#include "extensions/browser/scripting_utils.h"
 +#include "extensions/common/extension.h"
 +#include "extensions/common/manifest_handlers/content_scripts_handler.h"
++#include "extensions/common/permissions/api_permission.h"
++#include "extensions/common/permissions/permissions_data.h"
 +#include "extensions/common/url_pattern_set.h"
 +
 +namespace extensions {
@@ -508,7 +538,14 @@ index 0000000000..3b01205335
 +                         script->url_patterns().end());
 +    }
 +    // The scripts an extension registered to persist are known by their patterns, which are kept
-+    // in its prefs for this, while the scripts themselves are still being read from the store.
++    // in its prefs for this, while the scripts themselves are still being read from the store. The
++    // user-script manager reads them only for an extension that may still run them, so a page waits
++    // only then: waiting for a read that never starts would hold it for good.
++    const PermissionsData *permissions = extension->permissions_data();
++    if (!permissions->HasAPIPermission(mojom::APIPermissionID::kScripting)
++        && !permissions->HasAPIPermission(mojom::APIPermissionID::kUserScripts)) {
++        return;
++    }
 +    URLPatternSet dynamic_patterns =
 +            scripting::GetPersistentScriptURLPatterns(context_, extension->id());
 +    patterns->insert(patterns->end(), dynamic_patterns.begin(), dynamic_patterns.end());
@@ -666,7 +703,7 @@ index 0000000000..3ef78a315d
 @@ -0,0 +1 @@
 +document.documentElement.dataset.kept = "yes";
 diff --git a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
-index 1290b685fb..faf204f7b6 100644
+index 1290b685fb..c3e28363e9 100644
 --- a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
 +++ b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
 @@ -19,6 +19,8 @@
@@ -678,7 +715,7 @@ index 1290b685fb..faf204f7b6 100644
  
  using namespace Qt::StringLiterals;
  
-@@ -46,6 +48,14 @@ private Q_SLOTS:
+@@ -46,6 +48,15 @@ private Q_SLOTS:
      void loadOffTheRecord();
      void installOffTheRecord();
      void loadInstalledExtensions();
@@ -688,12 +725,13 @@ index 1290b685fb..faf204f7b6 100644
 +    void anUninstalledExtensionTakesItsKeptScriptsWithIt();
 +    void aDisabledExtensionKeepsItsScripts();
 +    void anUpdateForgetsWhatTheOldVersionRegistered();
++    void aPageDoesNotWaitForScriptsTheExtensionMayNoLongerRun();
 +    void aPageOpenedAsTheExtensionIsEnabledRunsItsKeptScripts();
 +    void anOffTheRecordProfileKeepsNoScriptStore();
      void serviceWorkerMessaging();
      void serviceWorkerLocalization();
      void extensionLoadedIntoARunningProfile();
-@@ -79,6 +89,25 @@ private:
+@@ -79,6 +90,25 @@ private:
      void uninstallExtensionSync(const QWebEngineExtensionInfo &extension);
      QString resourcesPath();
      QDir extensionsInstallDir();
@@ -719,7 +757,7 @@ index 1290b685fb..faf204f7b6 100644
  
      QWebEnginePage *m_page;
      QWebEngineProfile *m_profile;
-@@ -412,6 +441,412 @@ void tst_QWebEngineExtension::loadInstalledExtensions()
+@@ -412,6 +442,460 @@ void tst_QWebEngineExtension::loadInstalledExtensions()
      QTRY_COMPARE(manager2->extensions().size(), extensionCount);
  }
  
@@ -988,8 +1026,8 @@ index 1290b685fb..faf204f7b6 100644
 +    // As in Chrome, a new version starts with none of the old one's registrations. An application
 +    // updates an unpacked extension by replacing its files and loading the same path again, and an
 +    // extension that registers the same ids at every start gets "Duplicate script ID" if the old
-+    // ones come back. Opening a page the old script was for waits until the extension has read
-+    // what it kept, so the page shows whether the old script came back.
++    // ones come back. If the old script were still kept, a page it is for would wait until it was
++    // read and then run it, so the page shows whether it came back.
 +    HttpServer server;
 +    server.setResourceDirs({ resourcesPath() });
 +    QVERIFY(server.start());
@@ -1033,6 +1071,54 @@ index 1290b685fb..faf204f7b6 100644
 +             QString());
 +    QCOMPARE(registeredIds(session.page.get()), QStringList());
 +    QCOMPARE(scripting(session.page.get(), registerKept), "null"_L1);
++}
++
++void tst_QWebEngineExtension::aPageDoesNotWaitForScriptsTheExtensionMayNoLongerRun()
++{
++    // An extension loaded again without the scripting permission keeps what it registered, but
++    // the user-script manager does not read it, as in Chrome. A page those scripts were for must
++    // not wait for a read that never starts.
++    HttpServer server;
++    server.setResourceDirs({ resourcesPath() });
++    QVERIFY(server.start());
++    QTemporaryDir storage(QDir::tempPath() + "/tst_QWebEngineExtension-XXXXXX"_L1);
++    QTemporaryDir unpacked(QDir::tempPath() + "/tst_QWebEngineExtension-XXXXXX"_L1);
++    const QDir fixture(resourcesPath() + "kept_scripts_ext"_L1);
++    for (const QString &name : fixture.entryList(QDir::Files))
++        QVERIFY(QFile::copy(fixture.filePath(name), unpacked.filePath(name)));
++
++    ScriptingSession session;
++    openScriptingSession(session, storage.path(), false, unpacked.path());
++    if (QTest::currentTestFailed())
++        return;
++    QCOMPARE(scripting(session.page.get(),
++                       "chrome.scripting.registerContentScripts([{id: 'kept', matches: ['"_L1
++                               + server.url("/*"_L1).toString() + "'], js: ['marker.js']}])"_L1),
++             "null"_L1);
++    QTRY_VERIFY(QDir(storage.filePath("Extension Scripts"_L1)).exists());
++    session.close();
++
++    QFile manifest(unpacked.filePath("manifest.json"_L1));
++    QVERIFY(manifest.open(QIODevice::ReadOnly));
++    const QByteArray withScripting = manifest.readAll();
++    manifest.close();
++    QByteArray withoutScripting = withScripting;
++    withoutScripting.replace("\"scripting\"", "");
++    QVERIFY(withoutScripting != withScripting);
++    QVERIFY(manifest.open(QIODevice::WriteOnly | QIODevice::Truncate));
++    QCOMPARE(manifest.write(withoutScripting), withoutScripting.size());
++    manifest.close();
++
++    openScriptingSession(session, storage.path(), false, unpacked.path());
++    if (QTest::currentTestFailed())
++        return;
++    QWebEnginePage page(session.profile.get());
++    QSignalSpy loadSpy(&page, SIGNAL(loadFinished(bool)));
++    page.load(server.url("/index.html"_L1));
++    QTRY_COMPARE(loadSpy.size(), 1);
++    QCOMPARE(evaluateJavaScriptSync(&page, "document.documentElement.dataset.kept ?? ''"_L1)
++                     .toString(),
++             QString());
 +}
 +
 +void tst_QWebEngineExtension::aPageOpenedAsTheExtensionIsEnabledRunsItsKeptScripts()
