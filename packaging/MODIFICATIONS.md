@@ -24,8 +24,9 @@ installed. The twenty-first adds one more piece of the extension runtime: the ap
 where the window holding a page is, and the `windows` namespace reports it to an extension. The
 twenty-second keeps the content scripts an extension registers to persist across a restart, in the
 profile's storage path, forgets them when another version of the extension is loaded, holds a
-page they are for until they are read, and fixes Chromium's `scripting` namespace keeping one only
-for the session after an update that leaves its persistence out. The twenty-third adds one more
+page they are for until they are read, has a profile that is deleted write its preferences before
+it is gone, and fixes Chromium's `scripting` namespace keeping one only for the session after an
+update that leaves its persistence out. The twenty-third adds one more
 piece of the extension runtime: a page an extension opens is a window of its own, and the extension
 is told when it closes. The last is a bug fix in Qt's own code: deleting a profile while an
 extension's message waits for its worker no longer crashes the application.

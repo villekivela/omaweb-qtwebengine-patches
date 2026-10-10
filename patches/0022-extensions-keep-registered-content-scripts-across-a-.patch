@@ -1,4 +1,4 @@
-From 123c9b5d26b57a50786ab50bf96cd24abde4f5e1 Mon Sep 17 00:00:00 2001
+From 72943994a293797631d13fa986ff35a5ae38ed3b Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivel=C3=A4?=
  <5814559+villekivela@users.noreply.github.com>
 Date: Sat, 10 Oct 2026 12:09:25 +0300
@@ -62,6 +62,16 @@ The store is opened at the storage path the profile has when its
 extension system is made. A path changed later is not followed, as
 chrome.storage's is not.
 
+A profile's preferences, the kept scripts' URL patterns among them,
+are written to its storage path in the background, and a profile made
+on that path reads them as it is made. One deleted and made again on
+the same path, as the tests restart it, could read the file before the
+last write of the one before it. It then started without the patterns,
+so the user-script manager never read the scripts kept for them, and
+its own next write dropped the patterns for good. PrefServiceAdapter
+now waits for that write as it is destroyed. The aarch64 build lost the
+race on every run, and x86_64 pinned to one CPU in six runs of ten.
+
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
  .../extensions/api/scripting/scripting_api.cc |  10 +-
@@ -76,12 +86,14 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  .../extensions/extensions_browser_client_qt.h |   1 +
  .../extensions/user_script_listener_qt.cpp    | 146 ++++++
  src/core/extensions/user_script_listener_qt.h |  67 +++
+ src/core/pref_service_adapter.cpp             |  23 +
+ src/core/pref_service_adapter.h               |   3 +
  .../resources/kept_scripts_ext/control.html   |   2 +
  .../resources/kept_scripts_ext/control.js     |   7 +
  .../resources/kept_scripts_ext/manifest.json  |  12 +
  .../resources/kept_scripts_ext/marker.js      |   1 +
  .../extensions/tst_qwebengineextension.cpp    | 484 ++++++++++++++++++
- 17 files changed, 842 insertions(+), 4 deletions(-)
+ 19 files changed, 868 insertions(+), 4 deletions(-)
  create mode 100644 src/core/extensions/user_script_listener_qt.cpp
  create mode 100644 src/core/extensions/user_script_listener_qt.h
  create mode 100644 tests/auto/widgets/extensions/resources/kept_scripts_ext/control.html
@@ -656,6 +668,68 @@ index 0000000000..f4f1886b12
 +} // namespace extensions
 +
 +#endif // USER_SCRIPT_LISTENER_QT_H_
+diff --git a/src/core/pref_service_adapter.cpp b/src/core/pref_service_adapter.cpp
+index 46aa19b4d8..e11c91a117 100644
+--- a/src/core/pref_service_adapter.cpp
++++ b/src/core/pref_service_adapter.cpp
+@@ -10,6 +10,8 @@
+ #include "web_engine_library_info.h"
+ 
+ #include "base/base_paths.h"
++#include "base/functional/bind.h"
++#include "base/synchronization/waitable_event.h"
+ #include "base/threading/thread_restrictions.h"
+ #include "chrome/browser/prefs/chrome_command_line_pref_store.h"
+ #include "content/public/browser/browser_thread.h"
+@@ -173,6 +175,27 @@ void PrefServiceAdapter::commit()
+     m_prefService->CommitPendingWrite();
+ }
+ 
++PrefServiceAdapter::~PrefServiceAdapter()
++{
++    commitAndWait();
++}
++
++// Writes what is pending and returns once it is on disk. The file is written in the background and
++// read on the UI thread, so a profile made next on the same path could otherwise read it before the
++// last write of the one before it, and start without the preferences that profile kept. The thread
++// pool outlives every profile, so the write always runs.
++void PrefServiceAdapter::commitAndWait()
++{
++    if (!m_prefService)
++        return;
++    base::WaitableEvent written;
++    m_prefService->CommitPendingWrite(
++            base::OnceClosure(),
++            base::BindOnce(&base::WaitableEvent::Signal, base::Unretained(&written)));
++    base::ScopedAllowBlocking allowBlock;
++    written.Wait();
++}
++
+ PrefService* PrefServiceAdapter::prefService()
+ {
+     return m_prefService.get();
+diff --git a/src/core/pref_service_adapter.h b/src/core/pref_service_adapter.h
+index ece156b743..b100c5c6e9 100644
+--- a/src/core/pref_service_adapter.h
++++ b/src/core/pref_service_adapter.h
+@@ -20,6 +20,7 @@ class PrefServiceAdapter
+ public:
+ 
+     PrefServiceAdapter() = default;
++    ~PrefServiceAdapter();
+ 
+     void setup(const ProfileAdapter &adapter);
+     void commit();
+@@ -35,6 +36,8 @@ public:
+ #endif // QT_CONFIG(webengine_spellchecker)
+ 
+ private:
++    void commitAndWait();
++
+     std::unique_ptr<PrefService> m_prefService;
+ };
+ 
 diff --git a/tests/auto/widgets/extensions/resources/kept_scripts_ext/control.html b/tests/auto/widgets/extensions/resources/kept_scripts_ext/control.html
 new file mode 100644
 index 0000000000..4a7f09355f
@@ -1219,5 +1293,5 @@ index 1290b685fb..c3e28363e9 100644
  {
      int lastExtensionCount = extensionCount();
 -- 
-2.55.0
+2.56.0
 
