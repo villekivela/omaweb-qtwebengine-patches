@@ -1,0 +1,693 @@
+From 87d7df5a14a4a232620d4a3c82efe07e617b1c17 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Ville=20Kivel=C3=A4?= <vkivela@hotmail.com>
+Date: Sun, 11 Oct 2026 09:31:04 +0000
+Subject: [PATCH] favicons: draw an icon again when the colour scheme changes
+
+An SVG favicon can follow prefers-color-scheme, as chatgpt.com's does:
+black under a light scheme, white under a dark one. The engine draws it
+under the scheme the page is told, keeps the drawing in the profile, and
+before this kept showing it after the application's scheme changed.
+
+Three things stood in the way.
+
+The web theme took the new scheme, and nothing told the pages: the
+WebContents only reread it on NotifyOnNativeThemeUpdated, which nothing
+called. The one QStyleHints connection, made once rather than once per
+adapter, now calls it when the scheme changes, and only then, so a page
+on show is told the new scheme.
+
+The favicon driver and the profile's favicon service now observe the web
+theme, and act on every notice rather than keeping a scheme of their
+own: one built before the engine first reads the application's scheme,
+as the first page and profile of a run are, would otherwise start from
+Chromium's default and miss the change back to it. The driver marks its
+page's icon out of date, as a reload does, and fetches it again, at once
+for a loaded page and from the candidates a page still loading reports
+once it has. The service marks every drawing the profile keeps out of
+date, so a page not on show draws its icon afresh on its next visit,
+after showing the earlier drawing as an expired icon is shown.
+
+A drawing at the address the icon already had was dropped: the driver
+updated the navigation entry, and told the view, only when the address
+changed. It now also does when the drawing differs in its pixels, so the
+same drawing fetched again, as on a same-document navigation, is still
+not reported. It reports such an icon as cleared and then as the
+address again, the address on the next turn of the event loop, because
+the Quick view reads its icon property a turn after it is told.
+
+A platform that takes no colour scheme request, as the offscreen one
+the tests run on does not, is told the change by the tests themselves:
+they emit QStyleHints::colorSchemeChanged as a platform would.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/core/favicon_driver_qt.cpp                |  64 ++++++-
+ src/core/favicon_driver_qt.h                  |  18 +-
+ src/core/favicon_service_factory_qt.cpp       |  49 +++++-
+ src/core/web_contents_adapter.cpp             |  24 ++-
+ .../quick/qmltests/data/favicon-scheme.html   |   9 +
+ .../auto/quick/qmltests/data/icons/scheme.svg |   7 +
+ .../auto/quick/qmltests/data/tst_favicon.qml  |  57 ++++++
+ tests/auto/widgets/favicon/CMakeLists.txt     |   2 +
+ .../favicon/resources/favicon-scheme.html     |   9 +
+ .../favicon/resources/icons/scheme.svg        |   7 +
+ tests/auto/widgets/favicon/tst_favicon.cpp    | 162 ++++++++++++++++++
+ 11 files changed, 402 insertions(+), 6 deletions(-)
+ create mode 100644 tests/auto/quick/qmltests/data/favicon-scheme.html
+ create mode 100644 tests/auto/quick/qmltests/data/icons/scheme.svg
+ create mode 100644 tests/auto/widgets/favicon/resources/favicon-scheme.html
+ create mode 100644 tests/auto/widgets/favicon/resources/icons/scheme.svg
+
+diff --git a/src/core/favicon_driver_qt.cpp b/src/core/favicon_driver_qt.cpp
+index d96dfafc96..c1f0430c14 100644
+--- a/src/core/favicon_driver_qt.cpp
++++ b/src/core/favicon_driver_qt.cpp
+@@ -23,6 +23,10 @@
+ #include "content/public/browser/render_frame_host.h"
+ #include "content/public/browser/web_contents.h"
+ #include "third_party/blink/public/mojom/manifest/manifest.mojom.h"
++#include "ui/gfx/image/image.h"
++#include "ui/gfx/skia_util.h"
++
++#include <QtCore/QCoreApplication>
+ 
+ namespace QtWebEngineCore {
+ 
+@@ -74,6 +78,7 @@ FaviconDriverQt::FaviconDriverQt(content::WebContents *webContents,
+     , m_viewClient(viewClient)
+ {
+     initFaviconHandlers();
++    m_themeObservation.Observe(ui::NativeTheme::GetInstanceForWeb());
+ }
+ 
+ void FaviconDriverQt::setFaviconService(favicon::CoreFaviconService *service)
+@@ -366,6 +371,38 @@ void FaviconDriverQt::DidFinishNavigation(content::NavigationHandle *navigation_
+     FetchFavicon(url, navigation_handle->IsSameDocument());
+ }
+ 
++// An icon can draw itself for the colour scheme it is shown under, as an SVG
++// with a prefers-color-scheme rule does, so a page on show draws its icon again
++// when that scheme changes, as a reload would.
++void FaviconDriverQt::OnNativeThemeUpdated(ui::NativeTheme *observed_theme)
++{
++    Q_UNUSED(observed_theme);
++    redrawFavicon();
++}
++
++void FaviconDriverQt::redrawFavicon()
++{
++    content::NavigationEntry *entry = web_contents()->GetController().GetLastCommittedEntry();
++    if (!entry)
++        return;
++
++    content::RenderFrameHost *rfh = web_contents()->GetPrimaryMainFrame();
++    const GURL url = rfh->GetLastCommittedURL();
++    if (!IsOffTheRecord())
++        SetFaviconOutOfDateForPage(url, false);
++
++    // The icon on show stays until the new drawing replaces it. A page still
++    // loading reports its icon's candidates once it has loaded, as it would
++    // have, and the fetch started here takes them.
++    m_completedHandlersCount = 0;
++    m_latestFavicon = FaviconStatusQt();
++    FetchFavicon(url, false);
++    if (rfh->IsDocumentOnLoadCompletedInMainFrame()) {
++        OnUpdateCandidates(url, favicon::FaviconURLsFromContentFaviconURLs(rfh->FaviconURLs()),
++                           GetManifestURL(rfh));
++    }
++}
++
+ void FaviconDriverQt::SetFaviconOutOfDateForPage(const GURL &url, bool force_reload)
+ {
+     if (m_faviconService) {
+@@ -413,13 +450,38 @@ void FaviconDriverQt::emitIconChangedIfNeeded()
+     content::NavigationEntry *entry = web_contents()->GetController().GetLastCommittedEntry();
+     DCHECK(entry);
+ 
+-    if (entry->GetFavicon().url != m_latestFavicon.url) {
++    // An icon can be drawn again at the address it had: an expired one is
++    // shown from the profile and then downloaded afresh, and one that follows
++    // the colour scheme is redrawn when the scheme changes. The same drawing
++    // fetched again, as on a same-document navigation, is not new.
++    const gfx::Image &shown = entry->GetFavicon().image;
++    const gfx::Image &latest = m_latestFavicon.image;
++    const bool redrawn = entry->GetFavicon().url == m_latestFavicon.url
++            && !(shown.IsEmpty() && latest.IsEmpty())
++            && (shown.IsEmpty() || latest.IsEmpty()
++                || !gfx::BitmapsAreEqual(*shown.ToSkBitmap(), *latest.ToSkBitmap()));
++    if (entry->GetFavicon().url != m_latestFavicon.url || redrawn) {
+         entry->GetFavicon().valid = m_latestFavicon.valid;
+         entry->GetFavicon().url = m_latestFavicon.url;
+         entry->GetFavicon().image = m_latestFavicon.image;
+         web_contents()->NotifyNavigationStateChanged(content::INVALIDATE_TYPE_TAB);
+     }
+ 
++    if (redrawn) {
++        // A view reports an icon only when its address changes, and the Quick
++        // view reads the address a turn of the event loop later. So a redrawn
++        // icon is cleared now, and its address is reported again on the next
++        // turn, unless the page has moved on by then.
++        m_viewClient->iconChanged(QUrl());
++        QMetaObject::invokeMethod(
++                QCoreApplication::instance(),
++                [driver = m_weakFactory.GetWeakPtr(), url = m_latestFavicon.url] {
++                    if (driver && driver->m_latestFavicon.url == url)
++                        driver->m_viewClient->iconChanged(toQt(url));
++                },
++                Qt::QueuedConnection);
++        return;
++    }
+     m_viewClient->iconChanged(toQt(m_latestFavicon.url));
+ }
+ 
+diff --git a/src/core/favicon_driver_qt.h b/src/core/favicon_driver_qt.h
+index 34a3540919..74a5c15272 100644
+--- a/src/core/favicon_driver_qt.h
++++ b/src/core/favicon_driver_qt.h
+@@ -18,6 +18,8 @@
+ 
+ #include "qtwebenginecoreglobal_p.h"
+ 
++#include "base/memory/weak_ptr.h"
++#include "base/scoped_observation.h"
+ #include "components/favicon/core/favicon_driver.h"
+ #include "components/favicon/core/favicon_handler.h"
+ #include "content/public/browser/document_user_data.h"
+@@ -26,6 +28,8 @@
+ #include "content/public/browser/web_contents_observer.h"
+ #include "content/public/browser/web_contents_user_data.h"
+ #include "third_party/blink/public/mojom/favicon/favicon_url.mojom.h"
++#include "ui/native_theme/native_theme.h"
++#include "ui/native_theme/native_theme_observer.h"
+ 
+ namespace content {
+ class BrowserContext;
+@@ -51,7 +55,8 @@ struct FaviconStatusQt : public content::FaviconStatus
+ class FaviconDriverQt : public favicon::FaviconDriver,
+                         public favicon::FaviconHandler::Delegate,
+                         public content::WebContentsObserver,
+-                        public content::WebContentsUserData<FaviconDriverQt>
++                        public content::WebContentsUserData<FaviconDriverQt>,
++                        public ui::NativeThemeObserver
+ {
+ public:
+     static void CreateForWebContents(content::WebContents *webContents,
+@@ -122,6 +127,14 @@ private:
+     void DidStartNavigation(content::NavigationHandle *navigation_handle) override;
+     void DidFinishNavigation(content::NavigationHandle *navigation_handle) override;
+ 
++    // ui::NativeThemeObserver implementation. The web theme notifies its
++    // observers when the colour scheme pages are told changes.
++    void OnNativeThemeUpdated(ui::NativeTheme *observed_theme) override;
++
++    // Draws the icon of the page on show again, under the colour scheme pages
++    // are told now.
++    void redrawFavicon();
++
+     // Informs CoreFaviconService that the favicon for |url| is out of date. If
+     // |force_reload| is true, then discard information about favicon download
+     // failures.
+@@ -149,6 +162,9 @@ private:
+     int m_completedHandlersCount = 0;
+     FaviconStatusQt m_latestFavicon;
+ 
++    base::ScopedObservation<ui::NativeTheme, ui::NativeThemeObserver> m_themeObservation{ this };
++    base::WeakPtrFactory<FaviconDriverQt> m_weakFactory{ this };
++
+     WEB_CONTENTS_USER_DATA_KEY_DECL();
+ };
+ 
+diff --git a/src/core/favicon_service_factory_qt.cpp b/src/core/favicon_service_factory_qt.cpp
+index 6a5577856f..900c1283dc 100644
+--- a/src/core/favicon_service_factory_qt.cpp
++++ b/src/core/favicon_service_factory_qt.cpp
+@@ -5,6 +5,9 @@
+ #include "favicon_service_factory_qt.h"
+ 
+ #include "base/files/file_util.h"
++#include "base/functional/callback_helpers.h"
++#include "base/scoped_observation.h"
++#include "base/time/time.h"
+ #include "components/favicon/core/favicon_service_impl.h"
+ #include "components/history/content/browser/content_visit_delegate.h"
+ #include "components/history/content/browser/history_database_helper.h"
+@@ -13,10 +16,54 @@
+ #include "components/history/core/browser/history_service.h"
+ #include "components/keyed_service/content/browser_context_dependency_manager.h"
+ #include "content/public/browser/browser_context.h"
++#include "ui/native_theme/native_theme.h"
++#include "ui/native_theme/native_theme_observer.h"
+ #include "url/gurl.h"
+ 
+ namespace QtWebEngineCore {
+ 
++namespace {
++
++// An icon can draw itself for the colour scheme it is shown under, so when that
++// scheme changes every drawing the profile keeps is marked out of date, as a
++// reload marks one page's. A page not on show then draws its icon afresh on its
++// next visit, rather than showing the drawing made under the earlier scheme.
++class FaviconServiceQt : public favicon::FaviconServiceImpl, public ui::NativeThemeObserver
++{
++public:
++    FaviconServiceQt(std::unique_ptr<favicon::FaviconClient> faviconClient,
++                     history::HistoryService *historyService)
++        : favicon::FaviconServiceImpl(std::move(faviconClient), historyService)
++    {
++        m_themeObservation.Observe(ui::NativeTheme::GetInstanceForWeb());
++    }
++
++    void Shutdown() override
++    {
++        m_themeObservation.Reset();
++        m_tracker.TryCancelAll();
++        favicon::FaviconServiceImpl::Shutdown();
++    }
++
++    // The web theme notifies its observers when the colour scheme pages are
++    // told changes.
++    void OnNativeThemeUpdated(ui::NativeTheme *observed_theme) override
++    {
++        Q_UNUSED(observed_theme);
++        // The profile hands the service its history once it has a path, and
++        // none while it is off the record.
++        if (history::HistoryService *historyService = HistoryService())
++            historyService->SetFaviconsOutOfDateBetween(base::Time(), base::Time::Max(),
++                                                        base::DoNothing(), &m_tracker);
++    }
++
++private:
++    base::CancelableTaskTracker m_tracker;
++    base::ScopedObservation<ui::NativeTheme, ui::NativeThemeObserver> m_themeObservation{ this };
++};
++
++} // namespace
++
+ void HistoryClientQt::OnHistoryServiceCreated(history::HistoryService *history_service)
+ {
+     Q_UNUSED(history_service);
+@@ -169,7 +216,7 @@ FaviconServiceFactoryQt::BuildServiceInstanceForBrowserContext(content::BrowserC
+ {
+     history::HistoryService *historyService = static_cast<history::HistoryService *>(
+             HistoryServiceFactoryQt::GetInstance()->GetForBrowserContext(context));
+-    return std::make_unique<favicon::FaviconServiceImpl>(std::make_unique<FaviconClientQt>(), historyService);
++    return std::make_unique<FaviconServiceQt>(std::make_unique<FaviconClientQt>(), historyService);
+ }
+ 
+ } // namespace QtWebEngineCore
+diff --git a/src/core/web_contents_adapter.cpp b/src/core/web_contents_adapter.cpp
+index 05c3632dc7..5925050797 100644
+--- a/src/core/web_contents_adapter.cpp
++++ b/src/core/web_contents_adapter.cpp
+@@ -459,6 +459,26 @@ ui::NativeTheme::PreferredColorScheme toWeb(Qt::ColorScheme colorScheme) {
+     return colorScheme == Qt::ColorScheme::Dark ? ui::NativeTheme::PreferredColorScheme::kDark : ui::NativeTheme::PreferredColorScheme::kLight;
+ }
+ 
++// Tells pages the application's colour scheme from now on. Setting the web
++// theme's scheme alone reached a page only when it next computed its
++// preferences, so a page on show kept the scheme it loaded under. The web
++// theme's observers hear of a change, and only of a change: the favicon
++// drivers and services draw icons again on every notice.
++static void followColorScheme()
++{
++    static bool following = false;
++    if (following)
++        return;
++    following = true;
++    QObject::connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged, [](Qt::ColorScheme colorScheme) {
++        ui::NativeTheme *webTheme = ui::NativeTheme::GetInstanceForWeb();
++        if (webTheme->GetPreferredColorScheme() == toWeb(colorScheme))
++            return;
++        webTheme->set_preferred_color_scheme(toWeb(colorScheme));
++        webTheme->NotifyOnNativeThemeUpdated();
++    });
++}
++
+ void WebContentsAdapter::initialize(content::SiteInstance *site)
+ {
+     Q_ASSERT(m_adapterClient);
+@@ -513,9 +533,7 @@ void WebContentsAdapter::initialize(content::SiteInstance *site)
+     m_webContentsDelegate->RenderViewHostChanged(nullptr, rvh);
+ 
+     // Make sure the system theme's light/dark mode is propagated to webpages
+-    QObject::connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged, [](Qt::ColorScheme colorScheme){
+-        ui::NativeTheme::GetInstanceForWeb()->set_preferred_color_scheme(toWeb(colorScheme));
+-    });
++    followColorScheme();
+     ui::NativeTheme::GetInstanceForWeb()->set_preferred_color_scheme(toWeb(QGuiApplication::styleHints()->colorScheme()));
+ 
+     {
+diff --git a/tests/auto/quick/qmltests/data/favicon-scheme.html b/tests/auto/quick/qmltests/data/favicon-scheme.html
+new file mode 100644
+index 0000000000..d42e55ce92
+--- /dev/null
++++ b/tests/auto/quick/qmltests/data/favicon-scheme.html
+@@ -0,0 +1,9 @@
++<html>
++    <head>
++        <title>Favicon Scheme Test</title>
++        <link rel="icon" href="icons/scheme.svg" type="image/svg+xml" />
++    </head>
++    <body>
++        <h1>Favicon Scheme Test</h1>
++    </body>
++</html>
+diff --git a/tests/auto/quick/qmltests/data/icons/scheme.svg b/tests/auto/quick/qmltests/data/icons/scheme.svg
+new file mode 100644
+index 0000000000..a91a00cb8c
+--- /dev/null
++++ b/tests/auto/quick/qmltests/data/icons/scheme.svg
+@@ -0,0 +1,7 @@
++<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32">
++    <style>
++        rect { fill: #000; }
++        @media (prefers-color-scheme: dark) { rect { fill: #fff; } }
++    </style>
++    <rect width="32" height="32"/>
++</svg>
+diff --git a/tests/auto/quick/qmltests/data/tst_favicon.qml b/tests/auto/quick/qmltests/data/tst_favicon.qml
+index f2f7afe122..dee8d6b670 100644
+--- a/tests/auto/quick/qmltests/data/tst_favicon.qml
++++ b/tests/auto/quick/qmltests/data/tst_favicon.qml
+@@ -37,6 +37,27 @@ TestWebEngineView {
+         source: webEngineView.icon
+     }
+ 
++    // Drawn afresh at each address it is given, as an interface that shows a
++    // redrawn icon has to.
++    Image {
++        id: freshFavicon
++        x: 100
++        z: 1
++        width: 32
++        height: 32
++        cache: false
++        source: webEngineView.icon
++    }
++
++    // Asks for a colour scheme. The platform a test runs on may not take the
++    // request, as the offscreen one does not, and then the test announces the
++    // change itself, as a platform does.
++    function useColorScheme(colorScheme) {
++        Qt.styleHints.colorScheme = colorScheme
++        if (Qt.styleHints.colorScheme !== colorScheme)
++            Qt.styleHints.colorSchemeChanged(colorScheme)
++    }
++
+     TestCase {
+         id: testCase
+         name: "WebEngineFavicon"
+@@ -537,5 +558,41 @@ TestWebEngineView {
+             var iconUrl = removeFaviconProviderPrefix(webEngineView.icon)
+             compare(iconUrl, row.expectedIconUrl)
+         }
++
++        // How light the middle of the icon the view shows is, from 0 to 1.
++        function freshFaviconLightness() {
++            var image = grabImage(webEngineView)
++            return Qt.color(image.pixel(freshFavicon.x + 16, freshFavicon.y + 16)).hslLightness
++        }
++
++        // An SVG favicon that follows prefers-color-scheme is drawn under the
++        // scheme the page is told. When that scheme changes, the view reports
++        // the redrawn icon as new: no icon, and then the address it had.
++        function test_faviconRedrawnWhenColorSchemeChanges() {
++            webEngineView.profile = nonOtrProfile.instance()
++            useColorScheme(Qt.ColorScheme.Light)
++            webEngineView.url = Qt.resolvedUrl("favicon-scheme.html")
++            verify(webEngineView.waitForLoadSucceeded())
++            tryVerify(function() {
++                return freshFavicon.status === Image.Ready && freshFaviconLightness() < 0.25
++            })
++
++            var drawn = String(webEngineView.icon)
++            var reported = []
++            var record = function() { reported.push(String(webEngineView.icon)) }
++            webEngineView.iconChanged.connect(record)
++            useColorScheme(Qt.ColorScheme.Dark)
++            tryVerify(function() {
++                return reported.length >= 2 && reported[reported.length - 1] === drawn
++            })
++            webEngineView.iconChanged.disconnect(record)
++            compare(reported[0], "")
++            tryVerify(function() {
++                return freshFavicon.status === Image.Ready && freshFaviconLightness() > 0.75
++            })
++
++            Qt.styleHints.colorScheme = Qt.ColorScheme.Unknown
++            Qt.styleHints.colorSchemeChanged(Qt.styleHints.colorScheme)
++        }
+     }
+ }
+diff --git a/tests/auto/widgets/favicon/CMakeLists.txt b/tests/auto/widgets/favicon/CMakeLists.txt
+index 0deae6a375..c22a68331a 100644
+--- a/tests/auto/widgets/favicon/CMakeLists.txt
++++ b/tests/auto/widgets/favicon/CMakeLists.txt
+@@ -14,6 +14,7 @@ qt_internal_add_test(tst_favicon
+ set(tst_favicon_resource_files
+     "resources/favicon-misc.html"
+     "resources/favicon-multi.html"
++    "resources/favicon-scheme.html"
+     "resources/favicon-shortcut.html"
+     "resources/favicon-single.html"
+     "resources/favicon-touch.html"
+@@ -21,6 +22,7 @@ set(tst_favicon_resource_files
+     "resources/icons/qt144.png"
+     "resources/icons/qt32.ico"
+     "resources/icons/qtmulti.ico"
++    "resources/icons/scheme.svg"
+     "resources/test1.html"
+ )
+ 
+diff --git a/tests/auto/widgets/favicon/resources/favicon-scheme.html b/tests/auto/widgets/favicon/resources/favicon-scheme.html
+new file mode 100644
+index 0000000000..d42e55ce92
+--- /dev/null
++++ b/tests/auto/widgets/favicon/resources/favicon-scheme.html
+@@ -0,0 +1,9 @@
++<html>
++    <head>
++        <title>Favicon Scheme Test</title>
++        <link rel="icon" href="icons/scheme.svg" type="image/svg+xml" />
++    </head>
++    <body>
++        <h1>Favicon Scheme Test</h1>
++    </body>
++</html>
+diff --git a/tests/auto/widgets/favicon/resources/icons/scheme.svg b/tests/auto/widgets/favicon/resources/icons/scheme.svg
+new file mode 100644
+index 0000000000..a91a00cb8c
+--- /dev/null
++++ b/tests/auto/widgets/favicon/resources/icons/scheme.svg
+@@ -0,0 +1,7 @@
++<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32">
++    <style>
++        rect { fill: #000; }
++        @media (prefers-color-scheme: dark) { rect { fill: #fff; } }
++    </style>
++    <rect width="32" height="32"/>
++</svg>
+diff --git a/tests/auto/widgets/favicon/tst_favicon.cpp b/tests/auto/widgets/favicon/tst_favicon.cpp
+index 4d3d99b5c2..c506630cd9 100644
+--- a/tests/auto/widgets/favicon/tst_favicon.cpp
++++ b/tests/auto/widgets/favicon/tst_favicon.cpp
+@@ -4,6 +4,8 @@
+ #include <QtTest/QtTest>
+ #include <util.h>
+ 
++#include <QGuiApplication>
++#include <QStyleHints>
+ #include <QWebEngineHistory>
+ #include <QWebEnginePage>
+ #include <QWebEngineProfile>
+@@ -47,6 +49,10 @@ private Q_SLOTS:
+     void requestIconForPageURL();
+     void desiredSize();
+     void changePersistentStorage();
++    void redrawOnColorSchemeChange();
++    void redrawOnNextVisitAfterColorSchemeChange();
++    void redrawAfterAPageStartsUnderAnotherScheme();
++    void sameDrawingIsNotReportedAgain();
+ 
+ private:
+     QWebEngineView *m_view;
+@@ -54,6 +60,17 @@ private:
+     QWebEngineProfile *m_profile;
+ };
+ 
++// Asks for a colour scheme. The platform a test runs on may not take the
++// request, as the offscreen one does not, and then the test announces the
++// change itself, as a platform does.
++static void useColorScheme(Qt::ColorScheme colorScheme)
++{
++    QStyleHints *styleHints = QGuiApplication::styleHints();
++    styleHints->setColorScheme(colorScheme);
++    if (styleHints->colorScheme() != colorScheme)
++        Q_EMIT styleHints->colorSchemeChanged(colorScheme);
++}
++
+ void tst_Favicon::init()
+ {
+     m_profile = new QWebEngineProfile(this);
+@@ -68,6 +85,9 @@ void tst_Favicon::cleanupTestCase() { }
+ 
+ void tst_Favicon::cleanup()
+ {
++    QGuiApplication::styleHints()->unsetColorScheme();
++    Q_EMIT QGuiApplication::styleHints()->colorSchemeChanged(
++            QGuiApplication::styleHints()->colorScheme());
+     delete m_view;
+     delete m_profile;
+ }
+@@ -908,6 +928,148 @@ void tst_Favicon::changePersistentStorage()
+     }
+ }
+ 
++// How light the opaque pixels of an icon are, from 0 to 255, or -1 for none.
++static int lightness(const QIcon &icon)
++{
++    const QImage image = icon.pixmap(QSize(32, 32)).toImage();
++    int opaque = 0;
++    qint64 sum = 0;
++    for (int y = 0; y < image.height(); ++y) {
++        for (int x = 0; x < image.width(); ++x) {
++            const QColor colour = image.pixelColor(x, y);
++            if (colour.alpha() > 128) {
++                ++opaque;
++                sum += colour.lightness();
++            }
++        }
++    }
++    return opaque ? int(sum / opaque) : -1;
++}
++
++// An SVG favicon that follows prefers-color-scheme is drawn under the scheme
++// the page is told. A page on show draws it again when that scheme changes.
++void tst_Favicon::redrawOnColorSchemeChange()
++{
++    QTemporaryDir tmpDir;
++    QWebEngineProfile profile("scheme");
++    profile.setPersistentStoragePath(tmpDir.path());
++    QWebEnginePage page(&profile);
++    QSignalSpy loadFinishedSpy(&page, &QWebEnginePage::loadFinished);
++    useColorScheme(Qt::ColorScheme::Light);
++
++    page.load(QUrl("qrc:/resources/favicon-scheme.html"));
++    QTRY_COMPARE_WITH_TIMEOUT(loadFinishedSpy.size(), 1, 30000);
++    QTRY_VERIFY(!page.icon().isNull());
++    QCOMPARE_LT(lightness(page.icon()), 64);
++
++    QSignalSpy iconChangedSpy(&page, &QWebEnginePage::iconChanged);
++    useColorScheme(Qt::ColorScheme::Dark);
++    QTRY_COMPARE(evaluateJavaScriptSync(&page, "matchMedia('(prefers-color-scheme: dark)').matches"),
++                 QVariant(true));
++    QTRY_VERIFY_WITH_TIMEOUT(lightness(page.icon()) > 192, 10000);
++    QTRY_VERIFY(!iconChangedSpy.isEmpty()
++                && lightness(iconChangedSpy.last().at(0).value<QIcon>()) > 192);
++}
++
++// A page not on show when the colour scheme changes draws its icon afresh on
++// its next visit, rather than showing the drawing the profile kept.
++void tst_Favicon::redrawOnNextVisitAfterColorSchemeChange()
++{
++    QTemporaryDir tmpDir;
++    QWebEngineProfile profile("schemeVisit");
++    profile.setPersistentStoragePath(tmpDir.path());
++    QWebEnginePage page(&profile);
++    QSignalSpy loadFinishedSpy(&page, &QWebEnginePage::loadFinished);
++    useColorScheme(Qt::ColorScheme::Light);
++
++    const QUrl schemePage("qrc:/resources/favicon-scheme.html");
++    page.load(schemePage);
++    QTRY_COMPARE_WITH_TIMEOUT(loadFinishedSpy.size(), 1, 30000);
++    QTRY_VERIFY(!page.icon().isNull());
++    QCOMPARE_LT(lightness(page.icon()), 64);
++
++    page.load(QUrl("qrc:/resources/test1.html"));
++    QTRY_COMPARE_WITH_TIMEOUT(loadFinishedSpy.size(), 2, 30000);
++    QTRY_VERIFY(page.icon().isNull());
++    useColorScheme(Qt::ColorScheme::Dark);
++
++    QSignalSpy iconChangedSpy(&page, &QWebEnginePage::iconChanged);
++    page.load(schemePage);
++    QTRY_COMPARE_WITH_TIMEOUT(loadFinishedSpy.size(), 3, 30000);
++    QTRY_VERIFY_WITH_TIMEOUT(lightness(page.icon()) > 192, 10000);
++    QTRY_VERIFY(!iconChangedSpy.isEmpty()
++                && lightness(iconChangedSpy.last().at(0).value<QIcon>()) > 192);
++}
++
++// Whether the profile has an icon for a page, asked and answered.
++static bool hasIconFor(QWebEngineProfile &profile, const QUrl &pageUrl)
++{
++    bool answered = false;
++    bool known = false;
++    profile.requestIconForPageURL(pageUrl, 0, [&](const QIcon &icon, const QUrl &, const QUrl &) {
++        known = !icon.isNull();
++        answered = true;
++    });
++    return QTest::qWaitFor([&] { return answered; }, 5000) && known;
++}
++
++// A page can be built while the engine still tells pages another scheme than
++// the application's, as the first page of a run is. It draws its icon under
++// the scheme it is then told, and draws it again on the next change.
++void tst_Favicon::redrawAfterAPageStartsUnderAnotherScheme()
++{
++    if (QGuiApplication::styleHints()->colorScheme() != Qt::ColorScheme::Unknown)
++        QSKIP("This needs a platform that answers no colour scheme, as the offscreen one does.");
++    QTemporaryDir tmpDir;
++    QWebEngineProfile profile("schemeStart");
++    profile.setPersistentStoragePath(tmpDir.path());
++
++    // A page tells the engine to follow the application's scheme, and the
++    // dark one is then announced, so the next page is built under it.
++    QWebEnginePage first(&profile);
++    QSignalSpy firstLoaded(&first, &QWebEnginePage::loadFinished);
++    first.load(QUrl("qrc:/resources/test1.html"));
++    QTRY_COMPARE_WITH_TIMEOUT(firstLoaded.size(), 1, 30000);
++    Q_EMIT QGuiApplication::styleHints()->colorSchemeChanged(Qt::ColorScheme::Dark);
++
++    // Built under the dark scheme, the page is then told the application's,
++    // which answers none and so is light.
++    QWebEnginePage page(&profile);
++    QSignalSpy loadFinishedSpy(&page, &QWebEnginePage::loadFinished);
++    page.load(QUrl("qrc:/resources/favicon-scheme.html"));
++    QTRY_COMPARE_WITH_TIMEOUT(loadFinishedSpy.size(), 1, 30000);
++    QTRY_VERIFY(!page.icon().isNull());
++    QCOMPARE_LT(lightness(page.icon()), 64);
++
++    Q_EMIT QGuiApplication::styleHints()->colorSchemeChanged(Qt::ColorScheme::Dark);
++    QTRY_VERIFY_WITH_TIMEOUT(lightness(page.icon()) > 192, 10000);
++}
++
++// The engine fetches a page's icon again on a same-document navigation and
++// finds the same drawing, which is not a new icon to report.
++void tst_Favicon::sameDrawingIsNotReportedAgain()
++{
++    QTemporaryDir tmpDir;
++    QWebEngineProfile profile("sameDrawing");
++    profile.setPersistentStoragePath(tmpDir.path());
++    QWebEnginePage page(&profile);
++    QSignalSpy loadFinishedSpy(&page, &QWebEnginePage::loadFinished);
++    useColorScheme(Qt::ColorScheme::Light);
++    page.load(QUrl("qrc:/resources/favicon-scheme.html"));
++    QTRY_COMPARE_WITH_TIMEOUT(loadFinishedSpy.size(), 1, 30000);
++    QTRY_VERIFY(!page.icon().isNull());
++
++    QSignalSpy iconUrlChangedSpy(&page, &QWebEnginePage::iconUrlChanged);
++    const QUrl pushed("qrc:/resources/favicon-scheme-pushed.html");
++    evaluateJavaScriptSync(&page, "history.pushState(null, '', 'favicon-scheme-pushed.html')");
++    QTRY_COMPARE(page.url(), pushed);
++    // The engine has fetched the icon for the pushed address once the profile
++    // knows one for it. A report it makes then is queued for the next turn.
++    QTRY_VERIFY_WITH_TIMEOUT(hasIconFor(profile, pushed), 10000);
++    QTest::qWait(100);
++    QCOMPARE(iconUrlChangedSpy.size(), 0);
++}
++
+ QTEST_MAIN(tst_Favicon)
+ 
+ #include "tst_favicon.moc"
+-- 
+2.55.0
+

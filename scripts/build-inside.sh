@@ -106,9 +106,10 @@ sh /root/series/scripts/verify.sh "$tree" | tee /root/out/verify.txt
 # a gate that names a number refuses the day the suite grows, which is how a green run was
 # refused once already. The gate runs more than one test program, and each reports its own
 # totals, so every one of them has to read none failed and every one has to be there: the
-# write-barrier check, the extension tests, the DNS aliases and the certificate chain. A program
-# that dies before its totals leaves one line fewer, and the floor of 3 let that through.
-if [ "$(grep -cE "^Totals: " /root/out/verify.txt)" -lt 4 ] \
+# write-barrier check, the extension tests, the DNS aliases, the certificate chain, and the
+# favicon for a page and for the Quick view. A program that dies before its totals leaves one
+# line fewer, and the floor of 3 let that through.
+if [ "$(grep -cE "^Totals: " /root/out/verify.txt)" -lt 6 ] \
     || grep -qE "^Totals: [0-9]+ passed, [1-9]" /root/out/verify.txt; then
     echo "the gate did not pass, so nothing is packaged"
     exit 2
