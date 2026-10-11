@@ -331,7 +331,10 @@ Patch 0025's cases live in Qt's favicon tests: `redrawOnColorSchemeChange`,
 runs with the engine's QML module from the build. Each loads a page whose SVG icon is black under a
 light scheme and white under a dark one. The offscreen platform takes no colour scheme request, so
 the cases emit `QStyleHints::colorSchemeChanged` themselves where a request does not take, as a
-platform does. Each part is red when broken:
+platform does. The first three fail on a stock engine, which never tells a page the new scheme, and
+the gate's stock run checks them. `sameDrawingIsNotReportedAgain` passes there, because a stock
+engine drops every drawing at an address it already shows: it guards the patch's own reporting.
+Each part is red when broken:
 
 - without `NotifyOnNativeThemeUpdated`, all three fail: the page is never told the dark scheme
 - without the driver's redraw, `redrawOnColorSchemeChange` and the Quick case fail

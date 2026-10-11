@@ -174,8 +174,13 @@ then
     echo "  no stock engine installed here, so there is nothing to compare against"
     exit 0
 fi
+# A stock engine drops every drawing at an address it already shows, so
+# sameDrawingIsNotReportedAgain passes there by construction. It guards the
+# patch's own reporting and is left out here.
+stock_favicon_cases="redrawOnColorSchemeChange redrawOnNextVisitAfterColorSchemeChange \
+redrawAfterAPageStartsUnderAnotherScheme"
 for case in serviceWorkerLocalization enableAfterStoragePathChange tabsWindowsAndScripting \
-    nativeMessaging $favicon_cases
+    nativeMessaging $stock_favicon_cases
 do
     program="$test"
     case " $favicon_cases " in *" $case "*) program="$favicon" ;; esac
