@@ -127,6 +127,46 @@ else
     echo "  the test did not finish cleanly, exit $?"
 fi
 
+# A favicon drawn again when the colour scheme changes is the one patch about
+# the favicon driver, so its cases live in Qt's favicon tests, one for a page
+# and one for the Quick view. Only the cases the patch adds run.
+favicon="$tree/build/tests/auto/widgets/favicon/tst_favicon"
+favicon_cases="redrawOnColorSchemeChange redrawOnNextVisitAfterColorSchemeChange \
+redrawAfterAPageStartsUnderAnotherScheme sameDrawingIsNotReportedAgain"
+[ -x "$favicon" ] || "$tree/build.sh" tst_favicon
+
+echo "=== patched engine, a favicon drawn again when the colour scheme changes"
+# shellcheck disable=SC2086 # one argument per case
+if env "$path_var=$tree/build/lib" \
+    ${helper:+QTWEBENGINEPROCESS_PATH="$helper"} \
+    ${resources:+QTWEBENGINE_RESOURCES_PATH="$resources"} \
+    ${locales:+QTWEBENGINE_LOCALES_PATH="$locales"} \
+    "$favicon" $favicon_cases -nocrashhandler -o -,txt 2>&1
+then
+    :
+else
+    echo "  the test did not finish cleanly, exit $?"
+fi
+
+# The Quick tests load the engine's QML module, which an uninstalled tree keeps
+# under its build, and run from their own directory, where they find their list.
+qmltests="$tree/build/tests/auto/quick/qmltests/tst_qmltests"
+[ -x "$qmltests" ] || "$tree/build.sh" tst_qmltests
+
+echo "=== patched engine, a favicon the Quick view draws again"
+if (cd "$(dirname "$qmltests")" && env "$path_var=$tree/build/lib" \
+    QML_IMPORT_PATH="$tree/build/lib/qt6/qml" \
+    ${helper:+QTWEBENGINEPROCESS_PATH="$helper"} \
+    ${resources:+QTWEBENGINE_RESOURCES_PATH="$resources"} \
+    ${locales:+QTWEBENGINE_LOCALES_PATH="$locales"} \
+    "$qmltests" WebEngineFavicon::test_faviconRedrawnWhenColorSchemeChanges \
+    -nocrashhandler -o -,txt 2>&1)
+then
+    :
+else
+    echo "  the test did not finish cleanly, exit $?"
+fi
+
 echo "=== stock engine, where each of these must fail or crash"
 if [ ! -e "$stock/qt6/QtWebEngineProcess" ] && [ ! -e "$stock/QtWebEngineProcess" ] \
     && [ ! -d "$stock/QtWebEngineCore.framework" ]
@@ -134,9 +174,12 @@ then
     echo "  no stock engine installed here, so there is nothing to compare against"
     exit 0
 fi
-for case in serviceWorkerLocalization enableAfterStoragePathChange tabsWindowsAndScripting nativeMessaging
+for case in serviceWorkerLocalization enableAfterStoragePathChange tabsWindowsAndScripting \
+    nativeMessaging $favicon_cases
 do
-    output=$(env "$path_var=$stock" "$test" "$case" -nocrashhandler -o -,txt 2>&1) \
+    program="$test"
+    case " $favicon_cases " in *" $case "*) program="$favicon" ;; esac
+    output=$(env "$path_var=$stock" "$program" "$case" -nocrashhandler -o -,txt 2>&1) \
         && status=0 || status=$?
     verdict=$(echo "$output" | grep -E "^(PASS|FAIL).*$case" | head -1 | cut -d: -f1 | tr -d ' ')
     case "$verdict" in

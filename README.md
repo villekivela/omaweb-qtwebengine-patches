@@ -1,18 +1,18 @@
 # QtWebEngine extension patches
 
-Twenty-four patches to QtWebEngine. Sixteen let it host a password manager's Chromium extension,
+Twenty-five patches to QtWebEngine. Sixteen let it host a password manager's Chromium extension,
 two add API that Omaweb's content blocking and certificate view ask for, one restores a trace macro
 that slowed every page, one turns V8's write barriers back on, one keeps an offscreen document from
 crashing the engine, one builds the tests against Qt 6.12, one keeps the content scripts any
-extension registers across a restart, and one keeps a profile from crashing as it is deleted with an
-extension's message still waiting. Base is the released `qtwebengine-everywhere-src-6.11.2`
-tarball.
+extension registers across a restart, one keeps a profile from crashing as it is deleted with an
+extension's message still waiting, and one draws a favicon again when the colour scheme changes.
+Base is the released `qtwebengine-everywhere-src-6.11.2` tarball.
 
 Built for [omaweb#344](https://github.com/villekivela/omaweb/issues/344), which asks whether Omaweb
 can host Bitwarden and 1Password. The findings live in `docs/research/password-manager-extensions.md`
 in that repository.
 
-Eight of the twenty-four are ordinary bug fixes headed for Gerrit, and 0018 and 0020 are Qt's own
+Nine of the twenty-five are ordinary bug fixes headed for Gerrit, and 0018 and 0020 are Qt's own
 changes. The rest wait on one question to Qt, in `upstream/QTBUG-draft.md`. If Qt takes the work,
 this repository is deleted rather than maintained.
 
@@ -225,6 +225,21 @@ fifteen alone and one full-suite run in thirty: its last poll leaves a message w
 [omaweb#696](https://github.com/villekivela/omaweb/issues/696). _A bug fix with a test. Submit as
 is._
 
+**0025, draw a favicon again when the colour scheme changes.** An SVG favicon can follow
+`prefers-color-scheme`, as chatgpt.com's does, and the engine draws it under the scheme the page is
+told. The application's scheme changing left every page on show with the earlier drawing. The web
+theme took the new scheme and nothing told the pages, so the one `QStyleHints` connection, now made
+once rather than per page, calls `NotifyOnNativeThemeUpdated` when the scheme changes. The favicon
+driver then marks the page's icon out of date, as a reload does, and draws it again, and the
+profile's favicon service marks every drawing it keeps out of date, so a page not on show draws its
+icon afresh on its next visit. Both act on every notice rather than keeping a scheme of their own,
+which the first page and profile of a run would take from Chromium's default. The driver also
+updated the page and the view only when an icon's address changed, so a new drawing at the same
+address was dropped. It now reports a drawing whose pixels differ as cleared and then as the address
+again, the address on the next turn of the event loop, because the Quick view reads its icon
+property a turn after it is told. See [omaweb#700](https://github.com/villekivela/omaweb/issues/700).
+_A bug fix with tests. Submit as is._
+
 ## The open question
 
 `TabsDelegateQt` is internal, and `ExtensionsBrowserClientQt` fills it by treating every page of the
@@ -309,6 +324,26 @@ thirty. Answering true from `IsValidContext` again crashes it, and so does leavi
 end of `~ProfileQt` rather than at the start. The fix touches only stock Qt code, but the case's
 fixture comes with 0009, so the case does not exist on a stock build.
 
+Patch 0025's cases live in Qt's favicon tests: `redrawOnColorSchemeChange`,
+`redrawOnNextVisitAfterColorSchemeChange`, `redrawAfterAPageStartsUnderAnotherScheme` and
+`sameDrawingIsNotReportedAgain` in `tst_favicon`, and
+`test_faviconRedrawnWhenColorSchemeChanges` in the Quick tests' `tst_favicon.qml`, which the gate
+runs with the engine's QML module from the build. Each loads a page whose SVG icon is black under a
+light scheme and white under a dark one. The offscreen platform takes no colour scheme request, so
+the cases emit `QStyleHints::colorSchemeChanged` themselves where a request does not take, as a
+platform does. Each part is red when broken:
+
+- without `NotifyOnNativeThemeUpdated`, all three fail: the page is never told the dark scheme
+- without the driver's redraw, `redrawOnColorSchemeChange` and the Quick case fail
+- without the profile's mark, `redrawOnNextVisitAfterColorSchemeChange` fails
+- when the driver keeps the scheme it was built under, `redrawAfterAPageStartsUnderAnotherScheme`
+  fails: built under one scheme and told another, the page misses the change back
+- when a drawing at the same address is not taken as new, the page cases fail
+- when any new copy of a drawing counts as new, `sameDrawingIsNotReportedAgain` fails: a
+  same-document navigation reports the icon as cleared
+- when the address is reported again at once rather than on the next turn, the Quick case fails:
+  the view never reports the empty address
+
 Patch 0018 has no test case, because what it changes is how V8 is compiled. The gate reads that
 instead. `scripts/check-write-barriers.sh` fails a tree whose V8 is compiled with
 `-DV8_DISABLE_WRITE_BARRIERS`, as 6.11.2 is without the patch, and names the ninja file it read. It
@@ -328,6 +363,7 @@ stays after 0018 drops, so a later Qt that turns the barriers off again is notic
 | 6.11.2-9, series grown to 22 | 20 already applied, 2 more, no conflicts | incremental | 63 of 63 | none |
 | 6.11.2-10, series grown to 23 | 21 already applied, 2 more, no conflicts | incremental | 71 of 71 | none |
 | 6.11.2-11, series grown to 24 | 21 already applied, 3 more, no conflicts | incremental | 72 of 72 | none |
+| 6.11.2-13, series grown to 25 | 21 already applied, 4 more, no conflicts | incremental | 81 of 81 | none |
 
 The rows after the first are the series growing, and the last is the same series rebuilt with each
 architecture's toolchain and published as 6.11.2-5 (omaweb#576), rather than Qt moving. They
