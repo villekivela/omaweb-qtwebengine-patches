@@ -143,9 +143,12 @@ cp "$tarball" "$stage/"
 # makepkg refuses to run as root, and a container has nobody else until it is
 # told. `-d` because this copies files into a package rather than compiling
 # against anything, and the engine's dependencies are the running system's Qt.
+# The PKGBUILD makes the Qt this engine was built against the package's floor,
+# and only this container knows which that was. Inside the command, because su
+# does not promise to carry the environment across.
 id packager > /dev/null 2>&1 || useradd -m packager
 chown -R packager "$stage"
-su packager -c "cd $stage && makepkg -f -d --noconfirm"
+su packager -c "cd $stage && OMAWEB_ENGINE_QT=$system_qt makepkg -f -d --noconfirm"
 
 package="$(find "$stage" -maxdepth 1 -name '*.pkg.tar.*' ! -name '*.sig' -print)"
 if [ -z "$package" ] || [ "$(printf '%s\n' "$package" | wc -l)" -ne 1 ]; then
@@ -164,8 +167,12 @@ echo "packaged $(basename "$package")"
 # fixes this engine includes, is not in the tree: Qt says it in prose in the
 # release notes. So it is not guessed here, and whoever reads those notes fills
 # it in.
+#
+# Beside them, the Qt it was built against, which is not the baseline's but the
+# package's: `package-locally.sh` reads it from here when a tarball is packaged
+# again away from the container that built it.
 chromium="$(awk -F= '/^MAJOR=/{a=$2} /^MINOR=/{b=$2} /^BUILD=/{c=$2} /^PATCH=/{d=$2}
     END {print a"."b"."c"."d}' "$tree/src/3rdparty/chromium/chrome/VERSION")"
-printf '{\n  "qtwebengine": "%s",\n  "chromium": "%s"\n}\n' "$version" "$chromium" \
-    > /root/out/engine.json
+printf '{\n  "qtwebengine": "%s",\n  "chromium": "%s",\n  "qt": "%s"\n}\n' \
+    "$version" "$chromium" "$system_qt" > /root/out/engine.json
 cat /root/out/engine.json

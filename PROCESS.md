@@ -64,10 +64,20 @@ stable mirror on x86_64, a delayed snapshot of Arch, and Arch Linux ARM on
 aarch64. `build-inside.sh` installs from the mirror on x86_64, here and on
 Hetzner alike (omaweb#674).
 
-The PKGBUILD gives `qt6-base` and `qt6-declarative` no version at all. A floor
-at the build's Qt held every Omarchy reader back the day Arch moved to Qt 6.12
-and the mirror had not (omaweb#674), and an upper bound would hold back a
-reader's system upgrade (omaweb#660). When the readers' Qt moves a minor,
+The PKGBUILD gives `qt6-base` and `qt6-declarative` the Qt the engine was built
+against as their floor, and no upper bound. `build-inside.sh` passes it to
+makepkg and writes it into `engine.json` as `qt`, where `package-locally.sh`
+finds it. Built against the readers' own Qt, the floor holds nobody back: what
+held every Omarchy reader back in omaweb#674 was an engine built against Arch's
+Qt 6.12 when the mirror served 6.11.2. An upper bound would hold back a reader's
+system upgrade (omaweb#660).
+
+The engine says its own version whatever Qt it is built against.
+`toolchain/module-version.patch`, which `refresh.sh` applies to every 6.11 tree,
+gives it the version from its `.cmake.conf` where Qt's 6.11 build takes the
+system Qt's, as Qt's own 6.140.0 does. Without it 6.11.2 built against Qt 6.12.0
+installed `libQt6WebEngineCore.so.6.12.0` and a CMake package that said 6.12.0.
+`apply.txt` records it as `MODULE VERSION`. When the readers' Qt moves a minor,
 rebuild the engine against it promptly as the next pkgrel, with the same
 series. Omaweb's own CI keeps building against Arch's current Qt, so breakage
 from the next Qt shows there first.

@@ -67,6 +67,23 @@ else
     echo "==> No SHA256SUMS beside the tarball, so nothing checks it"
 fi
 
+# The Qt the engine was built against, which the package takes as its floor
+# (packaging/PKGBUILD). The build wrote it into engine.json beside the tarball;
+# OMAWEB_ENGINE_QT names it for a tarball that travelled without one. Never
+# guessed from this machine's Qt, which is not the one the engine was built
+# against, and never left out.
+qt="${OMAWEB_ENGINE_QT:-}"
+engine="$(dirname "$tarball")/engine.json"
+if [ -z "$qt" ] && [ -f "$engine" ]; then
+    qt="$(sed -n 's/^ *"qt": "\([^"]*\)".*/\1/p' "$engine")"
+fi
+[ -n "$qt" ] || {
+    echo "no Qt for this engine: engine.json beside the tarball does not name one,"
+    echo "so set OMAWEB_ENGINE_QT to the Qt it was built against"
+    exit 1
+}
+echo "==> Packaging an engine built against Qt $qt"
+
 command -v docker > /dev/null 2>&1 || { echo "install docker first"; exit 1; }
 
 # Checked before the build rather than after it, so a keyring that cannot sign
@@ -110,11 +127,12 @@ command -v makepkg > /dev/null 2>&1 || {
 
 id builder > /dev/null 2>&1 || useradd -m builder
 chown -R builder /pkg
-su builder -c "cd /pkg && makepkg -f -d --noconfirm"
+su builder -c "cd /pkg && OMAWEB_ENGINE_QT=$OMAWEB_ENGINE_QT makepkg -f -d --noconfirm"
 INSIDE
 
 echo "==> Building the package in $image"
-docker run --rm --platform "$platform" -v "$stage":/pkg "$image" sh /pkg/inside.sh
+docker run --rm --platform "$platform" -e OMAWEB_ENGINE_QT="$qt" -v "$stage":/pkg "$image" \
+    sh /pkg/inside.sh
 
 package="$(find "$stage" -maxdepth 1 -name '*.pkg.tar.*' ! -name '*.sig' -print)"
 [ -n "$package" ] && [ "$(printf '%s\n' "$package" | wc -l)" -eq 1 ] || {

@@ -1,0 +1,77 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index c53356d..478d6e8 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -27,15 +27,15 @@ if(DEFINED BUILD_ONLY_GN)
+ endif()
+ 
+ project(QtWebEngine
+-    VERSION ${Qt6BuildInternals_VERSION}
++    VERSION ${QT_REPO_MODULE_VERSION}
+     DESCRIPTION "QtWebEngine and QtPdf modules"
+     HOMEPAGE_URL "https://qt.io/"
+     LANGUAGES CXX C
+ )
+ qt_internal_project_setup()
+ 
+-find_package(Qt6 ${PROJECT_VERSION} CONFIG REQUIRED COMPONENTS Core)
+-find_package(Qt6 ${PROJECT_VERSION} CONFIG QUIET OPTIONAL_COMPONENTS
++find_package(Qt6 ${Qt6BuildInternals_VERSION} CONFIG REQUIRED COMPONENTS Core)
++find_package(Qt6 ${Qt6BuildInternals_VERSION} CONFIG QUIET OPTIONAL_COMPONENTS
+     Gui Widgets Network OpenGL Quick Qml PrintSupport
+     WebChannel WebChannelQuick Positioning QuickControls2
+     Test QuickWidgets QuickTest WebSockets Designer
+diff --git a/src/core/api/CMakeLists.txt b/src/core/api/CMakeLists.txt
+index f1a9c53..4aad502 100644
+--- a/src/core/api/CMakeLists.txt
++++ b/src/core/api/CMakeLists.txt
+@@ -1,8 +1,8 @@
+ # Copyright (C) 2022 The Qt Company Ltd.
+ # SPDX-License-Identifier: BSD-3-Clause
+ 
+-find_package(Qt6 ${PROJECT_VERSION} REQUIRED COMPONENTS Gui Network Quick)
+-find_package(Qt6 ${PROJECT_VERSION} QUIET OPTIONAL_COMPONENTS WebChannel Positioning)
++find_package(Qt6 ${Qt6BuildInternals_VERSION} REQUIRED COMPONENTS Gui Network Quick)
++find_package(Qt6 ${Qt6BuildInternals_VERSION} QUIET OPTIONAL_COMPONENTS WebChannel Positioning)
+ 
+ set(qtWebEngineProcessName QtWebEngineProcess)
+ 
+diff --git a/src/core/api/configure.cmake b/src/core/api/configure.cmake
+index 606ebf5..02d15a7 100644
+--- a/src/core/api/configure.cmake
++++ b/src/core/api/configure.cmake
+@@ -17,7 +17,7 @@ if(NOT QT_CONFIGURE_RUNNING)
+             pkg_check_modules(GIO gio-2.0)
+         endif()
+     endif()
+-    find_package(Qt6 ${PROJECT_VERSION} CONFIG QUIET
++    find_package(Qt6 ${Qt6BuildInternals_VERSION} CONFIG QUIET
+         OPTIONAL_COMPONENTS Positioning WebChannel PrintSupport)
+ endif()
+ 
+diff --git a/src/pdfquick/CMakeLists.txt b/src/pdfquick/CMakeLists.txt
+index 5da3d53..badbb37 100644
+--- a/src/pdfquick/CMakeLists.txt
++++ b/src/pdfquick/CMakeLists.txt
+@@ -1,7 +1,7 @@
+ # Copyright (C) 2022 The Qt Company Ltd.
+ # SPDX-License-Identifier: BSD-3-Clause
+ 
+-find_package(Qt6 ${PROJECT_VERSION} CONFIG REQUIRED COMPONENTS Core Gui Qml Quick)
++find_package(Qt6 ${Qt6BuildInternals_VERSION} CONFIG REQUIRED COMPONENTS Core Gui Qml Quick)
+ 
+ set(qml_files
+     "+Material/PdfStyle.qml"
+diff --git a/src/pdfwidgets/CMakeLists.txt b/src/pdfwidgets/CMakeLists.txt
+index c7a7780..def68d1 100644
+--- a/src/pdfwidgets/CMakeLists.txt
++++ b/src/pdfwidgets/CMakeLists.txt
+@@ -1,7 +1,7 @@
+ # Copyright (C) 2022 The Qt Company Ltd.
+ # SPDX-License-Identifier: BSD-3-Clause
+ 
+-find_package(Qt6 ${PROJECT_VERSION} CONFIG REQUIRED COMPONENTS Core Gui Widgets)
++find_package(Qt6 ${Qt6BuildInternals_VERSION} CONFIG REQUIRED COMPONENTS Core Gui Widgets)
+ 
+ qt_internal_add_module(PdfWidgets
+     SOURCES

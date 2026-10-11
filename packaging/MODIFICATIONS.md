@@ -44,6 +44,11 @@ longer fits a builtin, V8's snapshot step builds that builtin without it instead
 changes how the engine is compiled, not what its code does. `scripts/engine-toolchain.sh` names the
 toolchain each architecture is built with.
 
+`toolchain/module-version.patch` versions the engine's modules after the engine rather than after
+the Qt it is built against, as Qt's own 6.140.0 does, so its libraries, headers and CMake package say
+6.11.2 on any Qt. It changes the top-level `CMakeLists.txt` and four `find_package` calls under
+`src/`, and no code.
+
 Each patch is a single commit with its own message explaining what it changes and why. They are in
 `patches/` in the repository named as this package's URL, and `README.md` there lists them one by
 one.
