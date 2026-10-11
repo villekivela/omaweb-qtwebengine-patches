@@ -33,6 +33,25 @@ the series: it changes how the engine is compiled, not what its code does. It do
 - Where V8's builtins profile no longer fits a builtin, it has V8 build that builtin without the
   profile instead of stopping the build. Qt's V8 is not built quite as Chrome's.
 
+## The module version
+
+`module-version.patch` is applied by `refresh.sh` to every 6.11 tree, whatever the toolchain, and
+before `clang.patch`. Qt's 6.11 build versions the engine's modules after the Qt it is built
+against, so 6.11.2 built against Arch Linux ARM's Qt 6.12.0 installed `libQt6WebEngineCore.so.6.12.0`,
+its headers under `6.12.0/`, and a CMake package that said 6.12.0. `qWebEngineVersion()` said 6.11.2
+throughout, because the engine's own code is compiled with the version from `.cmake.conf`.
+
+The patch is the shape Qt's own 6.140.0 tree has: `project()` takes `QT_REPO_MODULE_VERSION`, and
+each `find_package(Qt6 ...)` asks for `Qt6BuildInternals_VERSION`, the Qt actually installed. On Qt
+6.11.2 the two are one number and the patch changes nothing. A 6.140 tree already reads this way,
+and `refresh.sh` says so rather than applying it.
+
+One number it leaves alone: `QTWEBENGINECORE_VERSION_STR` in the installed
+`qtwebenginecoreversion.h` names the Qt the engine was built against, because syncqt writes its own
+Qt's version into every module's version header and takes no version to write. Qt's 6.140.0-rc,
+built here against Qt 6.11.2, says 6.11.2 there too. Omaweb reads the engine's version from
+`qWebEngineVersion()`, not from that macro.
+
 ## The profiles
 
 `scripts/fetch-profiles.sh` takes the profiles for the tree being built, so they follow the

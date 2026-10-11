@@ -24,24 +24,29 @@ license=('LGPL-3.0-only' 'BSD-3-Clause')
 # their DT_NEEDED entries, less what glibc, gcc-libs and the Qt packages in the
 # list already bring. A clean Arch install has none of the media and image
 # libraries, so leaving one out fails at load time on the reader's machine.
-depends=('qt6-base' 'qt6-declarative' 'qt6-positioning' 'qt6-webchannel' 'nss' 'libxkbcommon'
-         'alsa-lib' 'dbus' 'expat' 'fontconfig' 'freetype2' 'harfbuzz' 'lcms2' 'libglvnd'
-         'libjpeg-turbo' 'libpng' 'libtiff' 'libwebp' 'libxml2' 'libxslt' 'mesa' 'minizip'
-         'openjpeg2' 'opus' 'snappy' 'systemd-libs' 'zlib')
+#
 # The engine uses Qt's private API, which promises nothing across a Qt minor.
 # It is built against the Qt its readers have, Omarchy's stable mirror on
 # x86_64 and Arch Linux ARM on aarch64, because an engine built against an
-# older Qt runs on a newer one and not the other way round. So Qt carries no
-# version here: a floor at the build's Qt held back every Omarchy reader the
-# day Arch moved ahead of the mirror (omaweb#674), and an upper bound would
-# hold back a reader's system upgrade (omaweb#660).
+# older Qt runs on a newer one and not the other way round (omaweb#674). So Qt's
+# floor is the Qt it was built against, which differs by architecture and is
+# known only where it was built: `build-inside.sh` passes it in, and
+# `package-locally.sh` reads it from the build's engine.json. A floor at the
+# readers' own Qt holds nobody back. What held every Omarchy reader back in
+# omaweb#674 was an engine built against a Qt they did not have. There is no
+# upper bound, which would hold back a reader's system upgrade (omaweb#660).
+_qt="${OMAWEB_ENGINE_QT:-}"
+depends=("qt6-base>=${_qt}" "qt6-declarative>=${_qt}" 'qt6-positioning' 'qt6-webchannel' 'nss'
+         'libxkbcommon' 'alsa-lib' 'dbus' 'expat' 'fontconfig' 'freetype2' 'harfbuzz' 'lcms2'
+         'libglvnd' 'libjpeg-turbo' 'libpng' 'libtiff' 'libwebp' 'libxml2' 'libxslt' 'mesa'
+         'minizip' 'openjpeg2' 'opus' 'snappy' 'systemd-libs' 'zlib')
 # Only Qt Designer loads the QWebEngineView plugin, and it links libQt6Designer.
 optdepends=('qt6-tools: the QWebEngineView plugin for Qt Designer')
 
 # The notices travel with this file rather than with the tarball, so correcting
 # one does not cost a rebuild.
 source=('MODIFICATIONS.md' 'LGPL-3.0-only.txt' 'chromium-LICENSE.txt')
-sha256sums=('655ece6e25ea4d42503480651b65aca90dfe0652025de754b571202c1bb79619'
+sha256sums=('b11654738d61ab90191e17ea71ee8d94502dfd07a2349d927419607477fe5cf9'
             'da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768'
             '368cca1106be99d39ecd32a38d8305585d802a475effb66380b91ffc9bcf709b')
 
@@ -65,6 +70,13 @@ sha256sums_aarch64=('SKIP')
 options=('!strip')
 
 package() {
+    # A package without its Qt floor installs beside a Qt the engine was not
+    # built for, and fails only when a reader starts it.
+    if [ -z "${_qt}" ]; then
+        echo "OMAWEB_ENGINE_QT is not set: name the Qt this engine was built against" >&2
+        return 1
+    fi
+
     # The tarball is already an install tree rooted at /usr/lib/omaweb.
     cp -a "${srcdir}/usr" "${pkgdir}/usr"
 

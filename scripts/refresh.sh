@@ -154,6 +154,24 @@ fi
 # every other Qt application on the machine keeps the engine it had.
 prefix="${OMAWEB_ENGINE_PREFIX:-/usr/lib/omaweb}"
 
+# Up to 6.11 the engine takes its module version from the Qt it is built against,
+# so 6.11.2 built against Qt 6.12.0 installed libQt6WebEngineCore.so.6.12.0, its
+# headers under 6.12.0/ and a CMake package that said 6.12.0. From 6.140 Qt names
+# the engine's own version there and asks for the Qt it is built against by that
+# Qt's, and toolchain/module-version.patch does the same to an older tree. Where
+# the system Qt is the engine's own version, both name one number and the patch
+# changes nothing.
+# shellcheck disable=SC2016 # CMake's ${...}, matched as written, not expanded
+if grep -q '^    VERSION ${Qt6BuildInternals_VERSION}$' CMakeLists.txt; then
+    git apply "$series/../toolchain/module-version.patch"
+    echo "MODULE VERSION: $(sed -n 's/^set(QT_REPO_MODULE_VERSION "\(.*\)")$/\1/p' .cmake.conf), the engine's own rather than the system Qt's"
+elif grep -q '^    VERSION ${QT_REPO_MODULE_VERSION}$' CMakeLists.txt; then
+    echo "MODULE VERSION: the engine's own already"
+else
+    echo "the top-level CMakeLists.txt names the engine's version in a way refresh.sh does not know"
+    exit 1
+fi
+
 # OMAWEB_ENGINE_TOOLCHAIN=clang builds the engine the way Chrome is built:
 # clang, linked by LLD with ThinLTO, and with Chrome's own PGO profile for this
 # Chromium where Chrome publishes one. Qt turns ThinLTO on only when Qt itself
