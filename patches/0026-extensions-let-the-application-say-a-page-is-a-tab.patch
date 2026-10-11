@@ -1,0 +1,442 @@
+From 2e4e0b39e5eaa08240a48f33b80b8968286afc23 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Ville=20Kivel=C3=A4?= <vkivela@hotmail.com>
+Date: Sun, 11 Oct 2026 12:49:55 +0000
+Subject: [PATCH] extensions: let the application say a page is a tab
+
+A page an extension opens with windows.create is a window of its own,
+and an application may show it as one of the reader's tabs instead:
+Omaweb opens every such page as a tab when the reader has turned Glance
+off, and the reader can keep a Glance as a tab. The engine went on
+counting the page as the extension's window, so tabs.query listed it
+there rather than among the browser's tabs, and the extension could
+close the reader's tab with tabs.remove.
+
+QWebEngineExtensionManager::setPageIsTab takes the QWebEnginePage, or
+the WebEngineView in Qt Quick, and is invokable from QML. The page
+leaves the window it was opened in for the browser's: tabs.query lists
+it there, windows.get no longer answers for the window it left, and
+tabs.remove refuses it, as it refuses every tab the application keeps.
+The extension hears nothing, then or when the page closes. Bitwarden
+ends a passkey request when its prompt's window is removed, and the
+prompt is still open, now as a tab.
+
+Said while the application is being handed the page, before
+windows.create answers, the page is never a window of its own, and the
+call answers with the browser's window. The mark lives on the
+WebContents, so it holds from before windows.create registers the page,
+and dies with it. An extension's own page carries it too, and is then
+listed as a tab, where the delegate leaves every other extension page
+out.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../browser/extensions/tab_registry_qt.cc     |  29 +++
+ .../browser/extensions/tab_registry_qt.h      |   6 +
+ src/core/api/qwebengineextensionmanager.cpp   |  24 +++
+ src/core/api/qwebengineextensionmanager.h     |   1 +
+ src/core/extensions/extension_manager.cpp     |  22 +++
+ src/core/extensions/extension_manager.h       |   3 +
+ .../extensions_browser_client_qt.cpp          |   6 +-
+ .../extensions/tst_qwebengineextension.cpp    | 184 ++++++++++++++++++
+ 8 files changed, 273 insertions(+), 2 deletions(-)
+
+diff --git a/src/3rdparty/chromium/qtwebengine/browser/extensions/tab_registry_qt.cc b/src/3rdparty/chromium/qtwebengine/browser/extensions/tab_registry_qt.cc
+index 923c4e6504..9c4ba1d98c 100644
+--- a/src/3rdparty/chromium/qtwebengine/browser/extensions/tab_registry_qt.cc
++++ b/src/3rdparty/chromium/qtwebengine/browser/extensions/tab_registry_qt.cc
+@@ -60,6 +60,19 @@ class ScriptExecutorData : public content::WebContentsUserData<ScriptExecutorDat
+ 
+ WEB_CONTENTS_USER_DATA_KEY_IMPL(ScriptExecutorData);
+ 
++// The application said it shows the page as one of the reader's tabs. The mark lives on the
++// WebContents, so it holds from before windows.create registers the page and dies with it.
++class ShownAsTabData : public content::WebContentsUserData<ShownAsTabData> {
++ private:
++  friend class content::WebContentsUserData<ShownAsTabData>;
++  explicit ShownAsTabData(content::WebContents* web_contents)
++      : content::WebContentsUserData<ShownAsTabData>(*web_contents) {}
++
++  WEB_CONTENTS_USER_DATA_KEY_DECL();
++};
++
++WEB_CONTENTS_USER_DATA_KEY_IMPL(ShownAsTabData);
++
+ // A listener that filters windows.onRemoved by type hears about a window of a type it asked for,
+ // and one that does not filter hears about every window, as Chrome's WindowsEventRouter tells
+ // them. The router sends a copy of the event for each listener's filter, and the renderer matches
+@@ -161,11 +174,27 @@ content::WebContents* TabRegistryQt::GetWebContents(content::BrowserContext* con
+ 
+ void TabRegistryQt::OpenWindow(content::WebContents* web_contents,
+                                api::windows::WindowType type) {
++  // The application took the page as a tab while it was being opened.
++  if (IsShownAsTab(web_contents))
++    return;
+   const int window_id = ++last_window_id_;
+   windows_[window_id] =
+       std::make_unique<OpenedWindow>(web_contents, window_id, GetTabId(web_contents), type);
+ }
+ 
++void TabRegistryQt::ShowAsTab(content::WebContents* web_contents) {
++  ShownAsTabData::CreateForWebContents(web_contents);
++  // The window goes without a word: the page is still open, and an extension that hears its
++  // window was removed ends what it was showing there.
++  std::erase_if(windows_, [web_contents](const auto& entry) {
++    return entry.second->web_contents() == web_contents;
++  });
++}
++
++bool TabRegistryQt::IsShownAsTab(content::WebContents* web_contents) const {
++  return ShownAsTabData::FromWebContents(web_contents) != nullptr;
++}
++
+ bool TabRegistryQt::IsWindowOfItsOwn(content::WebContents* web_contents) const {
+   return FindWindow(web_contents) != nullptr;
+ }
+diff --git a/src/3rdparty/chromium/qtwebengine/browser/extensions/tab_registry_qt.h b/src/3rdparty/chromium/qtwebengine/browser/extensions/tab_registry_qt.h
+index 7bf421f6bd..62aa36d96c 100644
+--- a/src/3rdparty/chromium/qtwebengine/browser/extensions/tab_registry_qt.h
++++ b/src/3rdparty/chromium/qtwebengine/browser/extensions/tab_registry_qt.h
+@@ -70,6 +70,12 @@ class TabRegistryQt {
+   // every extension listening hears tabs.onRemoved for its tab and then windows.onRemoved for the
+   // window, as Chrome raises them, and the id answers nothing after that.
+   void OpenWindow(content::WebContents* web_contents, api::windows::WindowType type);
++  // The application shows |web_contents| as one of the browser window's tabs, for as long as it
++  // lives. A window of its own that it was is gone, and no extension hears about it, then or
++  // when the page closes. Before windows.create registers the page, it is never a window at all.
++  void ShowAsTab(content::WebContents* web_contents);
++  // Whether the application said it shows |web_contents| as a tab.
++  bool IsShownAsTab(content::WebContents* web_contents) const;
+   // Whether |web_contents| is a window of its own rather than a tab of the browser's window.
+   bool IsWindowOfItsOwn(content::WebContents* web_contents) const;
+   // The page holding the window |window_id| of |context|, or null.
+diff --git a/src/core/api/qwebengineextensionmanager.cpp b/src/core/api/qwebengineextensionmanager.cpp
+index 70b18f3e53..4fd8016929 100644
+--- a/src/core/api/qwebengineextensionmanager.cpp
++++ b/src/core/api/qwebengineextensionmanager.cpp
+@@ -208,5 +208,29 @@ void QWebEngineExtensionManager::setWindowGeometryProvider(
+     d_ptr->setWindowGeometryProvider(std::move(provider));
+ }
+ 
++/*!
++    Tells the extensions that \a page is one of the browser window's tabs.
++
++    \a page is a QWebEnginePage, or a WebEngineView in Qt Quick, of this
++    manager's profile. A page an extension opened with \c chrome.windows.create
++    is a window of its own until the application says it shows the page as a tab.
++    From then on the page is in the browser's window: \c chrome.tabs.query lists it
++    there, \c chrome.windows.get no longer answers for the window it was in, and
++    \c chrome.tabs.remove refuses it, as it refuses every tab the application
++    keeps. No event is raised for the window it leaves, and none when it closes.
++
++    Said while the page is being handed to the application, before
++    \c chrome.windows.create answers, the page is a tab from the start and the
++    extension is answered with the browser's window.
++
++    A page is a tab for as long as it lives. Saying so of a page that was never a
++    window of its own changes nothing an extension sees, unless it shows one of
++    the extension's own pages, which is then listed as a tab too.
++*/
++void QWebEngineExtensionManager::setPageIsTab(QObject *page)
++{
++    d_ptr->setPageIsTab(page);
++}
++
+ QT_END_NAMESPACE
+ #endif // QT_CONFIG(webengine_extensions)
+diff --git a/src/core/api/qwebengineextensionmanager.h b/src/core/api/qwebengineextensionmanager.h
+index 29ec98dac0..405bdf0ab4 100644
+--- a/src/core/api/qwebengineextensionmanager.h
++++ b/src/core/api/qwebengineextensionmanager.h
+@@ -41,6 +41,7 @@ public:
+     QList<QWebEngineExtensionInfo> extensions() const;
+ 
+     void setWindowGeometryProvider(std::function<QRect(const QObject *page)> provider);
++    Q_INVOKABLE void setPageIsTab(QObject *page);
+ 
+ Q_SIGNALS:
+     void loadFinished(const QWebEngineExtensionInfo &extension);
+diff --git a/src/core/extensions/extension_manager.cpp b/src/core/extensions/extension_manager.cpp
+index 454bc4c7ca..2f7e9302b7 100644
+--- a/src/core/extensions/extension_manager.cpp
++++ b/src/core/extensions/extension_manager.cpp
+@@ -13,7 +13,11 @@
+ #include "extension_loader.h"
+ #include "extension_installer.h"
+ #include "extension_system_qt.h"
++#include "profile_adapter.h"
++#include "profile_qt.h"
+ #include "type_conversion.h"
++#include "web_contents_adapter.h"
++#include "web_contents_adapter_client.h"
+ 
+ #include "base/functional/callback.h"
+ #include "content/public/browser/browser_context.h"
+@@ -22,6 +26,7 @@
+ #include "extensions/browser/extension_file_task_runner.h"
+ #include "extensions/browser/extension_registry.h"
+ #include "extensions/browser/uninstall_reason.h"
++#include "qtwebengine/browser/extensions/tab_registry_qt.h"
+ 
+ using namespace extensions;
+ 
+@@ -155,6 +160,23 @@ QList<QWebEngineExtensionInfo> ExtensionManager::extensions()
+     return extension_list;
+ }
+ 
++// The page is known by the object the application holds it in, a QWebEnginePage or a
++// WebEngineView, as the window geometry provider is asked about it.
++void ExtensionManager::setPageIsTab(QObject *page)
++{
++    ProfileAdapter *adapter = static_cast<ProfileQt *>(m_context)->profileAdapter();
++    if (!page || !adapter)
++        return;
++    for (WebContentsAdapterClient *client : adapter->webContentsAdapterClients()) {
++        if (client->holdingQObject() != page)
++            continue;
++        WebContentsAdapter *contents = client->webContentsAdapter();
++        if (contents && contents->isInitialized() && contents->webContents())
++            TabRegistryQt::Get()->ShowAsTab(contents->webContents());
++        return;
++    }
++}
++
+ void ExtensionManager::onExtensionLoaded(const Extension *extension)
+ {
+     Q_Q(QWebEngineExtensionManager);
+diff --git a/src/core/extensions/extension_manager.h b/src/core/extensions/extension_manager.h
+index 471bab7166..8518b08cdc 100644
+--- a/src/core/extensions/extension_manager.h
++++ b/src/core/extensions/extension_manager.h
+@@ -69,6 +69,9 @@ public:
+         m_windowGeometryProvider = std::move(provider);
+     }
+ 
++    // The application shows |page| as one of the browser window's tabs.
++    void setPageIsTab(QObject *page);
++
+     void onExtensionLoaded(const extensions::Extension *);
+     void onExtensionInstalled(const extensions::Extension *);
+     void onExtensionUninstalled(const std::string &id);
+diff --git a/src/core/extensions/extensions_browser_client_qt.cpp b/src/core/extensions/extensions_browser_client_qt.cpp
+index fdd963841d..8d1a15f287 100644
+--- a/src/core/extensions/extensions_browser_client_qt.cpp
++++ b/src/core/extensions/extensions_browser_client_qt.cpp
+@@ -364,10 +364,12 @@ void ExtensionsBrowserClientQt::Close(content::BrowserContext *context, const st
+ // A page the extension itself put on show, such as the view an application loads
+ // QWebEngineExtensionInfo::actionPopupUrl() into, is not a tab. Chrome does not list its own
+ // extension views either, and an extension that finds its popup in tabs.query() answers the popup
+-// instead of the page the reader is looking at.
++// instead of the page the reader is looking at. One the application says it shows as a tab, such
++// as a prompt an extension opened that the reader kept, is a tab like any other.
+ static bool isExtensionPage(content::WebContents *contents)
+ {
+-    return contents->GetLastCommittedURL().SchemeIs(extensions::kExtensionScheme);
++    return contents->GetLastCommittedURL().SchemeIs(extensions::kExtensionScheme)
++            && !TabRegistryQt::Get()->IsShownAsTab(contents);
+ }
+ 
+ std::vector<content::WebContents *> ExtensionsBrowserClientQt::GetTabs(content::BrowserContext *context)
+diff --git a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
+index 83458a04d7..03dd05bebb 100644
+--- a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
++++ b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
+@@ -88,6 +88,9 @@ private Q_SLOTS:
+     void anExtensionFindsItsWindowByAddressAndClosesIt();
+     void aWindowClosedWhileTheNextPageOpensIsNotAnswered();
+     void aStoppedWorkerIsWokenToHearItsWindowClosed();
++    void aWindowTheApplicationShowsAsATabJoinsTheBrowsersWindow_data();
++    void aWindowTheApplicationShowsAsATabJoinsTheBrowsersWindow();
++    void aPageTakenAsATabWhileItOpensIsNeverAWindow();
+ 
+ private:
+     int installedFiles();
+@@ -2184,5 +2187,186 @@ void tst_QWebEngineExtension::aStoppedWorkerIsWokenToHearItsWindowClosed()
+     QVERIFY(run() != first);
+ }
+ 
++void tst_QWebEngineExtension::aWindowTheApplicationShowsAsATabJoinsTheBrowsersWindow_data()
++{
++    QTest::addColumn<QString>("path");
++    QTest::addColumn<bool>("extensionPage");
++    QTest::newRow("an extension page") << u"/control.html"_s << true;
++    QTest::newRow("a web page") << u"/index.html"_s << false;
++}
++
++void tst_QWebEngineExtension::aWindowTheApplicationShowsAsATabJoinsTheBrowsersWindow()
++{
++    // An application may show a page an extension opened as one of the reader's tabs, as Omaweb
++    // does when the reader keeps a Glance. The page then leaves the window it was opened in for
++    // the browser's, where the extension finds it and may not close it, and the extension hears
++    // nothing: Bitwarden ends a passkey request when its prompt's window is removed, and the
++    // prompt is still open.
++    QFETCH(QString, path);
++    QFETCH(bool, extensionPage);
++    const int browserWindowId = 1;
++    HttpServer server;
++    server.setResourceDirs({ resourcesPath() });
++    QVERIFY(server.start());
++
++    QWebEngineExtensionInfo opener = loadExtensionSync(resourcesPath() + "window_closing_ext"_L1);
++    QVERIFY(opener.isLoaded());
++    m_manager->setExtensionEnabled(opener, true);
++
++    QSignalSpy loadSpy(m_page, SIGNAL(loadFinished(bool)));
++    m_page->load(server.url("/index.html"_L1));
++    QTRY_COMPARE(loadSpy.size(), 1);
++    std::vector<std::unique_ptr<QWebEnginePage>> opened;
++    connect(m_page, &QWebEnginePage::newWindowRequested, this,
++            [&opened, this](QWebEngineNewWindowRequest &request) {
++                opened.push_back(std::make_unique<QWebEnginePage>(m_profile));
++                request.openIn(opened.back().get());
++            });
++
++    QWebEnginePage control(m_profile);
++    QSignalSpy controlSpy(&control, SIGNAL(loadFinished(bool)));
++    control.load(QUrl("chrome-extension://"_L1 + opener.id() + "/control.html"_L1));
++    QTRY_COMPARE(controlSpy.size(), 1);
++
++    const QString address = extensionPage
++            ? "chrome.runtime.getURL('control.html?popout')"_L1
++            : QStringLiteral("'%1'").arg(server.url(path).toString() + "?popout"_L1);
++    const QString pattern = extensionPage
++            ? "chrome.runtime.getURL('control.html') + '?popout*'"_L1
++            : "'*://*/index.html?popout*'"_L1;
++    const QVariantMap created = askExtension(
++            &control, "created"_L1,
++            QStringLiteral("chrome.windows.create({ url: %1, type: 'popup' })").arg(address));
++    QVERIFY2(created.contains("value"_L1), qPrintable(created.value("error"_L1).toString()));
++    const QVariantMap window = created["value"_L1].toMap();
++    const int windowId = window["id"_L1].toInt();
++    QVERIFY(windowId != browserWindowId);
++    const int tabId = window["tabs"_L1].toList().first().toMap()["id"_L1].toInt();
++    QTRY_COMPARE(opened.size(), size_t(1));
++    QTRY_COMPARE(opened.front()->url().query(), "popout"_L1);
++
++    m_manager->setPageIsTab(opened.front().get());
++
++    const auto tabs = [](const QVariantMap &answer) {
++        QList<QPair<int, int>> tabs;
++        for (const QVariant &tab : answer.value("value"_L1).toList())
++            tabs.append({ tab.toMap()["id"_L1].toInt(), tab.toMap()["windowId"_L1].toInt() });
++        return tabs;
++    };
++    const QList<QPair<int, int>> inTheBrowsersWindow = { { tabId, browserWindowId } };
++    QCOMPARE(tabs(askExtension(&control, "found"_L1,
++                               QStringLiteral("chrome.tabs.query({ url: %1 })").arg(pattern))),
++             inTheBrowsersWindow);
++    QVERIFY(tabs(askExtension(&control, "browserWindow"_L1,
++                              "chrome.tabs.query({ windowId: 1 })"_L1))
++                    .contains(inTheBrowsersWindow.first()));
++    QCOMPARE(askExtension(&control, "gone"_L1,
++                          QStringLiteral("chrome.windows.get(%1)").arg(windowId))
++                     .value("error"_L1)
++                     .toString(),
++             QStringLiteral("No window with id: %1.").arg(windowId));
++    QCOMPARE(askExtension(&control, "removed"_L1,
++                          QStringLiteral("chrome.tabs.remove(%1)").arg(tabId))
++                     .value("error"_L1)
++                     .toString(),
++             "The application keeps its own tabs open."_L1);
++    QCOMPARE(askExtension(&control, "windowRemoved"_L1,
++                          QStringLiteral("chrome.windows.remove(%1)").arg(windowId))
++                     .value("error"_L1)
++                     .toString(),
++             QStringLiteral("No window with id: %1.").arg(windowId));
++    QVERIFY(opened.front());
++
++    // The reader closes the tab, and then a window the extension opened after it. The extension
++    // hears about the window, and nothing before it.
++    opened.front().reset();
++    const QVariantMap next = askExtension(
++            &control, "next"_L1, "chrome.windows.create({ url: 'blank.html', type: 'popup' })"_L1);
++    QVERIFY2(next.contains("value"_L1), qPrintable(next.value("error"_L1).toString()));
++    const int nextWindowId = next["value"_L1].toMap()["id"_L1].toInt();
++    const int nextTabId =
++            next["value"_L1].toMap()["tabs"_L1].toList().first().toMap()["id"_L1].toInt();
++    QTRY_COMPARE(opened.size(), size_t(2));
++    opened.back().reset();
++    QTRY_COMPARE(heardByWorker(&control), removalOf(nextTabId, nextWindowId));
++}
++
++void tst_QWebEngineExtension::aPageTakenAsATabWhileItOpensIsNeverAWindow()
++{
++    // An application may decide what a page an extension opens is while it is handed the page, as
++    // Omaweb opens every page as a tab when the reader has turned Glance off. Such a page is a tab
++    // of the browser's window from the start: windows.create answers with that window, and the
++    // extension hears nothing when the page closes.
++    const int browserWindowId = 1;
++    HttpServer server;
++    server.setResourceDirs({ resourcesPath() });
++    QVERIFY(server.start());
++
++    QWebEngineExtensionInfo opener = loadExtensionSync(resourcesPath() + "window_closing_ext"_L1);
++    QVERIFY(opener.isLoaded());
++    m_manager->setExtensionEnabled(opener, true);
++
++    QSignalSpy loadSpy(m_page, SIGNAL(loadFinished(bool)));
++    m_page->load(server.url("/index.html"_L1));
++    QTRY_COMPARE(loadSpy.size(), 1);
++    std::vector<std::unique_ptr<QWebEnginePage>> opened;
++    bool asTabs = true;
++    connect(m_page, &QWebEnginePage::newWindowRequested, this,
++            [&opened, &asTabs, this](QWebEngineNewWindowRequest &request) {
++                opened.push_back(std::make_unique<QWebEnginePage>(m_profile));
++                request.openIn(opened.back().get());
++                if (asTabs)
++                    m_manager->setPageIsTab(opened.back().get());
++            });
++
++    QWebEnginePage control(m_profile);
++    QSignalSpy controlSpy(&control, SIGNAL(loadFinished(bool)));
++    control.load(QUrl("chrome-extension://"_L1 + opener.id() + "/control.html"_L1));
++    QTRY_COMPARE(controlSpy.size(), 1);
++
++    const QVariantMap created = askExtension(
++            &control, "created"_L1,
++            "chrome.windows.create({ url: 'control.html?popout', type: 'popup' })"_L1);
++    QVERIFY2(created.contains("value"_L1), qPrintable(created.value("error"_L1).toString()));
++    const QVariantMap window = created["value"_L1].toMap();
++    QCOMPARE(window["id"_L1].toInt(), browserWindowId);
++    QCOMPARE(window["type"_L1].toString(), "normal"_L1);
++    const QVariantMap tab = window["tabs"_L1].toList().first().toMap();
++    QCOMPARE(tab["windowId"_L1].toInt(), browserWindowId);
++    const int tabId = tab["id"_L1].toInt();
++    QCOMPARE(opened.size(), size_t(1));
++    QTRY_COMPARE(opened.front()->url().query(), "popout"_L1);
++
++    // The extension finds its page among the browser's tabs, and not the control page, which the
++    // application never said is a tab.
++    const QVariantMap listed = askExtension(&control, "listed"_L1,
++                                            "chrome.tabs.query({ windowId: 1 })"_L1);
++    QList<QUrl> addresses;
++    for (const QVariant &listedTab : listed.value("value"_L1).toList())
++        addresses.append(QUrl(listedTab.toMap()["url"_L1].toString()));
++    QVERIFY(addresses.contains(opened.front()->url()));
++    QVERIFY(!addresses.contains(control.url()));
++    QCOMPARE(askExtension(&control, "removed"_L1,
++                          QStringLiteral("chrome.tabs.remove(%1)").arg(tabId))
++                     .value("error"_L1)
++                     .toString(),
++             "The application keeps its own tabs open."_L1);
++
++    // The reader closes the tab, and then a window the extension opened after it. The extension
++    // hears about the window, and nothing before it.
++    opened.front().reset();
++    asTabs = false;
++    const QVariantMap next = askExtension(
++            &control, "next"_L1, "chrome.windows.create({ url: 'blank.html', type: 'popup' })"_L1);
++    QVERIFY2(next.contains("value"_L1), qPrintable(next.value("error"_L1).toString()));
++    const int nextWindowId = next["value"_L1].toMap()["id"_L1].toInt();
++    QVERIFY(nextWindowId != browserWindowId);
++    const int nextTabId =
++            next["value"_L1].toMap()["tabs"_L1].toList().first().toMap()["id"_L1].toInt();
++    QTRY_COMPARE(opened.size(), size_t(2));
++    opened.back().reset();
++    QTRY_COMPARE(heardByWorker(&control), removalOf(nextTabId, nextWindowId));
++}
++
+ QTEST_MAIN(tst_QWebEngineExtension)
+ #include "tst_qwebengineextension.moc"
+-- 
+2.55.0
+
