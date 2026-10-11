@@ -1,6 +1,6 @@
 # QtWebEngine extension patches
 
-Twenty-five patches to QtWebEngine. Sixteen let it host a password manager's Chromium extension,
+Twenty-six patches to QtWebEngine. Seventeen let it host a password manager's Chromium extension,
 two add API that Omaweb's content blocking and certificate view ask for, one restores a trace macro
 that slowed every page, one turns V8's write barriers back on, one keeps an offscreen document from
 crashing the engine, one builds the tests against Qt 6.12, one keeps the content scripts any
@@ -12,7 +12,7 @@ Built for [omaweb#344](https://github.com/villekivela/omaweb/issues/344), which 
 can host Bitwarden and 1Password. The findings live in `docs/research/password-manager-extensions.md`
 in that repository.
 
-Nine of the twenty-five are ordinary bug fixes headed for Gerrit, and 0018 and 0020 are Qt's own
+Nine of the twenty-six are ordinary bug fixes headed for Gerrit, and 0018 and 0020 are Qt's own
 changes. The rest wait on one question to Qt, in `upstream/QTBUG-draft.md`. If Qt takes the work,
 this repository is deleted rather than maintained.
 
@@ -205,9 +205,8 @@ an extension finds its prompt by address and removes it, as Bitwarden does. When
 goes, however it went, every extension listening hears `tabs.onRemoved` and then
 `windows.onRemoved`, as in Chrome, and a stopped worker is woken to hear them. `windows.remove` and
 `tabs.remove` close such a page the way its own `window.close()` does, and refuse the browser's
-window and the reader's tabs. The engine cannot see where the application shows the page, so one
-it shows as a tab is still reported as a window of its own
-([omaweb#694](https://github.com/villekivela/omaweb/issues/694)). See
+window and the reader's tabs. The engine cannot see where the application shows the page, so 0026
+lets the application say when it shows one as a tab. See
 [omaweb#687](https://github.com/villekivela/omaweb/issues/687). _Part of the tab model the open
 question below is about. Propose it with 0004._
 
@@ -239,6 +238,23 @@ address was dropped. It now reports a drawing whose pixels differ as cleared and
 again, the address on the next turn of the event loop, because the Quick view reads its icon
 property a turn after it is told. See [omaweb#700](https://github.com/villekivela/omaweb/issues/700).
 _A bug fix with tests. Submit as is._
+
+**0026, let the application say a page is a tab.** A page an extension opened with `windows.create`
+is a window of its own from 0023 on, and an application may show it as one of the reader's tabs
+instead, as Omaweb does with Glance off or when the reader keeps a Glance. The extension then held a
+window the reader could not see, could close the reader's tab with `tabs.remove`, and did not find
+the page among the browser window's tabs. `QWebEngineExtensionManager::setPageIsTab` takes the
+`QWebEnginePage` or `WebEngineView`, and is invokable from QML. The page leaves its window for the
+browser's: `tabs.query` lists it there, `windows.get` no longer answers for the window, and
+`tabs.remove` refuses it as it refuses every tab the application keeps. The extension hears no
+`windows.onRemoved` or `tabs.onRemoved`, then or when the page closes, because Bitwarden abandons a
+passkey request when its prompt's window goes and the prompt is still open. Said while the
+application is being handed the page, before `windows.create` answers, the page is never a window:
+the call answers with the browser's window. The mark lives on the `WebContents`, so an extension's
+own page shown as a tab is listed as one, where the delegate leaves every other extension page out.
+See [omaweb#694](https://github.com/villekivela/omaweb/issues/694). _Part of the tab model the open
+question below is about: the first thing the application says about which pages are tabs. Propose
+it with 0004._
 
 ## The open question
 
@@ -276,6 +292,10 @@ third. Patch 0023's cases, `anExtensionIsToldTheWindowItOpenedClosed`,
 answers with the browser's window, no event arrives, `tabs.query` cannot find the window's tab, and
 `windows.remove` and `tabs.remove` are refused. `aStoppedWorkerIsWokenToHearItsWindowClosed` waits
 for the worker's thirty-second idle stop, and fails when the router does not wake it.
+Patch 0026's cases, `aWindowTheApplicationShowsAsATabJoinsTheBrowsersWindow` and
+`aPageTakenAsATabWhileItOpensIsNeverAWindow`, do not compile without the patch, which adds the call
+they make. With the call doing nothing they fail: `tabs.query` finds the page in its own window, and
+`windows.create` answers with that window.
 
 Patch 0022's nine cases restart a profile on the same storage path, disable and enable the
 extension, or load it again changed. They compile on the series without 0022. Five of the first six,
@@ -367,6 +387,7 @@ stays after 0018 drops, so a later Qt that turns the barriers off again is notic
 | 6.11.2-10, series grown to 23 | 21 already applied, 2 more, no conflicts | incremental | 71 of 71 | none |
 | 6.11.2-11, series grown to 24 | 21 already applied, 3 more, no conflicts | incremental | 72 of 72 | none |
 | 6.11.2-13, series grown to 25 | 21 already applied, 4 more, no conflicts | incremental | 81 of 81 | none |
+| 6.11.2-14, series grown to 26 | 21 already applied, 5 more, no conflicts | incremental | 84 of 84 | none |
 
 The rows after the first are the series growing, and the last is the same series rebuilt with each
 architecture's toolchain and published as 6.11.2-5 (omaweb#576), rather than Qt moving. They
