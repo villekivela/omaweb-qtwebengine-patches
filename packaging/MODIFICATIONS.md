@@ -9,7 +9,7 @@ this file is for.
 
 ## What changed
 
-Twenty-six patches, applied in order to the released source. Fourteen add the part of Chromium's
+Twenty-seven patches, applied in order to the released source. Fourteen add the part of Chromium's
 extension runtime that QtWebEngine compiles out: renderer bindings, the `tabs`, `windows`,
 `permissions`, `scripting`, `notifications` and `webNavigation` namespaces behind an embedder
 delegate, native messaging, and web accessible resources. Five of those are bug fixes in Qt's own
@@ -32,9 +32,11 @@ The twenty-fourth is a bug fix in Qt's own code: deleting a profile while an ext
 waits for its worker no longer crashes the application. The twenty-fifth is a bug fix in Qt's own
 code as well: when the application's colour scheme changes, pages are told it, and a favicon drawn
 for the earlier scheme is drawn again, at once for a page on show and on the next visit for any
-other. The last adds `QWebEngineExtensionManager::setPageIsTab`, through which the application says
-it shows a page an extension opened as one of its tabs, so the page leaves the window of its own for
-the browser's.
+other. The twenty-sixth adds `QWebEngineExtensionManager::setPageIsTab`, through which the
+application says it shows a page an extension opened as one of its tabs, so the page leaves the
+window of its own for the browser's. The last changes Chromium's favicon ranking: a page's SVG icon
+is tried before its raster ones and taken once it is drawn, so an icon that follows the colour scheme
+is shown rather than a raster one declared beside it.
 
 On x86_64 the engine is built with clang and LLD, with ThinLTO and Chrome's own PGO profile for its
 Chromium, where Qt's build would use GCC. On aarch64 it is built with GCC, as Qt's is.
