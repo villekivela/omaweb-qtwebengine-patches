@@ -451,6 +451,7 @@ engines, as the control for the first.
 | 6.11.2-11, series grown to 24 | 21 already applied, 3 more, no conflicts | incremental | 72 of 72 | none |
 | 6.11.2-13, series grown to 25 | 21 already applied, 4 more, no conflicts | incremental | 81 of 81 | none |
 | 6.11.2-14, series grown to 26 | x86_64 25 already applied, 1 more; aarch64 24 already applied, 2 more; no conflicts | incremental | 84 of 84 on each | none |
+| 6.11.2-15, series grown to 29 | 26 already applied, 3 more, no conflicts | incremental | 93 of 93 on each | none |
 
 The rows after the first are the series growing, and the last is the same series rebuilt with each
 architecture's toolchain and published as 6.11.2-5 (omaweb#576), rather than Qt moving. They
