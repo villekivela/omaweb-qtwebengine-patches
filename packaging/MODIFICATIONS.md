@@ -9,7 +9,7 @@ this file is for.
 
 ## What changed
 
-Twenty-eight patches, applied in order to the released source. Fourteen add the part of Chromium's
+Twenty-nine patches, applied in order to the released source. Fourteen add the part of Chromium's
 extension runtime that QtWebEngine compiles out: renderer bindings, the `tabs`, `windows`,
 `permissions`, `scripting`, `notifications` and `webNavigation` namespaces behind an embedder
 delegate, native messaging, and web accessible resources. Five of those are bug fixes in Qt's own
@@ -36,9 +36,12 @@ other. The twenty-sixth adds `QWebEngineExtensionManager::setPageIsTab`, through
 application says it shows a page an extension opened as one of its tabs, so the page leaves the
 window of its own for the browser's. The twenty-seventh changes Chromium's favicon ranking: a page's
 SVG icon is tried before its raster ones and taken once it is drawn, so an icon that follows the
-colour scheme is shown rather than a raster one declared beside it. The last is a bug fix for a
+colour scheme is shown rather than a raster one declared beside it. The twenty-eighth is a bug fix for a
 build without BlueZ, as this one is: Chromium is told there is no Bluetooth LE, so a page that asks
 what its passkeys can reach hears back rather than waiting on a Bluetooth adapter that never comes.
+The last removes Chromium's disguise for a missing push service in a window that keeps nothing: a
+page that subscribes there is refused at once, as in any other window, rather than after a question
+to the application.
 
 On x86_64 the engine is built with clang and LLD, with ThinLTO and Chrome's own PGO profile for its
 Chromium, where Qt's build would use GCC. On aarch64 it is built with GCC, as Qt's is.
