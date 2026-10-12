@@ -1,18 +1,19 @@
 # QtWebEngine extension patches
 
-Twenty-six patches to QtWebEngine. Seventeen let it host a password manager's Chromium extension,
+Twenty-seven patches to QtWebEngine. Seventeen let it host a password manager's Chromium extension,
 two add API that Omaweb's content blocking and certificate view ask for, one restores a trace macro
 that slowed every page, one turns V8's write barriers back on, one keeps an offscreen document from
 crashing the engine, one builds the tests against Qt 6.12, one keeps the content scripts any
 extension registers across a restart, one keeps a profile from crashing as it is deleted with an
-extension's message still waiting, and one draws a favicon again when the colour scheme changes.
+extension's message still waiting, one draws a favicon again when the colour scheme changes, and one
+shows a page's SVG icon rather than a raster one beside it.
 Base is the released `qtwebengine-everywhere-src-6.11.2` tarball.
 
 Built for [omaweb#344](https://github.com/villekivela/omaweb/issues/344), which asks whether Omaweb
 can host Bitwarden and 1Password. The findings live in `docs/research/password-manager-extensions.md`
 in that repository.
 
-Nine of the twenty-six are ordinary bug fixes headed for Gerrit, and 0018 and 0020 are Qt's own
+Nine of the twenty-seven are ordinary bug fixes headed for Gerrit, and 0018 and 0020 are Qt's own
 changes. The rest wait on one question to Qt, in `upstream/QTBUG-draft.md`. If Qt takes the work,
 this repository is deleted rather than maintained.
 
@@ -256,6 +257,18 @@ See [omaweb#694](https://github.com/villekivela/omaweb/issues/694). _Part of the
 question below is about: the first thing the application says about which pages are tabs. Propose
 it with 0004._
 
+**0027, rank a page's SVG icon above its raster ones.** chatgpt.com declares a black ICO for any size
+ahead of an SVG that follows `prefers-color-scheme`, so 0025 had nothing to redraw: the tab showed
+the ICO. Chromium's `FaviconHandler` ranks an icon declared for any size, or for none, at 1 before
+fetching it, scores an SVG's one drawing, made at the largest size wanted, below 1 against the 16
+and 32 pixels a tab wants, and goes on to a raster with exact frames, which scores 1. Chromium's
+main branch ranks the same way. The handler for small icons now tries a page's SVG icons first and
+scores a drawn SVG at 1, so it stops there; an SVG that cannot be fetched leaves the raster. A
+candidate carries no type from its `<link>`, so an SVG is known by its address: a path ending in
+`.svg`, or a `data:` URL of `image/svg+xml`. Nothing a page can see changes. See
+[omaweb#700](https://github.com/villekivela/omaweb/issues/700). _A behaviour change with tests,
+where upstream may prefer the `<link>` type carried through Blink. Propose it with that question._
+
 ## The open question
 
 `TabsDelegateQt` is internal, and `ExtensionsBrowserClientQt` fills it by treating every page of the
@@ -366,6 +379,14 @@ Each part is red when broken:
   same-document navigation reports the icon as cleared
 - when the address is reported again at once rather than on the next turn, the Quick case fails:
   the view never reports the empty address
+
+Patch 0027's cases, `svgRanksAboveARasterBesideIt`, `svgRanksAboveARasterDeclaredAfterIt` and
+`rasterShownWhenTheSvgFails`, are in `tst_favicon` beside 0025's. Each loads a page that declares
+`qtmulti.ico`, with 16, 32 and 64 pixel frames, for any size beside an SVG. The first declares the
+ICO first, as chatgpt.com does; the second declares the SVG first, which Blink reports last, so the
+ICO was fetched first and the SVG never was, and only the sort makes it pass. Both fail on a stock
+engine, which shows the ICO, and the gate's stock run checks them. The third names an SVG that does
+not exist and passes there too: it guards the fallback the patch keeps.
 
 Patch 0018 has no test case, because what it changes is how V8 is compiled. The gate reads that
 instead. `scripts/check-write-barriers.sh` fails a tree whose V8 is compiled with
