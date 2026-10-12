@@ -291,8 +291,8 @@ service unless the application switches one on, and Omaweb never does. Where the
 off-the-record profile: there Chromium hides the missing service by asking for the notifications
 permission and rejecting with `INCOGNITO_PERMISSION_DENIED` whatever the answer. An application that
 asks its reader gets a question that leads nowhere, and a site tells the two profiles apart.
-`Register` now answers `SERVICE_NOT_AVAILABLE` in every profile, and the request, its callback and the
-console message are gone. `Notification.requestPermission()` does not pass through it and is
+`Register` now answers `SERVICE_NOT_AVAILABLE` in every profile, and the request, its callback and
+the console message are gone. `Notification.requestPermission()` does not pass through it and is
 unchanged. See [omaweb#421](https://github.com/villekivela/omaweb/issues/421). _A behaviour change
 that drops Chromium's incognito disguise, which only means something where a push service exists._
 
@@ -426,11 +426,12 @@ that the answer comes within ten seconds with no hybrid transport, no platform a
 passkey platform authenticator and conditional mediation available. On a stock engine, built without
 BlueZ as Arch's is, no answer comes, and the gate's stock run checks that.
 
-Patch 0029's cases are in `tst_qwebenginepage` too. `pushSubscribeAnswersAlikeOffTheRecord` registers
-a service worker from a page on an off-the-record and on an on-the-record profile, subscribes, and
-checks that the application is never asked for a permission and that both reject with `AbortError:
-Registration failed - push service not available`. Off the record, an engine without the patch asks once,
-and the gate's stock run expects that case to fail. `notificationRequestStillReachesTheApplicationOffTheRecord` checks that
+Patch 0029's cases are in `tst_qwebenginepage` too. `pushSubscribeAnswersAlikeOffTheRecord`
+registers a service worker from a page on an off-the-record and on an on-the-record profile,
+subscribes, and checks that the application is never asked for a permission and that both reject
+with `AbortError: Registration failed - push service not available`. Off the record, an engine
+without the patch asks once, and the gate's stock run expects that case to fail.
+`notificationRequestStillReachesTheApplicationOffTheRecord` checks that
 `Notification.requestPermission()` still reaches the application off the record; it passes on both
 engines, as the control for the first.
 
