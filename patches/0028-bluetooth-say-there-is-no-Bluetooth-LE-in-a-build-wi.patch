@@ -1,0 +1,101 @@
+From a2c2ac5afe87600454720985563349339d2a2ece Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Ville=20Kivel=C3=A4?= <vkivela@hotmail.com>
+Date: Mon, 12 Oct 2026 05:42:04 +0000
+Subject: [PATCH] bluetooth: say there is no Bluetooth LE in a build without
+ BlueZ
+
+A page that asked PublicKeyCredential.getClientCapabilities() never
+heard back. Chromium answers once every capability it reports has
+answered, the hybrid transport among them, and the hybrid transport
+asks BluetoothAdapterFactory for an adapter whenever the platform
+supports Bluetooth LE. Built with use_bluez=false, Linux has Chromium's
+stub BluetoothAdapter::CreateAdapter(), which makes none, and Qt's
+GetAdapter() drops its callers' callbacks when there is none, so the
+promise stayed pending. Chromium 152 on the same machine answers at
+once.
+
+IsLowEnergySupported() now says false on Linux built without BlueZ,
+where the bluetooth component is compiled with LINUX_WITHOUT_DBUS. The
+hybrid transport is then reported unavailable without asking for an
+adapter, and the security key request and the digital credentials
+transaction, which check the same answer first, stop asking for one
+too. A page hears what the engine reaches: no hybrid transport, no
+platform authenticator, and passkey autofill.
+
+clientCapabilitiesAnswerWithoutBluetooth loads a page at an https
+address and asks; without this patch no answer comes within ten
+seconds.
+
+See villekivela/omaweb#711.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../bluetooth/bluetooth_adapter_factory.cc    |  7 ++++-
+ .../qwebenginepage/tst_qwebenginepage.cpp     | 26 +++++++++++++++++++
+ 2 files changed, 32 insertions(+), 1 deletion(-)
+
+diff --git a/src/3rdparty/chromium/device/bluetooth/bluetooth_adapter_factory.cc b/src/3rdparty/chromium/device/bluetooth/bluetooth_adapter_factory.cc
+index c5c88bdd3d..047c841d95 100644
+--- a/src/3rdparty/chromium/device/bluetooth/bluetooth_adapter_factory.cc
++++ b/src/3rdparty/chromium/device/bluetooth/bluetooth_adapter_factory.cc
+@@ -55,7 +55,12 @@ bool BluetoothAdapterFactory::IsLowEnergySupported() {
+     return override_values_->GetLESupported();
+   }
+ 
+-#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_LINUX) || \
++#if BUILDFLAG(IS_LINUX) && defined(LINUX_WITHOUT_DBUS)
++  // Built without BlueZ, Linux has the stub BluetoothAdapter::CreateAdapter(),
++  // which makes no adapter, and GetAdapter() never answers without one. Say
++  // there is no Bluetooth LE here, so nothing waits on an adapter for it.
++  return false;
++#elif BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_LINUX) || \
+     BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_WIN)
+   return true;
+ #else
+diff --git a/tests/auto/widgets/qwebenginepage/tst_qwebenginepage.cpp b/tests/auto/widgets/qwebenginepage/tst_qwebenginepage.cpp
+index 82b7707b87..6012bc186c 100644
+--- a/tests/auto/widgets/qwebenginepage/tst_qwebenginepage.cpp
++++ b/tests/auto/widgets/qwebenginepage/tst_qwebenginepage.cpp
+@@ -191,6 +191,7 @@ private Q_SLOTS:
+     void setHtmlWithImageResource();
+     void setHtmlWithStylesheetResource();
+     void setHtmlWithBaseURL();
++    void clientCapabilitiesAnswerWithoutBluetooth();
+     void setHtmlWithJSAlert();
+     void setHtmlWithModuleImport();
+     void baseUrl_data();
+@@ -2402,6 +2403,31 @@ void tst_QWebEnginePage::setHtmlWithBaseURL()
+     QCOMPARE(m_view->page()->history()->count(), 0);
+ }
+ 
++// An engine built without BlueZ has no Bluetooth adapter. getClientCapabilities()
++// waits on every capability it reports, the hybrid transport among them, and the
++// hybrid transport waited on an adapter that never came, so the promise never
++// settled and a site that asked heard nothing.
++void tst_QWebEnginePage::clientCapabilitiesAnswerWithoutBluetooth()
++{
++    QWebEnginePage page;
++    QSignalSpy loadSpy(&page, &QWebEnginePage::loadFinished);
++    page.setHtml("<html><body></body></html>", QUrl("https://www.example.com/"));
++    QTRY_COMPARE(loadSpy.size(), 1);
++    QVERIFY(evaluateJavaScriptSync(&page, "window.isSecureContext").toBool());
++
++    evaluateJavaScriptSync(&page,
++                           "PublicKeyCredential.getClientCapabilities()"
++                           ".then(c => window.capabilities = c);");
++    QTRY_VERIFY_WITH_TIMEOUT(
++            evaluateJavaScriptSync(&page, "window.capabilities !== undefined").toBool(), 10000);
++
++    const QVariantMap capabilities = evaluateJavaScriptSync(&page, "window.capabilities").toMap();
++    QCOMPARE(capabilities.value("hybridTransport"), QVariant(false));
++    QCOMPARE(capabilities.value("userVerifyingPlatformAuthenticator"), QVariant(false));
++    QCOMPARE(capabilities.value("passkeyPlatformAuthenticator"), QVariant(false));
++    QCOMPARE(capabilities.value("conditionalGet"), QVariant(true));
++}
++
+ class MyPage : public QWebEnginePage
+ {
+ public:
+-- 
+2.55.0
+
