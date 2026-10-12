@@ -1,20 +1,21 @@
 # QtWebEngine extension patches
 
-Twenty-eight patches to QtWebEngine. Seventeen let it host a password manager's Chromium extension,
+Twenty-nine patches to QtWebEngine. Seventeen let it host a password manager's Chromium extension,
 two add API that Omaweb's content blocking and certificate view ask for, one restores a trace macro
 that slowed every page, one turns V8's write barriers back on, one keeps an offscreen document from
 crashing the engine, one builds the tests against Qt 6.12, one keeps the content scripts any
 extension registers across a restart, one keeps a profile from crashing as it is deleted with an
 extension's message still waiting, one draws a favicon again when the colour scheme changes, one
-shows a page's SVG icon rather than a raster one beside it, and one lets a page hear what its
-passkeys can reach in a build without Bluetooth.
+shows a page's SVG icon rather than a raster one beside it, one lets a page hear what its
+passkeys can reach in a build without Bluetooth, and one answers a push subscription the same in
+a window that keeps nothing.
 Base is the released `qtwebengine-everywhere-src-6.11.2` tarball.
 
 Built for [omaweb#344](https://github.com/villekivela/omaweb/issues/344), which asks whether Omaweb
 can host Bitwarden and 1Password. The findings live in `docs/research/password-manager-extensions.md`
 in that repository.
 
-Ten of the twenty-eight are ordinary bug fixes headed for Gerrit, and 0018 and 0020 are Qt's own
+Ten of the twenty-nine are ordinary bug fixes headed for Gerrit, and 0018 and 0020 are Qt's own
 changes. The rest wait on one question to Qt, in `upstream/QTBUG-draft.md`. If Qt takes the work,
 this repository is deleted rather than maintained.
 
@@ -284,6 +285,17 @@ conditional mediation reported available, as Chromium on Linux reports it. See
 [omaweb#711](https://github.com/villekivela/omaweb/issues/711). _A bug fix for Qt's build without
 BlueZ, headed for Gerrit._
 
+**0029, answer a push subscription alike in a window that keeps nothing.** The engine has no push
+service unless the application switches one on, and Omaweb never does. Where there is none,
+`PushMessagingManager::Register` rejects with `SERVICE_NOT_AVAILABLE` at once, except in an
+off-the-record profile: there Chromium hides the missing service by asking for the notifications
+permission and rejecting with `INCOGNITO_PERMISSION_DENIED` whatever the answer. An application that
+asks its reader gets a question that leads nowhere, and a site tells the two profiles apart.
+`Register` now answers `SERVICE_NOT_AVAILABLE` in every profile, and the request, its callback and
+the console message are gone. `Notification.requestPermission()` does not pass through it and is
+unchanged. See [omaweb#421](https://github.com/villekivela/omaweb/issues/421). _A behaviour change
+that drops Chromium's incognito disguise, which only means something where a push service exists._
+
 ## The open question
 
 `TabsDelegateQt` is internal, and `ExtensionsBrowserClientQt` fills it by treating every page of the
@@ -413,6 +425,15 @@ loads a page at an `https` address, a secure context, asks `getClientCapabilitie
 that the answer comes within ten seconds with no hybrid transport, no platform authenticator, no
 passkey platform authenticator and conditional mediation available. On a stock engine, built without
 BlueZ as Arch's is, no answer comes, and the gate's stock run checks that.
+
+Patch 0029's cases are in `tst_qwebenginepage` too. `pushSubscribeAnswersAlikeOffTheRecord`
+registers a service worker from a page on an off-the-record and on an on-the-record profile,
+subscribes, and checks that the application is never asked for a permission and that both reject
+with `AbortError: Registration failed - push service not available`. Off the record, an engine
+without the patch asks once, and the gate's stock run expects that case to fail.
+`notificationRequestStillReachesTheApplicationOffTheRecord` checks that
+`Notification.requestPermission()` still reaches the application off the record; it passes on both
+engines, as the control for the first.
 
 ## Rebase record
 
