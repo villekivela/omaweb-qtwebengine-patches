@@ -1,19 +1,20 @@
 # QtWebEngine extension patches
 
-Twenty-seven patches to QtWebEngine. Seventeen let it host a password manager's Chromium extension,
+Twenty-eight patches to QtWebEngine. Seventeen let it host a password manager's Chromium extension,
 two add API that Omaweb's content blocking and certificate view ask for, one restores a trace macro
 that slowed every page, one turns V8's write barriers back on, one keeps an offscreen document from
 crashing the engine, one builds the tests against Qt 6.12, one keeps the content scripts any
 extension registers across a restart, one keeps a profile from crashing as it is deleted with an
-extension's message still waiting, one draws a favicon again when the colour scheme changes, and one
-shows a page's SVG icon rather than a raster one beside it.
+extension's message still waiting, one draws a favicon again when the colour scheme changes, one
+shows a page's SVG icon rather than a raster one beside it, and one lets a page hear what its
+passkeys can reach in a build without Bluetooth.
 Base is the released `qtwebengine-everywhere-src-6.11.2` tarball.
 
 Built for [omaweb#344](https://github.com/villekivela/omaweb/issues/344), which asks whether Omaweb
 can host Bitwarden and 1Password. The findings live in `docs/research/password-manager-extensions.md`
 in that repository.
 
-Nine of the twenty-seven are ordinary bug fixes headed for Gerrit, and 0018 and 0020 are Qt's own
+Ten of the twenty-eight are ordinary bug fixes headed for Gerrit, and 0018 and 0020 are Qt's own
 changes. The rest wait on one question to Qt, in `upstream/QTBUG-draft.md`. If Qt takes the work,
 this repository is deleted rather than maintained.
 
@@ -269,6 +270,20 @@ candidate carries no type from its `<link>`, so an SVG is known by its address: 
 [omaweb#700](https://github.com/villekivela/omaweb/issues/700). _A behaviour change with tests,
 where upstream may prefer the `<link>` type carried through Blink. Propose it with that question._
 
+**0028, say there is no Bluetooth LE in a build without BlueZ.** The engine is built with
+`use_bluez=false`, so `BluetoothAdapter::CreateAdapter()` is Chromium's stub and makes no adapter,
+and Qt's `BluetoothAdapterFactory::GetAdapter()` drops its callers' callbacks when there is none.
+`PublicKeyCredential.getClientCapabilities()` waits on every capability it reports, the hybrid
+transport among them, and the hybrid transport asks for the adapter, so the promise never settled.
+Chromium 152 on the same machine answers at once; no Chromium 140 was at hand, and 140's
+`GetClientCapabilities` waits on the same five checks. `IsLowEnergySupported()` now says false on
+Linux built without BlueZ, so the hybrid transport is reported unavailable without asking for an
+adapter, and the security key request and digital credentials stop asking for one too. A page hears
+what the engine reaches: no phone over hybrid transport and no platform authenticator, with
+conditional mediation reported available, as Chromium on Linux reports it. See
+[omaweb#711](https://github.com/villekivela/omaweb/issues/711). _A bug fix for Qt's build without
+BlueZ, headed for Gerrit._
+
 ## The open question
 
 `TabsDelegateQt` is internal, and `ExtensionsBrowserClientQt` fills it by treating every page of the
@@ -392,6 +407,12 @@ Patch 0018 has no test case, because what it changes is how V8 is compiled. The 
 instead. `scripts/check-write-barriers.sh` fails a tree whose V8 is compiled with
 `-DV8_DISABLE_WRITE_BARRIERS`, as 6.11.2 is without the patch, and names the ninja file it read. It
 stays after 0018 drops, so a later Qt that turns the barriers off again is noticed.
+
+Patch 0028's case, `clientCapabilitiesAnswerWithoutBluetooth`, is in `tst_qwebenginepage`. It
+loads a page at an `https` address, a secure context, asks `getClientCapabilities()`, and checks
+that the answer comes within ten seconds with no hybrid transport, no platform authenticator, no
+passkey platform authenticator and conditional mediation available. On a stock engine, built without
+BlueZ as Arch's is, no answer comes, and the gate's stock run checks that.
 
 ## Rebase record
 

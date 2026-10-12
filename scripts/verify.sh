@@ -169,6 +169,25 @@ else
     echo "  the test did not finish cleanly, exit $?"
 fi
 
+# What a page is told its passkeys can reach is the one patch about Bluetooth,
+# so its case lives in Qt's page test. Only the case the patch adds runs.
+page="$tree/build/tests/auto/widgets/qwebenginepage/tst_qwebenginepage"
+page_cases="clientCapabilitiesAnswerWithoutBluetooth"
+[ -x "$page" ] || "$tree/build.sh" tst_qwebenginepage
+
+echo "=== patched engine, a page told what its passkeys can reach"
+# shellcheck disable=SC2086 # one argument per case
+if env "$path_var=$tree/build/lib" \
+    ${helper:+QTWEBENGINEPROCESS_PATH="$helper"} \
+    ${resources:+QTWEBENGINE_RESOURCES_PATH="$resources"} \
+    ${locales:+QTWEBENGINE_LOCALES_PATH="$locales"} \
+    "$page" $page_cases -nocrashhandler -o -,txt 2>&1
+then
+    :
+else
+    echo "  the test did not finish cleanly, exit $?"
+fi
+
 echo "=== stock engine, where each of these must fail or crash"
 if [ ! -e "$stock/qt6/QtWebEngineProcess" ] && [ ! -e "$stock/QtWebEngineProcess" ] \
     && [ ! -d "$stock/QtWebEngineCore.framework" ]
@@ -184,10 +203,11 @@ stock_favicon_cases="redrawOnColorSchemeChange redrawOnNextVisitAfterColorScheme
 redrawAfterAPageStartsUnderAnotherScheme svgRanksAboveARasterBesideIt \
 svgRanksAboveARasterDeclaredAfterIt"
 for case in serviceWorkerLocalization enableAfterStoragePathChange tabsWindowsAndScripting \
-    nativeMessaging $stock_favicon_cases
+    nativeMessaging $stock_favicon_cases $page_cases
 do
     program="$test"
     case " $favicon_cases " in *" $case "*) program="$favicon" ;; esac
+    case " $page_cases " in *" $case "*) program="$page" ;; esac
     output=$(env "$path_var=$stock" "$program" "$case" -nocrashhandler -o -,txt 2>&1) \
         && status=0 || status=$?
     verdict=$(echo "$output" | grep -E "^(PASS|FAIL).*$case" | head -1 | cut -d: -f1 | tr -d ' ')
