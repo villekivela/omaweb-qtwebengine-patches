@@ -1,4 +1,4 @@
-From 2a1caa5bba1168c3cb22bbfdcc333fcd23dfa9d9 Mon Sep 17 00:00:00 2001
+From 46d5c3510c1cc8ba627a65033b45a55a40a50f31 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivel=C3=A4?= <vkivela@hotmail.com>
 Date: Mon, 12 Oct 2026 04:42:08 +0000
 Subject: [PATCH] favicons: rank a page's SVG icon above its raster ones
@@ -27,21 +27,26 @@ image/svg+xml, whose path is all that follows the scheme. Nothing a page
 can see changes: it is told nothing new, and its links are its own.
 
 svgRanksAboveARasterBesideIt loads a page with qtmulti.ico for any size
-ahead of scheme.svg and fails without this patch with the ICO's address.
-rasterShownWhenTheSvgFails names an SVG that does not exist and passes
-on both: it guards the fallback.
+ahead of scheme.svg, as chatgpt.com orders them, and fails without this
+patch with the ICO's address. svgRanksAboveARasterDeclaredAfterIt
+declares the SVG first. Blink reports icons last first, so there the ICO
+was fetched first and the SVG never was; it fails the same way, and
+covers the sort. rasterShownWhenTheSvgFails names an SVG that does not
+exist and passes on both: it guards the fallback.
 
 See villekivela/omaweb#700.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
- .../favicon/core/favicon_handler.cc           | 26 ++++++++++
- .../components/favicon/core/favicon_handler.h |  7 +++
- tests/auto/widgets/favicon/CMakeLists.txt     |  2 +
- .../resources/favicon-svg-missing.html        | 10 ++++
- .../favicon/resources/favicon-svg-raster.html | 10 ++++
- tests/auto/widgets/favicon/tst_favicon.cpp    | 49 +++++++++++++++++++
- 6 files changed, 104 insertions(+)
+ .../favicon/core/favicon_handler.cc           | 26 ++++++++
+ .../components/favicon/core/favicon_handler.h |  7 ++
+ tests/auto/widgets/favicon/CMakeLists.txt     |  3 +
+ .../favicon/resources/favicon-svg-first.html  | 10 +++
+ .../resources/favicon-svg-missing.html        | 10 +++
+ .../favicon/resources/favicon-svg-raster.html | 10 +++
+ tests/auto/widgets/favicon/tst_favicon.cpp    | 65 +++++++++++++++++++
+ 7 files changed, 131 insertions(+)
+ create mode 100644 tests/auto/widgets/favicon/resources/favicon-svg-first.html
  create mode 100644 tests/auto/widgets/favicon/resources/favicon-svg-missing.html
  create mode 100644 tests/auto/widgets/favicon/resources/favicon-svg-raster.html
 
@@ -137,18 +142,35 @@ index 1c3938f33b..fb4ba485a1 100644
  
    struct DownloadedFavicon {
 diff --git a/tests/auto/widgets/favicon/CMakeLists.txt b/tests/auto/widgets/favicon/CMakeLists.txt
-index c22a68331a..2d315d034f 100644
+index c22a68331a..5b3bf88f02 100644
 --- a/tests/auto/widgets/favicon/CMakeLists.txt
 +++ b/tests/auto/widgets/favicon/CMakeLists.txt
-@@ -17,6 +17,8 @@ set(tst_favicon_resource_files
+@@ -17,6 +17,9 @@ set(tst_favicon_resource_files
      "resources/favicon-scheme.html"
      "resources/favicon-shortcut.html"
      "resources/favicon-single.html"
++    "resources/favicon-svg-first.html"
 +    "resources/favicon-svg-missing.html"
 +    "resources/favicon-svg-raster.html"
      "resources/favicon-touch.html"
      "resources/favicon-unavailable.html"
      "resources/icons/qt144.png"
+diff --git a/tests/auto/widgets/favicon/resources/favicon-svg-first.html b/tests/auto/widgets/favicon/resources/favicon-svg-first.html
+new file mode 100644
+index 0000000000..c0da0dcb39
+--- /dev/null
++++ b/tests/auto/widgets/favicon/resources/favicon-svg-first.html
+@@ -0,0 +1,10 @@
++<html>
++    <head>
++        <title>Favicon SVG First Test</title>
++        <link rel="icon" href="icons/scheme.svg" type="image/svg+xml" />
++        <link rel="icon" href="icons/qtmulti.ico" sizes="any" />
++    </head>
++    <body>
++        <h1>Favicon SVG First Test</h1>
++    </body>
++</html>
 diff --git a/tests/auto/widgets/favicon/resources/favicon-svg-missing.html b/tests/auto/widgets/favicon/resources/favicon-svg-missing.html
 new file mode 100644
 index 0000000000..7b82171f2d
@@ -182,19 +204,20 @@ index 0000000000..dca1059bb9
 +    </body>
 +</html>
 diff --git a/tests/auto/widgets/favicon/tst_favicon.cpp b/tests/auto/widgets/favicon/tst_favicon.cpp
-index c506630cd9..24771582bb 100644
+index c506630cd9..75b37fa63e 100644
 --- a/tests/auto/widgets/favicon/tst_favicon.cpp
 +++ b/tests/auto/widgets/favicon/tst_favicon.cpp
-@@ -53,6 +53,8 @@ private Q_SLOTS:
+@@ -53,6 +53,9 @@ private Q_SLOTS:
      void redrawOnNextVisitAfterColorSchemeChange();
      void redrawAfterAPageStartsUnderAnotherScheme();
      void sameDrawingIsNotReportedAgain();
 +    void svgRanksAboveARasterBesideIt();
++    void svgRanksAboveARasterDeclaredAfterIt();
 +    void rasterShownWhenTheSvgFails();
  
  private:
      QWebEngineView *m_view;
-@@ -1070,6 +1072,53 @@ void tst_Favicon::sameDrawingIsNotReportedAgain()
+@@ -1070,6 +1073,68 @@ void tst_Favicon::sameDrawingIsNotReportedAgain()
      QCOMPARE(iconUrlChangedSpy.size(), 0);
  }
  
@@ -226,6 +249,21 @@ index c506630cd9..24771582bb 100644
 +        QSKIP("This test requires access to its resources on disk");
 +
 +    const QUrl iconUrl = iconUrlOf(m_page, QStringLiteral("favicon-svg-raster.html"));
++    QCOMPARE(iconUrl,
++             QUrl::fromLocalFile(QDir(QT_TESTCASE_SOURCEDIR).canonicalPath()
++                                 + QLatin1String("/resources/icons/scheme.svg")));
++    QVERIFY(!m_page->icon().isNull());
++}
++
++// The same icons with the SVG declared first. Blink reports a page's icons
++// last first, so the ICO was fetched first and its exact frames left no
++// candidate worth fetching after it: the SVG was never asked for.
++void tst_Favicon::svgRanksAboveARasterDeclaredAfterIt()
++{
++    if (!QDir(QDir(QT_TESTCASE_SOURCEDIR).canonicalPath()).exists())
++        QSKIP("This test requires access to its resources on disk");
++
++    const QUrl iconUrl = iconUrlOf(m_page, QStringLiteral("favicon-svg-first.html"));
 +    QCOMPARE(iconUrl,
 +             QUrl::fromLocalFile(QDir(QT_TESTCASE_SOURCEDIR).canonicalPath()
 +                                 + QLatin1String("/resources/icons/scheme.svg")));

@@ -134,7 +134,7 @@ fi
 favicon="$tree/build/tests/auto/widgets/favicon/tst_favicon"
 favicon_cases="redrawOnColorSchemeChange redrawOnNextVisitAfterColorSchemeChange \
 redrawAfterAPageStartsUnderAnotherScheme sameDrawingIsNotReportedAgain \
-svgRanksAboveARasterBesideIt rasterShownWhenTheSvgFails"
+svgRanksAboveARasterBesideIt svgRanksAboveARasterDeclaredAfterIt rasterShownWhenTheSvgFails"
 [ -x "$favicon" ] || "$tree/build.sh" tst_favicon
 
 echo "=== patched engine, a favicon drawn again when the colour scheme changes, and an SVG one first"
@@ -181,7 +181,8 @@ fi
 # raster beside an SVG it cannot fetch, as rasterShownWhenTheSvgFails expects.
 # Both guard what a patch keeps and are left out here.
 stock_favicon_cases="redrawOnColorSchemeChange redrawOnNextVisitAfterColorSchemeChange \
-redrawAfterAPageStartsUnderAnotherScheme svgRanksAboveARasterBesideIt"
+redrawAfterAPageStartsUnderAnotherScheme svgRanksAboveARasterBesideIt \
+svgRanksAboveARasterDeclaredAfterIt"
 for case in serviceWorkerLocalization enableAfterStoragePathChange tabsWindowsAndScripting \
     nativeMessaging $stock_favicon_cases
 do

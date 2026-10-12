@@ -356,11 +356,13 @@ thirty. Answering true from `IsValidContext` again crashes it, and so does leavi
 end of `~ProfileQt` rather than at the start. The fix touches only stock Qt code, but the case's
 fixture comes with 0009, so the case does not exist on a stock build.
 
-Patch 0027's cases, `svgRanksAboveARasterBesideIt` and `rasterShownWhenTheSvgFails`, are in
-`tst_favicon` beside 0025's. Each loads a page that declares `qtmulti.ico`, with 16, 32 and 64 pixel
-frames, for any size ahead of an SVG. The first fails on a stock engine, which shows the ICO, and
-the gate's stock run checks it. The second names an SVG that does not exist and passes there too: it
-guards the fallback the patch keeps.
+Patch 0027's cases, `svgRanksAboveARasterBesideIt`, `svgRanksAboveARasterDeclaredAfterIt` and
+`rasterShownWhenTheSvgFails`, are in `tst_favicon` beside 0025's. Each loads a page that declares
+`qtmulti.ico`, with 16, 32 and 64 pixel frames, for any size beside an SVG. The first declares the
+ICO first, as chatgpt.com does; the second declares the SVG first, which Blink reports last, so the
+ICO was fetched first and the SVG never was, and only the sort makes it pass. Both fail on a stock
+engine, which shows the ICO, and the gate's stock run checks them. The third names an SVG that does
+not exist and passes there too: it guards the fallback the patch keeps.
 
 Patch 0025's cases live in Qt's favicon tests: `redrawOnColorSchemeChange`,
 `redrawOnNextVisitAfterColorSchemeChange`, `redrawAfterAPageStartsUnderAnotherScheme` and
