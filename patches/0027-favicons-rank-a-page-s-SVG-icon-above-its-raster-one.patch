@@ -1,4 +1,4 @@
-From 46d5c3510c1cc8ba627a65033b45a55a40a50f31 Mon Sep 17 00:00:00 2001
+From 400570f8ab80088bddc0312628bb300af7c24df8 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivel=C3=A4?= <vkivela@hotmail.com>
 Date: Mon, 12 Oct 2026 04:42:08 +0000
 Subject: [PATCH] favicons: rank a page's SVG icon above its raster ones
@@ -204,7 +204,7 @@ index 0000000000..dca1059bb9
 +    </body>
 +</html>
 diff --git a/tests/auto/widgets/favicon/tst_favicon.cpp b/tests/auto/widgets/favicon/tst_favicon.cpp
-index c506630cd9..75b37fa63e 100644
+index c506630cd9..2f8e4c7bc5 100644
 --- a/tests/auto/widgets/favicon/tst_favicon.cpp
 +++ b/tests/auto/widgets/favicon/tst_favicon.cpp
 @@ -53,6 +53,9 @@ private Q_SLOTS:
@@ -221,8 +221,8 @@ index c506630cd9..75b37fa63e 100644
      QCOMPARE(iconUrlChangedSpy.size(), 0);
  }
  
-+// Loads `page` from the test's resources with small icons only, and returns
-+// the address of the icon the page reports.
++// Loads `file` from the test's resources into `page` with small icons only, and
++// returns the address of the icon the page reports.
 +static QUrl iconUrlOf(QWebEnginePage *page, const QString &file)
 +{
 +    QSignalSpy loadFinishedSpy(page, &QWebEnginePage::loadFinished);
