@@ -275,10 +275,12 @@ where upstream may prefer the `<link>` type carried through Blink. Propose it wi
 and Qt's `BluetoothAdapterFactory::GetAdapter()` drops its callers' callbacks when there is none.
 `PublicKeyCredential.getClientCapabilities()` waits on every capability it reports, the hybrid
 transport among them, and the hybrid transport asks for the adapter, so the promise never settled.
-Chromium 152 on the same machine answers at once. `IsLowEnergySupported()` now says false on Linux
-built without BlueZ, so the hybrid transport is reported unavailable without asking for an adapter,
-and the security key request and digital credentials stop asking for one too. A page hears what the
-engine reaches: no phone over hybrid transport, no platform authenticator, and passkey autofill. See
+Chromium 152 on the same machine answers at once; no Chromium 140 was at hand, and 140's
+`GetClientCapabilities` waits on the same five checks. `IsLowEnergySupported()` now says false on
+Linux built without BlueZ, so the hybrid transport is reported unavailable without asking for an
+adapter, and the security key request and digital credentials stop asking for one too. A page hears
+what the engine reaches: no phone over hybrid transport and no platform authenticator, with
+conditional mediation reported available, as Chromium on Linux reports it. See
 [omaweb#711](https://github.com/villekivela/omaweb/issues/711). _A bug fix for Qt's build without
 BlueZ, headed for Gerrit._
 
@@ -409,8 +411,8 @@ stays after 0018 drops, so a later Qt that turns the barriers off again is notic
 Patch 0028's case, `clientCapabilitiesAnswerWithoutBluetooth`, is in `tst_qwebenginepage`. It
 loads a page at an `https` address, a secure context, asks `getClientCapabilities()`, and checks
 that the answer comes within ten seconds with no hybrid transport, no platform authenticator, no
-passkey platform authenticator and passkey autofill. On a stock engine, built without BlueZ as Arch's is,
-no answer comes, and the gate's stock run checks that.
+passkey platform authenticator and conditional mediation available. On a stock engine, built without
+BlueZ as Arch's is, no answer comes, and the gate's stock run checks that.
 
 ## Rebase record
 

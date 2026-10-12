@@ -12,15 +12,16 @@ supports Bluetooth LE. Built with use_bluez=false, Linux has Chromium's
 stub BluetoothAdapter::CreateAdapter(), which makes none, and Qt's
 GetAdapter() drops its callers' callbacks when there is none, so the
 promise stayed pending. Chromium 152 on the same machine answers at
-once.
+once; 140's GetClientCapabilities waits on the same five checks.
 
 IsLowEnergySupported() now says false on Linux built without BlueZ,
 where the bluetooth component is compiled with LINUX_WITHOUT_DBUS. The
 hybrid transport is then reported unavailable without asking for an
 adapter, and the security key request and the digital credentials
 transaction, which check the same answer first, stop asking for one
-too. A page hears what the engine reaches: no hybrid transport, no
-platform authenticator, and passkey autofill.
+too. A page hears what the engine reaches: no hybrid transport and no
+platform authenticator, with conditional mediation reported available
+as Chromium on Linux reports it.
 
 clientCapabilitiesAnswerWithoutBluetooth loads a page at an https
 address and asks; without this patch no answer comes within ten
