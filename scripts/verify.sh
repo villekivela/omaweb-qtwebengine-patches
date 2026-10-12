@@ -169,10 +169,16 @@ else
     echo "  the test did not finish cleanly, exit $?"
 fi
 
-# What a page is told its passkeys can reach is the one patch about Bluetooth,
-# so its case lives in Qt's page test. Only the case the patch adds runs.
+# Two patches change what a page hears: what its passkeys can reach (0028) and how a push
+# subscription is answered (0029). Their cases live in Qt's page test, and only they run.
 page="$tree/build/tests/auto/widgets/qwebenginepage/tst_qwebenginepage"
-page_cases="clientCapabilitiesAnswerWithoutBluetooth"
+page_cases="clientCapabilitiesAnswerWithoutBluetooth pushSubscribeAnswersAlikeOffTheRecord"
+# The stock run below reads the first result line of each case, so 0029's case lists its
+# off-the-record row first, the one a stock engine fails.
+# Patch 0029 has a control beside its case: a notifications request still reaches the
+# application off the record, which a stock engine does too, so it runs on the patched
+# engine only.
+patched_page_cases="$page_cases notificationRequestStillReachesTheApplicationOffTheRecord"
 [ -x "$page" ] || "$tree/build.sh" tst_qwebenginepage
 
 echo "=== patched engine, a page told what its passkeys can reach"
@@ -181,7 +187,7 @@ if env "$path_var=$tree/build/lib" \
     ${helper:+QTWEBENGINEPROCESS_PATH="$helper"} \
     ${resources:+QTWEBENGINE_RESOURCES_PATH="$resources"} \
     ${locales:+QTWEBENGINE_LOCALES_PATH="$locales"} \
-    "$page" $page_cases -nocrashhandler -o -,txt 2>&1
+    "$page" $patched_page_cases -nocrashhandler -o -,txt 2>&1
 then
     :
 else

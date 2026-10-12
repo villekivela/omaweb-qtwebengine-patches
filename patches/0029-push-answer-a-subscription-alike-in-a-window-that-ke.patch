@@ -1,0 +1,258 @@
+From 833908403b41d6a8fb2d4400fb5b326af8d5a861 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Ville=20Kivel=C3=A4?= <vkivela@hotmail.com>
+Date: Mon, 12 Oct 2026 06:15:46 +0000
+Subject: [PATCH] push: answer a subscription alike in a window that keeps
+ nothing
+
+PushManager.subscribe() asked the application for the notifications
+permission in an off-the-record profile before it said no. The engine
+has no push service unless the application switches one on, and where
+there is none Chromium hides that in an off-the-record profile: it asks
+for the notifications permission, assumes the embedder will deny it, and
+rejects with INCOGNITO_PERMISSION_DENIED whatever the answer. An
+embedder that asks its reader gets a question that leads nowhere, and a
+site tells the two profiles apart, because an on-the-record profile
+rejects at once with SERVICE_NOT_AVAILABLE and no question.
+
+PushMessagingManager::Register() now answers SERVICE_NOT_AVAILABLE
+whenever there is no push service, in every profile, and the request
+for the permission, its callback and the console message that went with
+it are gone. Notification.requestPermission() does not go through this
+code and is unchanged.
+
+pushSubscribeAnswersAlikeOffTheRecord subscribes from a page on each
+kind of profile and checks that the application is never asked and the
+page hears the same error; off the record it was asked once without this
+patch. notificationRequestStillReachesTheApplicationOffTheRecord checks
+that a request to notify still reaches the application there.
+
+See villekivela/omaweb#421.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ .../push_messaging/push_messaging_manager.cc  | 71 ++-------------
+ .../push_messaging/push_messaging_manager.h   |  2 -
+ .../qwebenginepage/tst_qwebenginepage.cpp     | 91 +++++++++++++++++++
+ 3 files changed, 97 insertions(+), 67 deletions(-)
+
+diff --git a/src/3rdparty/chromium/content/browser/push_messaging/push_messaging_manager.cc b/src/3rdparty/chromium/content/browser/push_messaging/push_messaging_manager.cc
+index 961c7a696e..1f4214487d 100644
+--- a/src/3rdparty/chromium/content/browser/push_messaging/push_messaging_manager.cc
++++ b/src/3rdparty/chromium/content/browser/push_messaging/push_messaging_manager.cc
+@@ -43,13 +43,6 @@ namespace content {
+ 
+ namespace {
+ 
+-// Chrome currently does not support the Push API in incognito.
+-const char kIncognitoPushUnsupportedMessage[] =
+-    "Chrome currently does not support the Push API in incognito mode "
+-    "(https://crbug.com/401439). There is deliberately no way to "
+-    "feature-detect this, since incognito mode needs to be undetectable by "
+-    "websites.";
+-
+ // These UMA methods are called from the SW and/or UI threads. Racey but ok, see
+ // https://groups.google.com/a/chromium.org/d/msg/chromium-dev/FNzZRJtN2aw/Aw0CWAXJJ1kJ
+ void RecordRegistrationStatus(blink::mojom::PushRegistrationStatus status) {
+@@ -304,53 +297,12 @@ void PushMessagingManager::Register(PushMessagingManager::RegisterData data) {
+   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+   PushMessagingService* push_service = GetService();
+   if (!push_service) {
+-    if (!is_incognito_) {
+-      // This might happen if InstanceIDProfileService::IsInstanceIDEnabled
+-      // returns false because the Instance ID kill switch was enabled.
+-      SendSubscriptionError(
+-          std::move(data),
+-          blink::mojom::PushRegistrationStatus::SERVICE_NOT_AVAILABLE);
+-    } else {
+-      // Prevent websites from detecting incognito mode, by emulating what would
+-      // have happened if we had a PushMessagingService available.
+-      if (!IsRequestFromDocument(render_frame_id_) ||
+-          !data.options->user_visible_only) {
+-        // Throw a permission denied error under the same circumstances.
+-        SendSubscriptionError(
+-            std::move(data),
+-            blink::mojom::PushRegistrationStatus::INCOGNITO_PERMISSION_DENIED);
+-      } else {
+-        RenderFrameHostImpl* render_frame_host_impl =
+-            RenderFrameHostImpl::FromID(render_process_host_->GetDeprecatedID(),
+-                                        render_frame_id_);
+-        if (render_frame_host_impl) {
+-          render_frame_host_impl->AddMessageToConsole(
+-              blink::mojom::ConsoleMessageLevel::kError,
+-              kIncognitoPushUnsupportedMessage);
+-
+-          // Request notifications permission (which will fail, since
+-          // notifications aren't supported in incognito), so the website can't
+-          // detect whether incognito is active.
+-          bool user_gesture = data.user_gesture;
+-
+-          DCHECK_EQ(data.requesting_storage_key,
+-                    render_frame_host_impl->GetStorageKey());
+-
+-          render_frame_host_impl->GetBrowserContext()
+-              ->GetPermissionController()
+-              ->RequestPermissionFromCurrentDocument(
+-                  render_frame_host_impl,
+-                  PermissionRequestDescription(
+-                      PermissionDescriptorUtil::
+-                          CreatePermissionDescriptorForPermissionType(
+-                              blink::PermissionType::NOTIFICATIONS),
+-                      user_gesture),
+-                  base::BindOnce(
+-                      &PushMessagingManager::DidRequestPermissionInIncognito,
+-                      AsWeakPtr(), std::move(data)));
+-        }
+-      }
+-    }
++    // Say so in every window. A profile that has no push service has none off
++    // the record either, and asking for a permission first, to hide that from
++    // a site, would put a question to the reader that leads nowhere.
++    SendSubscriptionError(
++        std::move(data),
++        blink::mojom::PushRegistrationStatus::SERVICE_NOT_AVAILABLE);
+     return;
+   }
+ 
+@@ -375,17 +327,6 @@ void PushMessagingManager::Register(PushMessagingManager::RegisterData data) {
+   }
+ }
+ 
+-void PushMessagingManager::DidRequestPermissionInIncognito(
+-    RegisterData data,
+-    blink::mojom::PermissionStatus status) {
+-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+-  // Notification permission should always be denied in incognito.
+-  DCHECK_EQ(blink::mojom::PermissionStatus::DENIED, status);
+-  SendSubscriptionError(
+-      std::move(data),
+-      blink::mojom::PushRegistrationStatus::INCOGNITO_PERMISSION_DENIED);
+-}
+-
+ // TODO(crbug.com/40139581): Handle expiration_time that is passed from push
+ // service check if |expiration_time| is valid before saving it in |data| and
+ // passing it back in SendSubscriptionSuccess.
+diff --git a/src/3rdparty/chromium/content/browser/push_messaging/push_messaging_manager.h b/src/3rdparty/chromium/content/browser/push_messaging/push_messaging_manager.h
+index e3ef20010c..2bebdc6cd6 100644
+--- a/src/3rdparty/chromium/content/browser/push_messaging/push_messaging_manager.h
++++ b/src/3rdparty/chromium/content/browser/push_messaging/push_messaging_manager.h
+@@ -87,8 +87,6 @@ class PushMessagingManager : public blink::mojom::PushMessaging {
+                    const std::vector<uint8_t>& p256dh,
+                    const std::vector<uint8_t>& auth,
+                    blink::mojom::PushRegistrationStatus status);
+-  void DidRequestPermissionInIncognito(RegisterData data,
+-                                       blink::mojom::PermissionStatus status);
+ 
+   void DidCheckForExistingRegistration(
+       RegisterData data,
+diff --git a/tests/auto/widgets/qwebenginepage/tst_qwebenginepage.cpp b/tests/auto/widgets/qwebenginepage/tst_qwebenginepage.cpp
+index 6012bc186c..77a3b2ddfe 100644
+--- a/tests/auto/widgets/qwebenginepage/tst_qwebenginepage.cpp
++++ b/tests/auto/widgets/qwebenginepage/tst_qwebenginepage.cpp
+@@ -192,6 +192,9 @@ private Q_SLOTS:
+     void setHtmlWithStylesheetResource();
+     void setHtmlWithBaseURL();
+     void clientCapabilitiesAnswerWithoutBluetooth();
++    void pushSubscribeAnswersAlikeOffTheRecord_data();
++    void pushSubscribeAnswersAlikeOffTheRecord();
++    void notificationRequestStillReachesTheApplicationOffTheRecord();
+     void setHtmlWithJSAlert();
+     void setHtmlWithModuleImport();
+     void baseUrl_data();
+@@ -2428,6 +2431,94 @@ void tst_QWebEnginePage::clientCapabilitiesAnswerWithoutBluetooth()
+     QCOMPARE(capabilities.value("conditionalGet"), QVariant(true));
+ }
+ 
++void tst_QWebEnginePage::pushSubscribeAnswersAlikeOffTheRecord_data()
++{
++    QTest::addColumn<bool>("offTheRecord");
++    QTest::newRow("off the record") << true;
++    QTest::newRow("on the record") << false;
++}
++
++// The engine has no push service unless the application switches one on. An
++// on-the-record profile then rejects PushManager.subscribe() at once, and an
++// off-the-record one used to ask the application for the notifications
++// permission first, to hide the missing service from a site, and reject only
++// after the answer. Nothing was ever subscribed, so the question led nowhere,
++// and a site could tell the two profiles apart by it.
++void tst_QWebEnginePage::pushSubscribeAnswersAlikeOffTheRecord()
++{
++    QFETCH(bool, offTheRecord);
++    HttpServer server;
++    connect(&server, &HttpServer::newRequest, &server, [&](HttpReqRep *r) {
++        if (r->requestPath() == "/worker.js") {
++            r->setResponseHeader("Content-Type", "text/javascript");
++            r->setResponseBody("");
++            r->sendResponse();
++        } else if (r->requestPath() == "/") {
++            r->setResponseHeader("Content-Type", "text/html");
++            r->setResponseBody("<html><body></body></html>");
++            r->sendResponse();
++        }
++    });
++    QVERIFY(server.start());
++
++    QWebEngineProfile profile(offTheRecord ? QString() : QStringLiteral("pushSubscribe"));
++    QWebEnginePage page(&profile);
++    int asked = 0;
++    connect(&page, &QWebEnginePage::permissionRequested, &page, [&](QWebEnginePermission) { ++asked; });
++    QSignalSpy loadSpy(&page, &QWebEnginePage::loadFinished);
++    page.load(server.url("/"));
++    QTRY_COMPARE(loadSpy.size(), 1);
++    QVERIFY(evaluateJavaScriptSync(&page, "window.isSecureContext").toBool());
++
++    evaluateJavaScriptSync(&page,
++                           "const key = new Uint8Array(65); key[0] = 4;"
++                           "navigator.serviceWorker.register('/worker.js')"
++                           ".then(() => navigator.serviceWorker.ready)"
++                           ".then(r => r.pushManager.subscribe("
++                           "{userVisibleOnly: true, applicationServerKey: key}))"
++                           ".then(() => window.outcome = 'subscribed',"
++                           " e => window.outcome = e.name + ': ' + e.message);");
++    // The page has its answer, or the engine is waiting on the application.
++    QTRY_VERIFY_WITH_TIMEOUT(asked > 0
++                || evaluateJavaScriptSync(&page, "window.outcome !== undefined").toBool(),
++            10000);
++    QCOMPARE(asked, 0);
++    QCOMPARE(evaluateJavaScriptSync(&page, "window.outcome").toString(),
++             QStringLiteral("AbortError: Registration failed - push service not available"));
++}
++
++// Only a push subscription is turned away off the record. A page that asks to
++// notify is still put to the application, which can answer it.
++void tst_QWebEnginePage::notificationRequestStillReachesTheApplicationOffTheRecord()
++{
++    HttpServer server;
++    connect(&server, &HttpServer::newRequest, &server, [&](HttpReqRep *r) {
++        r->setResponseHeader("Content-Type", "text/html");
++        r->setResponseBody("<html><body></body></html>");
++        r->sendResponse();
++    });
++    QVERIFY(server.start());
++
++    QWebEngineProfile profile;
++    QVERIFY(profile.isOffTheRecord());
++    QWebEnginePage page(&profile);
++    QList<QWebEnginePermission::PermissionType> asked;
++    connect(&page, &QWebEnginePage::permissionRequested, &page, [&](QWebEnginePermission permission) {
++        asked.append(permission.permissionType());
++        permission.grant();
++    });
++    QSignalSpy loadSpy(&page, &QWebEnginePage::loadFinished);
++    page.load(server.url("/"));
++    QTRY_COMPARE(loadSpy.size(), 1);
++
++    evaluateJavaScriptSync(&page,
++                           "Notification.requestPermission().then(a => window.answer = a);");
++    QTRY_VERIFY_WITH_TIMEOUT(
++            evaluateJavaScriptSync(&page, "window.answer !== undefined").toBool(), 10000);
++    QCOMPARE(asked, QList<QWebEnginePermission::PermissionType>{QWebEnginePermission::PermissionType::Notifications});
++    QCOMPARE(evaluateJavaScriptSync(&page, "window.answer").toString(), QStringLiteral("granted"));
++}
++
+ class MyPage : public QWebEnginePage
+ {
+ public:
+-- 
+2.55.0
+
