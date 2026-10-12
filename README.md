@@ -256,6 +256,18 @@ See [omaweb#694](https://github.com/villekivela/omaweb/issues/694). _Part of the
 question below is about: the first thing the application says about which pages are tabs. Propose
 it with 0004._
 
+**0027, rank a page's SVG icon above its raster ones.** chatgpt.com declares a black ICO for any size
+ahead of an SVG that follows `prefers-color-scheme`, so 0025 had nothing to redraw: the tab showed
+the ICO. Chromium's `FaviconHandler` ranks an icon declared for any size, or for none, at 1 before
+fetching it, scores an SVG's one drawing, made at the largest size wanted, below 1 against the 16
+and 32 pixels a tab wants, and goes on to a raster with exact frames, which scores 1. Chromium's
+main branch ranks the same way. The handler for small icons now tries a page's SVG icons first and
+scores a drawn SVG at 1, so it stops there; an SVG that cannot be fetched leaves the raster. A
+candidate carries no type from its `<link>`, so an SVG is known by its address: a path ending in
+`.svg`, or a `data:` URL of `image/svg+xml`. Nothing a page can see changes. See
+[omaweb#700](https://github.com/villekivela/omaweb/issues/700). _A behaviour change with tests,
+where upstream may prefer the `<link>` type carried through Blink. Propose it with that question._
+
 ## The open question
 
 `TabsDelegateQt` is internal, and `ExtensionsBrowserClientQt` fills it by treating every page of the
@@ -343,6 +355,12 @@ the same way but whose worker script runs at once, the unfixed engine crashed in
 thirty. Answering true from `IsValidContext` again crashes it, and so does leaving the set at the
 end of `~ProfileQt` rather than at the start. The fix touches only stock Qt code, but the case's
 fixture comes with 0009, so the case does not exist on a stock build.
+
+Patch 0027's cases, `svgRanksAboveARasterBesideIt` and `rasterShownWhenTheSvgFails`, are in
+`tst_favicon` beside 0025's. Each loads a page that declares `qtmulti.ico`, with 16, 32 and 64 pixel
+frames, for any size ahead of an SVG. The first fails on a stock engine, which shows the ICO, and
+the gate's stock run checks it. The second names an SVG that does not exist and passes there too: it
+guards the fallback the patch keeps.
 
 Patch 0025's cases live in Qt's favicon tests: `redrawOnColorSchemeChange`,
 `redrawOnNextVisitAfterColorSchemeChange`, `redrawAfterAPageStartsUnderAnotherScheme` and

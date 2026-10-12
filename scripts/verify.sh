@@ -127,15 +127,17 @@ else
     echo "  the test did not finish cleanly, exit $?"
 fi
 
-# A favicon drawn again when the colour scheme changes is the one patch about
-# the favicon driver, so its cases live in Qt's favicon tests, one for a page
-# and one for the Quick view. Only the cases the patch adds run.
+# A favicon drawn again when the colour scheme changes and an SVG icon ranked
+# above a raster one are the patches about favicons, so their cases live in
+# Qt's favicon tests, one for a page and one for the Quick view. Only the cases
+# the patches add run.
 favicon="$tree/build/tests/auto/widgets/favicon/tst_favicon"
 favicon_cases="redrawOnColorSchemeChange redrawOnNextVisitAfterColorSchemeChange \
-redrawAfterAPageStartsUnderAnotherScheme sameDrawingIsNotReportedAgain"
+redrawAfterAPageStartsUnderAnotherScheme sameDrawingIsNotReportedAgain \
+svgRanksAboveARasterBesideIt rasterShownWhenTheSvgFails"
 [ -x "$favicon" ] || "$tree/build.sh" tst_favicon
 
-echo "=== patched engine, a favicon drawn again when the colour scheme changes"
+echo "=== patched engine, a favicon drawn again when the colour scheme changes, and an SVG one first"
 # shellcheck disable=SC2086 # one argument per case
 if env "$path_var=$tree/build/lib" \
     ${helper:+QTWEBENGINEPROCESS_PATH="$helper"} \
@@ -175,10 +177,11 @@ then
     exit 0
 fi
 # A stock engine drops every drawing at an address it already shows, so
-# sameDrawingIsNotReportedAgain passes there by construction. It guards the
-# patch's own reporting and is left out here.
+# sameDrawingIsNotReportedAgain passes there by construction, and it shows the
+# raster beside an SVG it cannot fetch, as rasterShownWhenTheSvgFails expects.
+# Both guard what a patch keeps and are left out here.
 stock_favicon_cases="redrawOnColorSchemeChange redrawOnNextVisitAfterColorSchemeChange \
-redrawAfterAPageStartsUnderAnotherScheme"
+redrawAfterAPageStartsUnderAnotherScheme svgRanksAboveARasterBesideIt"
 for case in serviceWorkerLocalization enableAfterStoragePathChange tabsWindowsAndScripting \
     nativeMessaging $stock_favicon_cases
 do

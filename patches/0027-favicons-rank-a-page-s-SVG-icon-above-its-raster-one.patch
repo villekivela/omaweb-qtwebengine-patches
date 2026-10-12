@@ -1,0 +1,253 @@
+From 2a1caa5bba1168c3cb22bbfdcc333fcd23dfa9d9 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Ville=20Kivel=C3=A4?= <vkivela@hotmail.com>
+Date: Mon, 12 Oct 2026 04:42:08 +0000
+Subject: [PATCH] favicons: rank a page's SVG icon above its raster ones
+
+chatgpt.com declares /favicon.ico sizes="any", a black ICO with 16, 32
+and 48 pixel frames, ahead of an SVG that follows prefers-color-scheme.
+The tab showed the black ICO under a dark scheme, so the redraw of patch
+0025 had nothing to redraw.
+
+FaviconHandler ranks an icon declared for any size, or for none, at 1
+before fetching it. It fetched the SVG, drew it once at the largest size
+wanted, and scored that one bitmap below 1 against the 16 and 32 pixels
+a tab wants. A candidate ranked 1 was still waiting, so it went on to
+the ICO, whose exact frames scored 1 and won. Chromium's main branch has
+the same favicon_handler.cc as 151, so upstream ranks the same way.
+
+The handler for small icons now sorts a page's SVG candidates before
+its raster ones and scores a drawn SVG at 1, since it draws as well at
+every size, so it stops there. An SVG that cannot be fetched draws
+nothing and the handler goes on to the raster. The largest-icon handlers
+for touch icons keep their ranking.
+
+blink::mojom::FaviconURL carries no type from the <link>, so an SVG is
+known by its address: a path ending in .svg, or a data: URL of
+image/svg+xml, whose path is all that follows the scheme. Nothing a page
+can see changes: it is told nothing new, and its links are its own.
+
+svgRanksAboveARasterBesideIt loads a page with qtmulti.ico for any size
+ahead of scheme.svg and fails without this patch with the ICO's address.
+rasterShownWhenTheSvgFails names an SVG that does not exist and passes
+on both: it guards the fallback.
+
+See villekivela/omaweb#700.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../favicon/core/favicon_handler.cc           | 26 ++++++++++
+ .../components/favicon/core/favicon_handler.h |  7 +++
+ tests/auto/widgets/favicon/CMakeLists.txt     |  2 +
+ .../resources/favicon-svg-missing.html        | 10 ++++
+ .../favicon/resources/favicon-svg-raster.html | 10 ++++
+ tests/auto/widgets/favicon/tst_favicon.cpp    | 49 +++++++++++++++++++
+ 6 files changed, 104 insertions(+)
+ create mode 100644 tests/auto/widgets/favicon/resources/favicon-svg-missing.html
+ create mode 100644 tests/auto/widgets/favicon/resources/favicon-svg-raster.html
+
+diff --git a/src/3rdparty/chromium/components/favicon/core/favicon_handler.cc b/src/3rdparty/chromium/components/favicon/core/favicon_handler.cc
+index 467bc0b477..fc69ac7d1b 100644
+--- a/src/3rdparty/chromium/components/favicon/core/favicon_handler.cc
++++ b/src/3rdparty/chromium/components/favicon/core/favicon_handler.cc
+@@ -16,6 +16,7 @@
+ #include "base/memory/ref_counted_memory.h"
+ #include "base/metrics/histogram_functions.h"
+ #include "base/metrics/histogram_macros.h"
++#include "base/strings/string_util.h"
+ #include "build/build_config.h"
+ #include "components/favicon/core/core_favicon_service.h"
+ #include "components/favicon_base/favicon_util.h"
+@@ -24,6 +25,7 @@
+ #include "ui/gfx/codec/png_codec.h"
+ #include "ui/gfx/image/image_skia.h"
+ #include "ui/gfx/image/image_util.h"
++#include "url/url_constants.h"
+ 
+ namespace favicon {
+ namespace {
+@@ -111,6 +113,18 @@ bool HasAnySize(const std::vector<gfx::Size>& icon_sizes) {
+   return std::ranges::any_of(icon_sizes, &gfx::Size::IsZero);
+ }
+ 
++// Returns true if `icon_url` names an SVG. A candidate carries no type from its
++// <link>, so the address decides: a path ending in .svg, or a data: URL of
++// image/svg+xml, whose path is everything after the scheme.
++bool IsSvgUrl(const GURL& icon_url) {
++  if (icon_url.SchemeIs(url::kDataScheme)) {
++    return base::StartsWith(icon_url.path_piece(), "image/svg+xml",
++                            base::CompareCase::INSENSITIVE_ASCII);
++  }
++  return base::EndsWith(icon_url.path_piece(), ".svg",
++                        base::CompareCase::INSENSITIVE_ASCII);
++}
++
+ }  // namespace
+ 
+ ////////////////////////////////////////////////////////////////////////////////
+@@ -124,6 +138,10 @@ FaviconHandler::FaviconCandidate::FromFaviconURL(
+   FaviconCandidate candidate;
+   candidate.icon_url = favicon_url.icon_url;
+   candidate.icon_type = favicon_url.icon_type;
++  // A small icon is drawn from an SVG at each size it is shown at, and an SVG
++  // that follows the page's colour scheme is drawn under it, which a raster
++  // beside it is not. So a page's SVG icon is tried before its raster ones.
++  candidate.is_vector = !want_largest_icon && IsSvgUrl(favicon_url.icon_url);
+ 
+   if (HasAnySize(favicon_url.icon_sizes)) {
+     // For candidates which has the keyword "any" as part of their size
+@@ -545,6 +563,14 @@ void FaviconHandler::OnDidDownloadFavicon(
+                                           preferred_icon_size(), &score);
+     }
+ 
++    // An SVG is drawn once, at the largest size wanted, and scored as that one
++    // bitmap. It draws as well at every size, so it is ideal, and no raster
++    // after it is downloaded.
++    if (!image_skia.isNull() &&
++        (*final_candidates_)[current_candidate_index_].is_vector) {
++      score = 1.0f;
++    }
++
+     if (!image_skia.isNull() && score > best_favicon_.candidate.score) {
+       best_favicon_.image = gfx::Image(image_skia);
+       best_favicon_.candidate.icon_url = image_url;
+diff --git a/src/3rdparty/chromium/components/favicon/core/favicon_handler.h b/src/3rdparty/chromium/components/favicon/core/favicon_handler.h
+index 1c3938f33b..fb4ba485a1 100644
+--- a/src/3rdparty/chromium/components/favicon/core/favicon_handler.h
++++ b/src/3rdparty/chromium/components/favicon/core/favicon_handler.h
+@@ -184,14 +184,21 @@ class FaviconHandler {
+         bool want_largest_icon);
+ 
+     // Compare function used for std::stable_sort to sort in descending order.
++    // An SVG candidate comes before every raster one, whatever their scores.
+     static bool CompareScore(const FaviconCandidate& lhs,
+                              const FaviconCandidate& rhs) {
++      if (lhs.is_vector != rhs.is_vector) {
++        return lhs.is_vector;
++      }
+       return lhs.score > rhs.score;
+     }
+ 
+     GURL icon_url;
+     favicon_base::IconType icon_type = favicon_base::IconType::kInvalid;
+     float score = 0;
++    // Whether the icon is an SVG, which draws exactly at any size and can
++    // follow the page's colour scheme. Only a handler for small icons sets it.
++    bool is_vector = false;
+   };
+ 
+   struct DownloadedFavicon {
+diff --git a/tests/auto/widgets/favicon/CMakeLists.txt b/tests/auto/widgets/favicon/CMakeLists.txt
+index c22a68331a..2d315d034f 100644
+--- a/tests/auto/widgets/favicon/CMakeLists.txt
++++ b/tests/auto/widgets/favicon/CMakeLists.txt
+@@ -17,6 +17,8 @@ set(tst_favicon_resource_files
+     "resources/favicon-scheme.html"
+     "resources/favicon-shortcut.html"
+     "resources/favicon-single.html"
++    "resources/favicon-svg-missing.html"
++    "resources/favicon-svg-raster.html"
+     "resources/favicon-touch.html"
+     "resources/favicon-unavailable.html"
+     "resources/icons/qt144.png"
+diff --git a/tests/auto/widgets/favicon/resources/favicon-svg-missing.html b/tests/auto/widgets/favicon/resources/favicon-svg-missing.html
+new file mode 100644
+index 0000000000..7b82171f2d
+--- /dev/null
++++ b/tests/auto/widgets/favicon/resources/favicon-svg-missing.html
+@@ -0,0 +1,10 @@
++<html>
++    <head>
++        <title>Favicon SVG Missing Test</title>
++        <link rel="icon" href="icons/qtmulti.ico" sizes="any" />
++        <link rel="icon" href="icons/missing.svg" type="image/svg+xml" />
++    </head>
++    <body>
++        <h1>Favicon SVG Missing Test</h1>
++    </body>
++</html>
+diff --git a/tests/auto/widgets/favicon/resources/favicon-svg-raster.html b/tests/auto/widgets/favicon/resources/favicon-svg-raster.html
+new file mode 100644
+index 0000000000..dca1059bb9
+--- /dev/null
++++ b/tests/auto/widgets/favicon/resources/favicon-svg-raster.html
+@@ -0,0 +1,10 @@
++<html>
++    <head>
++        <title>Favicon SVG Raster Test</title>
++        <link rel="icon" href="icons/qtmulti.ico" sizes="any" />
++        <link rel="icon" href="icons/scheme.svg" type="image/svg+xml" />
++    </head>
++    <body>
++        <h1>Favicon SVG Raster Test</h1>
++    </body>
++</html>
+diff --git a/tests/auto/widgets/favicon/tst_favicon.cpp b/tests/auto/widgets/favicon/tst_favicon.cpp
+index c506630cd9..24771582bb 100644
+--- a/tests/auto/widgets/favicon/tst_favicon.cpp
++++ b/tests/auto/widgets/favicon/tst_favicon.cpp
+@@ -53,6 +53,8 @@ private Q_SLOTS:
+     void redrawOnNextVisitAfterColorSchemeChange();
+     void redrawAfterAPageStartsUnderAnotherScheme();
+     void sameDrawingIsNotReportedAgain();
++    void svgRanksAboveARasterBesideIt();
++    void rasterShownWhenTheSvgFails();
+ 
+ private:
+     QWebEngineView *m_view;
+@@ -1070,6 +1072,53 @@ void tst_Favicon::sameDrawingIsNotReportedAgain()
+     QCOMPARE(iconUrlChangedSpy.size(), 0);
+ }
+ 
++// Loads `page` from the test's resources with small icons only, and returns
++// the address of the icon the page reports.
++static QUrl iconUrlOf(QWebEnginePage *page, const QString &file)
++{
++    QSignalSpy loadFinishedSpy(page, &QWebEnginePage::loadFinished);
++    QSignalSpy iconUrlChangedSpy(page, &QWebEnginePage::iconUrlChanged);
++    page->settings()->setAttribute(QWebEngineSettings::TouchIconsEnabled, false);
++    page->load(QUrl::fromLocalFile(QDir(QT_TESTCASE_SOURCEDIR).canonicalPath()
++                                   + QLatin1String("/resources/") + file));
++    if (!QTest::qWaitFor([&] { return loadFinishedSpy.size() == 1; }, 30000)
++        || !QTest::qWaitFor([&] { return !page->iconUrl().isEmpty(); }, 10000))
++        return QUrl();
++    // A handler that went on past the first icon reports the next one later.
++    QTest::qWait(500);
++    return page->iconUrl();
++}
++
++// A page offers an ICO for any size, with exact 16 and 32 pixel frames, ahead
++// of an SVG that follows the colour scheme, as chatgpt.com does. Both rank as
++// ideal before they are fetched, and the one drawing of the SVG then scored
++// lower than the ICO's two frames, so the page showed the ICO and its icon
++// could not follow the scheme. The SVG ranks above the raster.
++void tst_Favicon::svgRanksAboveARasterBesideIt()
++{
++    if (!QDir(QDir(QT_TESTCASE_SOURCEDIR).canonicalPath()).exists())
++        QSKIP("This test requires access to its resources on disk");
++
++    const QUrl iconUrl = iconUrlOf(m_page, QStringLiteral("favicon-svg-raster.html"));
++    QCOMPARE(iconUrl,
++             QUrl::fromLocalFile(QDir(QT_TESTCASE_SOURCEDIR).canonicalPath()
++                                 + QLatin1String("/resources/icons/scheme.svg")));
++    QVERIFY(!m_page->icon().isNull());
++}
++
++// An SVG that cannot be fetched leaves the page the raster beside it.
++void tst_Favicon::rasterShownWhenTheSvgFails()
++{
++    if (!QDir(QDir(QT_TESTCASE_SOURCEDIR).canonicalPath()).exists())
++        QSKIP("This test requires access to its resources on disk");
++
++    const QUrl iconUrl = iconUrlOf(m_page, QStringLiteral("favicon-svg-missing.html"));
++    QCOMPARE(iconUrl,
++             QUrl::fromLocalFile(QDir(QT_TESTCASE_SOURCEDIR).canonicalPath()
++                                 + QLatin1String("/resources/icons/qtmulti.ico")));
++    QVERIFY(!m_page->icon().isNull());
++}
++
+ QTEST_MAIN(tst_Favicon)
+ 
+ #include "tst_favicon.moc"
+-- 
+2.55.0
+
