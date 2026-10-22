@@ -1,0 +1,233 @@
+From b0fd032f80333dd763b2d4c4656463f490e3e07a Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Ville=20Kivel=C3=A4?=
+ <5814559+villekivela@users.noreply.github.com>
+Date: Thu, 22 Oct 2026 09:56:13 +0000
+Subject: [PATCH] extensions: answer clipboardRead and clipboardWrite as Chrome
+ does
+
+An extension that declares clipboardWrite could not copy without a
+gesture, and one that declares clipboardRead was asked before it read.
+Blink asks the frame's content settings client before the asynchronous
+clipboard requests a permission and before document.execCommand reads
+or writes, and ContentSettingsObserverQt left AllowReadFromClipboard()
+and AllowWriteToClipboard() at Blink's default, false.
+
+Both now answer from the extension context of the script running, as
+chrome/renderer/chrome_content_settings_agent_delegate.cc does: reading
+needs clipboardRead, and writing needs clipboardWrite or a privileged
+extension page other than a service worker. A password manager's
+offscreen document copies a password with execCommand("copy") and no
+gesture, and its contents have no view delegate to ask from, so the
+answer has to come from the renderer.
+
+anExtensionUsesTheClipboardItsPermissionsAllow checks that a web page
+can neither copy nor paste without a gesture, and that an extension page
+that declares both permissions pastes and copies through a selected text
+area. Without this patch its paste is refused.
+
+See villekivela/omaweb#745.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../renderer/content_settings_observer_qt.cpp | 52 +++++++++++++++++++
+ .../renderer/content_settings_observer_qt.h   |  2 +
+ .../resources/clipboard_ext/manifest.json     |  6 +++
+ .../resources/clipboard_ext/page.html         |  7 +++
+ .../resources/clipboard_ext/page.js           | 12 +++++
+ .../extensions/tst_qwebengineextension.cpp    | 29 +++++++++++
+ 6 files changed, 108 insertions(+)
+ create mode 100644 tests/auto/widgets/extensions/resources/clipboard_ext/manifest.json
+ create mode 100644 tests/auto/widgets/extensions/resources/clipboard_ext/page.html
+ create mode 100644 tests/auto/widgets/extensions/resources/clipboard_ext/page.js
+
+diff --git a/src/core/renderer/content_settings_observer_qt.cpp b/src/core/renderer/content_settings_observer_qt.cpp
+index 67dee40596..b2ea71e90b 100644
+--- a/src/core/renderer/content_settings_observer_qt.cpp
++++ b/src/core/renderer/content_settings_observer_qt.cpp
+@@ -10,14 +10,35 @@
+ #include "content_settings_observer_qt.h"
+ 
+ #include "content/public/renderer/render_frame.h"
++#include "extensions/buildflags/buildflags.h"
+ #include "third_party/blink/public/platform/browser_interface_broker_proxy.h"
+ #include "third_party/blink/public/platform/web_security_origin.h"
+ #include "third_party/blink/public/web/web_document.h"
+ #include "third_party/blink/public/web/web_local_frame.h"
+ #include "url/origin.h"
+ 
++#if BUILDFLAG(ENABLE_EXTENSIONS)
++#include "extensions/common/mojom/api_permission_id.mojom-shared.h"
++#include "extensions/common/mojom/context_type.mojom.h"
++#include "extensions/renderer/dispatcher.h"
++#include "extensions/renderer/extensions_renderer_client.h"
++#include "extensions/renderer/script_context.h"
++#include "extensions/renderer/script_context_set.h"
++#endif
++
+ namespace {
+ 
++#if BUILDFLAG(ENABLE_EXTENSIONS)
++// The extension context of the script running now, if any.
++extensions::ScriptContext *currentExtensionContext()
++{
++    auto *client = extensions::ExtensionsRendererClient::Get();
++    if (!client || !client->dispatcher())
++        return nullptr;
++    return client->dispatcher()->script_context_set().GetCurrent();
++}
++#endif
++
+ bool IsUniqueFrame(blink::WebFrame *frame)
+ {
+     return frame->GetSecurityOrigin().IsOpaque() ||
+@@ -98,6 +119,37 @@ void ContentSettingsObserverQt::AllowStorageAccess(StorageType storage_type,
+             frame->GetDocument().TopFrameOrigin(), std::move(allowStorageCallBack));
+ }
+ 
++// Based on chrome/renderer/chrome_content_settings_agent_delegate.cc. Blink asks
++// before the asynchronous clipboard requests a permission and before
++// document.execCommand reads or writes, so an extension granted here is never
++// asked about, whether or not its document has a view.
++bool ContentSettingsObserverQt::AllowReadFromClipboard()
++{
++#if BUILDFLAG(ENABLE_EXTENSIONS)
++    extensions::ScriptContext *context = currentExtensionContext();
++    return context && context->HasAPIPermission(extensions::mojom::APIPermissionID::kClipboardRead);
++#else
++    return false;
++#endif
++}
++
++bool ContentSettingsObserverQt::AllowWriteToClipboard()
++{
++#if BUILDFLAG(ENABLE_EXTENSIONS)
++    extensions::ScriptContext *context = currentExtensionContext();
++    if (!context)
++        return false;
++    // Every page of an extension's own could write in Chrome before the
++    // permission existed, and still can there, so it can here too.
++    if (context->effective_context_type() == extensions::mojom::ContextType::kPrivilegedExtension
++        && !context->IsForServiceWorker())
++        return true;
++    return context->HasAPIPermission(extensions::mojom::APIPermissionID::kClipboardWrite);
++#else
++    return false;
++#endif
++}
++
+ bool ContentSettingsObserverQt::AllowStorageAccessSync(StorageType storage_type)
+ {
+     blink::WebLocalFrame *frame = render_frame()->GetWebFrame();
+diff --git a/src/core/renderer/content_settings_observer_qt.h b/src/core/renderer/content_settings_observer_qt.h
+index 817905a435..385572c6ba 100644
+--- a/src/core/renderer/content_settings_observer_qt.h
++++ b/src/core/renderer/content_settings_observer_qt.h
+@@ -34,6 +34,8 @@ public:
+     void AllowStorageAccess(StorageType storage_type,
+                             base::OnceCallback<void(bool)> callback) override;
+     bool AllowStorageAccessSync(StorageType storage_type) override;
++    bool AllowReadFromClipboard() override;
++    bool AllowWriteToClipboard() override;
+ 
+ private:
+     // RenderFrameObserver implementation:
+diff --git a/tests/auto/widgets/extensions/resources/clipboard_ext/manifest.json b/tests/auto/widgets/extensions/resources/clipboard_ext/manifest.json
+new file mode 100644
+index 0000000000..dd8b463014
+--- /dev/null
++++ b/tests/auto/widgets/extensions/resources/clipboard_ext/manifest.json
+@@ -0,0 +1,6 @@
++{
++    "name": "Clipboard",
++    "version": "1.0",
++    "manifest_version": 3,
++    "permissions": ["clipboardRead", "clipboardWrite"]
++}
+diff --git a/tests/auto/widgets/extensions/resources/clipboard_ext/page.html b/tests/auto/widgets/extensions/resources/clipboard_ext/page.html
+new file mode 100644
+index 0000000000..7e33b83de9
+--- /dev/null
++++ b/tests/auto/widgets/extensions/resources/clipboard_ext/page.html
+@@ -0,0 +1,7 @@
++<!doctype html>
++<html>
++<body>
++<textarea></textarea>
++<script src="page.js"></script>
++</body>
++</html>
+diff --git a/tests/auto/widgets/extensions/resources/clipboard_ext/page.js b/tests/auto/widgets/extensions/resources/clipboard_ext/page.js
+new file mode 100644
+index 0000000000..813639a293
+--- /dev/null
++++ b/tests/auto/widgets/extensions/resources/clipboard_ext/page.js
+@@ -0,0 +1,12 @@
++// A password manager copies and pastes through a selected text area.
++const area = document.querySelector("textarea");
++function copy(text) {
++    area.value = text;
++    area.select();
++    return document.execCommand("copy");
++}
++function paste() {
++    area.value = "";
++    area.select();
++    return document.execCommand("paste") ? area.value : "refused";
++}
+diff --git a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
+index 03dd05bebb..0f70809f0b 100644
+--- a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
++++ b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
+@@ -3,6 +3,7 @@
+ 
+ #include <util.h>
+ #include <QtTest/QtTest>
++#include <QClipboard>
+ #include <QTemporaryDir>
+ #include <QtWebEngineCore/qwebengineprofile.h>
+ #include <QtWebEngineCore/qwebenginepage.h>
+@@ -74,6 +75,7 @@ private Q_SLOTS:
+     void aPageCanLoadAWebAccessibleResource();
+     void aResourceWithADynamicUrlIsReachableOnlyUnderIt();
+     void anOffscreenDocumentCanBeCreated();
++    void anExtensionUsesTheClipboardItsPermissionsAllow();
+     void enableAfterStoragePathChange();
+     void tabsWindowsAndScripting();
+     void nativeMessaging();
+@@ -1432,6 +1434,33 @@ void tst_QWebEngineExtension::anOffscreenDocumentCanBeCreated()
+     QTRY_COMPARE(m_page->title(), "offscreen ready"_L1);
+ }
+ 
++void tst_QWebEngineExtension::anExtensionUsesTheClipboardItsPermissionsAllow()
++{
++    // Chrome lets an extension that declares clipboardWrite write, and one that declares
++    // clipboardRead read, without a gesture or a question. A password manager copies from a
++    // document that has neither focus nor a click behind it. Blink asks the frame's content
++    // settings client, which answered no for every frame.
++    QSignalSpy webSpy(m_page, SIGNAL(loadFinished(bool)));
++    m_page->load(QUrl("qrc:///resources/index.html"));
++    QTRY_COMPARE(webSpy.size(), 1);
++    QGuiApplication::clipboard()->setText("from the reader"_L1);
++    QCOMPARE(evaluateJavaScriptSync(m_page, "document.execCommand('copy')").toBool(), false);
++    QCOMPARE(evaluateJavaScriptSync(m_page, "document.execCommand('paste')").toBool(), false);
++    QCOMPARE(QGuiApplication::clipboard()->text(), "from the reader"_L1);
++
++    QWebEngineExtensionInfo extension = loadExtensionSync(resourcesPath() + "clipboard_ext"_L1);
++    QVERIFY2(extension.isLoaded(), qPrintable(extension.error()));
++    m_manager->setExtensionEnabled(extension, true);
++    QWebEnginePage page(m_profile);
++    QSignalSpy loadSpy(&page, SIGNAL(loadFinished(bool)));
++    page.load(QUrl("chrome-extension://"_L1 + extension.id() + "/page.html"_L1));
++    QTRY_COMPARE(loadSpy.size(), 1);
++
++    QCOMPARE(evaluateJavaScriptSync(&page, "paste()"), "from the reader"_L1);
++    QCOMPARE(evaluateJavaScriptSync(&page, "copy('from the extension')").toBool(), true);
++    QTRY_COMPARE(QGuiApplication::clipboard()->text(), "from the extension"_L1);
++}
++
+ void tst_QWebEngineExtension::aProfileMayGoWhileAMessageWaitsForTheWorker()
+ {
+     // A message to an extension's worker waits in a queue until the worker is registered and
+-- 
+2.55.0
+

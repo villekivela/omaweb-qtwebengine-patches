@@ -1,0 +1,155 @@
+From 45c2101f41f75173c4263bb28fc7d983d7f1d1f7 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Ville=20Kivel=C3=A4?=
+ <5814559+villekivela@users.noreply.github.com>
+Date: Thu, 22 Oct 2026 09:49:56 +0000
+Subject: [PATCH] clipboard: grant a sanitized write during a gesture, as
+ Chrome does
+
+A copy button asked the application every time. Blink asks for
+CLIPBOARD_SANITIZED_WRITE only when a page writes text or a known image
+format during a click or a key press, and Chrome grants it by default
+(components/permissions/contexts/clipboard_sanitized_write_permission_context.cc).
+Qt granted it only with JavascriptCanAccessClipboard on, which also lets
+document.execCommand("copy") write with no gesture at all, so an
+application that wanted Chrome's answer had to take a worse one. Without
+the setting, Qt reports the request as ClipboardReadWrite, the same type
+as a read, and the application cannot tell the two apart.
+
+getStatusFromSettings() now answers GRANTED for
+CLIPBOARD_SANITIZED_WRITE whatever the settings say. Both callers take
+it: the request a write makes, and what navigator.permissions.query()
+reports for clipboard-write. CLIPBOARD_READ_WRITE, which a read and any
+unsanitized or gestureless write ask for, is unchanged.
+
+clickedWriteIsNotAsked writes from a click without a request, and checks
+that the same write from a script is still asked. The clipboard-write
+rows of clipboardReadWritePermissionInitialState and
+clipboardReadWritePermission now expect granted, because the query asks
+about a sanitized write with a gesture. The row without either setting
+is listed first, because the stock run reads the first result line.
+
+See villekivela/omaweb#745.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/core/permission_manager_qt.cpp            |  8 ++-
+ .../tst_qwebenginepermission.cpp              | 55 +++++++++++++++++--
+ 2 files changed, 55 insertions(+), 8 deletions(-)
+
+diff --git a/src/core/permission_manager_qt.cpp b/src/core/permission_manager_qt.cpp
+index 838fa3b94f..d2cc682546 100644
+--- a/src/core/permission_manager_qt.cpp
++++ b/src/core/permission_manager_qt.cpp
+@@ -206,9 +206,11 @@ static blink::mojom::PermissionStatus getStatusFromSettings(blink::PermissionTyp
+             return blink::mojom::PermissionStatus::GRANTED;
+         return blink::mojom::PermissionStatus::ASK;
+     case blink::PermissionType::CLIPBOARD_SANITIZED_WRITE:
+-        if (settings->testAttribute(QWebEngineSettings::JavascriptCanAccessClipboard))
+-            return blink::mojom::PermissionStatus::GRANTED;
+-        return blink::mojom::PermissionStatus::ASK;
++        // Blink asks for this only for a sanitized write during a user gesture,
++        // and Chrome grants it by default
++        // (components/permissions/contexts/clipboard_sanitized_write_permission_context.cc).
++        // Any other write is CLIPBOARD_READ_WRITE, which still asks.
++        return blink::mojom::PermissionStatus::GRANTED;
+     default:
+         return blink::mojom::PermissionStatus::ASK;
+     }
+diff --git a/tests/auto/widgets/qwebenginepermission/tst_qwebenginepermission.cpp b/tests/auto/widgets/qwebenginepermission/tst_qwebenginepermission.cpp
+index b750e575ee..dce41695a6 100644
+--- a/tests/auto/widgets/qwebenginepermission/tst_qwebenginepermission.cpp
++++ b/tests/auto/widgets/qwebenginepermission/tst_qwebenginepermission.cpp
+@@ -4,6 +4,7 @@
+ #include <util.h>
+ 
+ #include <QtTest/QtTest>
++#include <QClipboard>
+ #include <QDir>
+ #include <QStringLiteral>
+ #include <QWebEngineDesktopMediaRequest>
+@@ -50,6 +51,7 @@ private Q_SLOTS:
+     void clipboardReadWritePermissionInitialState();
+     void clipboardReadWritePermission_data();
+     void clipboardReadWritePermission();
++    void clickedWriteIsNotAsked();
+ 
+ private:
+     std::unique_ptr<QWebEngineProfile> m_profile;
+@@ -579,12 +581,14 @@ void tst_QWebEnginePermission::clipboardReadWritePermissionInitialState_data()
+     QTest::addColumn<bool>("canPaste");
+     QTest::addColumn<QString>("readPermission");
+     QTest::addColumn<QString>("writePermission");
++    // A sanitized write with a gesture is granted whatever the settings say, as Chrome grants it,
++    // and a query for clipboard-write asks about that write.
++    QTest::newRow("no access or paste should prompt for read")
++            << false << false << "prompt" << "granted";
+     QTest::newRow("access and paste should grant both") << true << true << "granted" << "granted";
+-    QTest::newRow("paste only should prompt for both") << false << true << "prompt" << "prompt";
+-    QTest::newRow("access only should grant for write only")
++    QTest::newRow("paste only should prompt for read") << false << true << "prompt" << "granted";
++    QTest::newRow("access only should prompt for read")
+             << true << false << "prompt" << "granted";
+-    QTest::newRow("no access or paste should prompt for both")
+-            << false << false << "prompt" << "prompt";
+ }
+ 
+ void tst_QWebEnginePermission::clipboardReadWritePermissionInitialState()
+@@ -698,7 +702,7 @@ void tst_QWebEnginePermission::clipboardReadWritePermission()
+     evaluateJavaScriptSync(&page, clipboardPermissionQuery("readPermission", "clipboard-read"));
+     QCOMPARE(evaluateJavaScriptSync(&page, QStringLiteral("readPermission")), initialPermission);
+     evaluateJavaScriptSync(&page, clipboardPermissionQuery("writePermission", "clipboard-write"));
+-    QCOMPARE(evaluateJavaScriptSync(&page, QStringLiteral("writePermission")), initialPermission);
++    QCOMPARE(evaluateJavaScriptSync(&page, QStringLiteral("writePermission")), "granted"_L1);
+ 
+     auto triggerRequest = [&page](QString variableName, QString apiCall)
+     {
+@@ -724,5 +728,46 @@ void tst_QWebEnginePermission::clipboardReadWritePermission()
+     QVERIFY(!errorState);
+ }
+ 
++void tst_QWebEnginePermission::clickedWriteIsNotAsked()
++{
++    // A copy button writes text during a click, and Chrome grants that sanitized write by default.
++    // Without JavascriptCanAccessClipboard, which would also let execCommand("copy") write with no
++    // gesture, it reached the application as a ClipboardReadWrite request.
++    QWebEngineView view;
++    QWebEnginePage page(m_profile.get(), &view);
++    view.setPage(&page);
++    int asked = 0;
++    connect(&page, &QWebEnginePage::permissionRequested, &page, [&](QWebEnginePermission p) {
++        ++asked;
++        p.deny();
++    });
++
++    QSignalSpy spy(&page, &QWebEnginePage::loadFinished);
++    page.setHtml("<html><body style='margin: 0'>"
++                 "<button style='width: 100vw; height: 100vh' onclick='copy()'>copy</button>"
++                 "<script>var state; function copy() { navigator.clipboard.writeText('copied')"
++                 ".then(() => state = 'written', (e) => state = e.name); }</script>"
++                 "</body></html>"_L1,
++                 QUrl("https://www.example.com/copy.html"));
++    QTRY_COMPARE(spy.size(), 1);
++    view.resize(300, 300);
++    view.show();
++    QVERIFY(QTest::qWaitForWindowExposed(&view));
++    view.activateWindow();
++    QTRY_VERIFY(evaluateJavaScriptSync(&page, "document.hasFocus()").toBool());
++    QGuiApplication::clipboard()->clear();
++
++    // The write without a gesture is the ClipboardReadWrite permission, and is still asked.
++    evaluateJavaScriptSync(&page, "copy()"_L1);
++    QTRY_COMPARE(evaluateJavaScriptSync(&page, "state"), "NotAllowedError"_L1);
++    QCOMPARE(asked, 1);
++    QCOMPARE(QGuiApplication::clipboard()->text(), QString());
++
++    QTest::mouseClick(view.focusProxy(), Qt::LeftButton, {}, QPoint{100, 100});
++    QTRY_COMPARE(evaluateJavaScriptSync(&page, "state"), "written"_L1);
++    QCOMPARE(QGuiApplication::clipboard()->text(), "copied"_L1);
++    QCOMPARE(asked, 1);
++}
++
+ QTEST_MAIN(tst_QWebEnginePermission)
+ #include "tst_qwebenginepermission.moc"
+-- 
+2.55.0
+

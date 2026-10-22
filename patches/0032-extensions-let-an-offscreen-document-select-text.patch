@@ -1,0 +1,197 @@
+From 8a9c5665ec2130b71e98ca586817db0c2b60a67b Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Ville=20Kivel=C3=A4?=
+ <5814559+villekivela@users.noreply.github.com>
+Date: Thu, 22 Oct 2026 09:59:44 +0000
+Subject: [PATCH] extensions: let an offscreen document select text
+
+Selecting text in an offscreen document took the browser down. A
+password manager copies a password from its offscreen document by
+putting it in a text area, selecting it and calling
+document.execCommand("copy"), so the first copy that reached that
+document ended the session. The document's contents were created by the
+extension system, so its RenderWidgetHostViewQt has no delegate, and the
+text input state, selection and focused node changes the selection
+reports each reached for it: OnUpdateTextInputStateCalled() dereferenced
+the null delegate, and the selection handlers go on to the missing
+adapter client.
+
+Each of OnUpdateTextInputStateCalled(), OnSelectionBoundsChanged(),
+OnTextSelectionChanged() and FocusedNodeChanged() now returns before it
+reaches the delegate when there is none. Such a view has no input method
+and no one to report a selection to. This follows 0019, which made
+Hide() and IsShowing() handle the same missing delegate. Stock
+QtWebEngine 6.11.2 crashes the same way.
+
+anOffscreenDocumentCanSelectText selects text in an offscreen document,
+removes the text area and waits for the reports to arrive. Without this
+patch the test program dies with SIGSEGV in
+RenderWidgetHostViewQt::OnUpdateTextInputStateCalled().
+
+See villekivela/omaweb#745.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/core/render_widget_host_view_qt.cpp       | 13 +++++++++++-
+ .../offscreen_text_ext/manifest.json          |  8 ++++++++
+ .../offscreen_text_ext/offscreen.html         |  7 +++++++
+ .../resources/offscreen_text_ext/offscreen.js |  6 ++++++
+ .../resources/offscreen_text_ext/page.html    |  7 +++++++
+ .../resources/offscreen_text_ext/page.js      |  6 ++++++
+ .../extensions/tst_qwebengineextension.cpp    | 20 +++++++++++++++++++
+ 7 files changed, 66 insertions(+), 1 deletion(-)
+ create mode 100644 tests/auto/widgets/extensions/resources/offscreen_text_ext/manifest.json
+ create mode 100644 tests/auto/widgets/extensions/resources/offscreen_text_ext/offscreen.html
+ create mode 100644 tests/auto/widgets/extensions/resources/offscreen_text_ext/offscreen.js
+ create mode 100644 tests/auto/widgets/extensions/resources/offscreen_text_ext/page.html
+ create mode 100644 tests/auto/widgets/extensions/resources/offscreen_text_ext/page.js
+
+diff --git a/src/core/render_widget_host_view_qt.cpp b/src/core/render_widget_host_view_qt.cpp
+index 1ad92f2dad..340672c5f0 100644
+--- a/src/core/render_widget_host_view_qt.cpp
++++ b/src/core/render_widget_host_view_qt.cpp
+@@ -687,6 +687,11 @@ void RenderWidgetHostViewQt::OnUpdateTextInputStateCalled(content::TextInputMana
+     Q_UNUSED(updated_view);
+     Q_UNUSED(did_update_state);
+ 
++    // A view in contents the extension system created, such as an offscreen document, has no
++    // delegate and no input method to tell.
++    if (!m_delegate)
++        return;
++
+     const ui::mojom::TextInputState *state = text_input_manager->GetTextInputState();
+     if (!state) {
+         // Do not reset input method state here because an editable node might be still focused and
+@@ -734,6 +739,9 @@ void RenderWidgetHostViewQt::OnSelectionBoundsChanged(content::TextInputManager
+ {
+     Q_UNUSED(updated_view);
+ 
++    if (!m_delegate)
++        return;
++
+     m_imState |= ImStateFlags::TextSelectionBoundsUpdated;
+     if (m_imState == ImStateFlags::AllFlags
+         || (m_imState == ImStateFlags::TextSelectionFlags
+@@ -766,6 +774,9 @@ void RenderWidgetHostViewQt::OnTextSelectionChanged(content::TextInputManager *t
+     }
+ #endif // BUILDFLAG(IS_OZONE)
+ 
++    if (!m_delegate)
++        return;
++
+     m_imState |= ImStateFlags::TextSelectionUpdated;
+     if (m_imState == ImStateFlags::AllFlags
+         || (m_imState == ImStateFlags::TextSelectionFlags
+@@ -1060,7 +1071,7 @@ const viz::LocalSurfaceId &RenderWidgetHostViewQt::GetLocalSurfaceId() const
+ void RenderWidgetHostViewQt::FocusedNodeChanged(bool is_editable_node, const gfx::Rect& node_bounds_in_screen)
+ {
+     Q_UNUSED(node_bounds_in_screen);
+-    if (!is_editable_node) {
++    if (!is_editable_node && m_delegate) {
+         m_delegate->inputMethodStateChanged(false /*editorVisible*/, false /*passwordInput*/);
+         m_delegate->setInputMethodHints(Qt::ImhNone);
+     }
+diff --git a/tests/auto/widgets/extensions/resources/offscreen_text_ext/manifest.json b/tests/auto/widgets/extensions/resources/offscreen_text_ext/manifest.json
+new file mode 100644
+index 0000000000..36373db595
+--- /dev/null
++++ b/tests/auto/widgets/extensions/resources/offscreen_text_ext/manifest.json
+@@ -0,0 +1,8 @@
++{
++    "name": "offscreen text",
++    "version": "1.0",
++    "manifest_version": 3,
++    "permissions": [
++        "offscreen"
++    ]
++}
+diff --git a/tests/auto/widgets/extensions/resources/offscreen_text_ext/offscreen.html b/tests/auto/widgets/extensions/resources/offscreen_text_ext/offscreen.html
+new file mode 100644
+index 0000000000..15df15a39a
+--- /dev/null
++++ b/tests/auto/widgets/extensions/resources/offscreen_text_ext/offscreen.html
+@@ -0,0 +1,7 @@
++<!DOCTYPE html>
++<html>
++<body>
++<textarea></textarea>
++<script src="offscreen.js"></script>
++</body>
++</html>
+diff --git a/tests/auto/widgets/extensions/resources/offscreen_text_ext/offscreen.js b/tests/auto/widgets/extensions/resources/offscreen_text_ext/offscreen.js
+new file mode 100644
+index 0000000000..92a6900e6d
+--- /dev/null
++++ b/tests/auto/widgets/extensions/resources/offscreen_text_ext/offscreen.js
+@@ -0,0 +1,6 @@
++// A password manager copies through a text area it selects, and then takes it away again.
++const area = document.querySelector("textarea");
++area.value = "password";
++area.select();
++area.remove();
++chrome.runtime.sendMessage("offscreen selected");
+diff --git a/tests/auto/widgets/extensions/resources/offscreen_text_ext/page.html b/tests/auto/widgets/extensions/resources/offscreen_text_ext/page.html
+new file mode 100644
+index 0000000000..e49c5f39bb
+--- /dev/null
++++ b/tests/auto/widgets/extensions/resources/offscreen_text_ext/page.html
+@@ -0,0 +1,7 @@
++<!DOCTYPE html>
++<html>
++<head>
++<script src="page.js"></script>
++</head>
++<body></body>
++</html>
+diff --git a/tests/auto/widgets/extensions/resources/offscreen_text_ext/page.js b/tests/auto/widgets/extensions/resources/offscreen_text_ext/page.js
+new file mode 100644
+index 0000000000..9241881ff1
+--- /dev/null
++++ b/tests/auto/widgets/extensions/resources/offscreen_text_ext/page.js
+@@ -0,0 +1,6 @@
++chrome.runtime.onMessage.addListener((message) => document.title = message);
++chrome.offscreen.createDocument({
++    url: "offscreen.html",
++    reasons: ["CLIPBOARD"],
++    justification: "test"
++}).catch((error) => document.title = "failed: " + error.message);
+diff --git a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
+index 0f70809f0b..57e864ab70 100644
+--- a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
++++ b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
+@@ -75,6 +75,7 @@ private Q_SLOTS:
+     void aPageCanLoadAWebAccessibleResource();
+     void aResourceWithADynamicUrlIsReachableOnlyUnderIt();
+     void anOffscreenDocumentCanBeCreated();
++    void anOffscreenDocumentCanSelectText();
+     void anExtensionUsesTheClipboardItsPermissionsAllow();
+     void enableAfterStoragePathChange();
+     void tabsWindowsAndScripting();
+@@ -1434,6 +1435,25 @@ void tst_QWebEngineExtension::anOffscreenDocumentCanBeCreated()
+     QTRY_COMPARE(m_page->title(), "offscreen ready"_L1);
+ }
+ 
++void tst_QWebEngineExtension::anOffscreenDocumentCanSelectText()
++{
++    // An offscreen document's view has no delegate. Selecting text in it, and taking the text
++    // area away again, reports a text input state, a selection and a focused node to that view,
++    // and each of those reached for the missing delegate.
++    QWebEngineExtensionInfo extension = loadExtensionSync(resourcesPath() + "offscreen_text_ext"_L1);
++    QVERIFY2(extension.isLoaded(), qPrintable(extension.error()));
++    m_manager->setExtensionEnabled(extension, true);
++
++    QSignalSpy loadSpy(m_page, SIGNAL(loadFinished(bool)));
++    m_page->load(QUrl("chrome-extension://"_L1 + extension.id() + "/page.html"_L1));
++    QTRY_COMPARE(loadSpy.size(), 1);
++    QTRY_COMPARE(m_page->title(), "offscreen selected"_L1);
++    // The view hears of the selection after the document has moved on, so the page is given
++    // time for it to arrive.
++    QTest::qWait(500);
++    QCOMPARE(evaluateJavaScriptSync(m_page, "document.title"), "offscreen selected"_L1);
++}
++
+ void tst_QWebEngineExtension::anExtensionUsesTheClipboardItsPermissionsAllow()
+ {
+     // Chrome lets an extension that declares clipboardWrite write, and one that declares
+-- 
+2.55.0
+
