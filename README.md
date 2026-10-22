@@ -323,7 +323,8 @@ document by selecting the password in a text area. The document's view has no de
 found, and the text input state, selection and focused node changes the selection reports each
 reached for it, so the first such copy took the browser down. Each now returns first when there is
 no delegate. Stock QtWebEngine 6.11.2 crashes the same way. See
-[omaweb#745](https://github.com/villekivela/omaweb/issues/745). _A bug fix with a test. Submit as is._
+[omaweb#745](https://github.com/villekivela/omaweb/issues/745). _A bug fix with a test. Submit as
+is._
 
 ## The open question
 
