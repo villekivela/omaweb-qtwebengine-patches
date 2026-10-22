@@ -315,14 +315,15 @@ answers from the extension context of the script running, as Chrome's
 `ChromeContentSettingsAgentDelegate` does: `clipboardRead` reads, and `clipboardWrite` or a
 privileged extension page other than a service worker writes. A password manager's offscreen
 document copies with no gesture and no view to ask from, so the answer has to come from the
-renderer. See [omaweb#745](https://github.com/villekivela/omaweb/issues/745).
+renderer. See [omaweb#745](https://github.com/villekivela/omaweb/issues/745). _Part of the extension
+runtime the open question below is about. Propose it with 0004._
 
 **0032, let an offscreen document select text.** A password manager copies from its offscreen
 document by selecting the password in a text area. The document's view has no delegate, as 0019
 found, and the text input state, selection and focused node changes the selection reports each
 reached for it, so the first such copy took the browser down. Each now returns first when there is
 no delegate. Stock QtWebEngine 6.11.2 crashes the same way. See
-[omaweb#745](https://github.com/villekivela/omaweb/issues/745). _A bug fix, headed for Gerrit._
+[omaweb#745](https://github.com/villekivela/omaweb/issues/745). _A bug fix with a test. Submit as is._
 
 ## The open question
 
@@ -472,9 +473,11 @@ checks.
 
 Patches 0031 and 0032 have cases in `tst_qwebengineextension`, which the gate runs whole.
 `anExtensionUsesTheClipboardItsPermissionsAllow` checks that a web page can neither copy nor paste
-with `execCommand` and no gesture, and that a page of an extension that declares both permissions
-can. `anOffscreenDocumentCanSelectText` selects text in an offscreen document and removes the text
-area; a stock engine dies with SIGSEGV in `RenderWidgetHostViewQt::OnUpdateTextInputStateCalled`.
+with `execCommand` and no gesture, and that an extension that declares both permissions pastes from
+its page and copies from its offscreen document. The offscreen document is not a privileged page, so
+its copy is the one that needs `clipboardWrite`. `anOffscreenDocumentCanSelectText` selects text in
+an offscreen document and removes the text area; a stock engine dies with SIGSEGV in
+`RenderWidgetHostViewQt::OnUpdateTextInputStateCalled`.
 
 ## Rebase record
 

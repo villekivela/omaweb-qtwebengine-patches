@@ -1,4 +1,4 @@
-From b0fd032f80333dd763b2d4c4656463f490e3e07a Mon Sep 17 00:00:00 2001
+From fde60c3f76d17d2cf23ad86e69de390d1202dfb8 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivel=C3=A4?=
  <5814559+villekivela@users.noreply.github.com>
 Date: Thu, 22 Oct 2026 09:56:13 +0000
@@ -21,9 +21,12 @@ gesture, and its contents have no view delegate to ask from, so the
 answer has to come from the renderer.
 
 anExtensionUsesTheClipboardItsPermissionsAllow checks that a web page
-can neither copy nor paste without a gesture, and that an extension page
-that declares both permissions pastes and copies through a selected text
-area. Without this patch its paste is refused.
+can neither copy nor paste without a gesture, and that an extension that
+declares both permissions pastes from its page and copies from its
+offscreen document through a selected text area. An offscreen document
+is not a privileged page, so its copy needs clipboardWrite. Without this
+patch the paste is refused. A copy from the extension's own page writes
+with or without the permission, as in Chrome.
 
 See villekivela/omaweb#745.
 
@@ -31,12 +34,16 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
  .../renderer/content_settings_observer_qt.cpp | 52 +++++++++++++++++++
  .../renderer/content_settings_observer_qt.h   |  2 +
- .../resources/clipboard_ext/manifest.json     |  6 +++
+ .../resources/clipboard_ext/manifest.json     | 10 ++++
+ .../resources/clipboard_ext/offscreen.html    |  7 +++
+ .../resources/clipboard_ext/offscreen.js      |  4 ++
  .../resources/clipboard_ext/page.html         |  7 +++
- .../resources/clipboard_ext/page.js           | 12 +++++
- .../extensions/tst_qwebengineextension.cpp    | 29 +++++++++++
- 6 files changed, 108 insertions(+)
+ .../resources/clipboard_ext/page.js           | 21 ++++++++
+ .../extensions/tst_qwebengineextension.cpp    | 33 ++++++++++++
+ 8 files changed, 136 insertions(+)
  create mode 100644 tests/auto/widgets/extensions/resources/clipboard_ext/manifest.json
+ create mode 100644 tests/auto/widgets/extensions/resources/clipboard_ext/offscreen.html
+ create mode 100644 tests/auto/widgets/extensions/resources/clipboard_ext/offscreen.js
  create mode 100644 tests/auto/widgets/extensions/resources/clipboard_ext/page.html
  create mode 100644 tests/auto/widgets/extensions/resources/clipboard_ext/page.js
 
@@ -133,23 +140,50 @@ index 817905a435..385572c6ba 100644
      // RenderFrameObserver implementation:
 diff --git a/tests/auto/widgets/extensions/resources/clipboard_ext/manifest.json b/tests/auto/widgets/extensions/resources/clipboard_ext/manifest.json
 new file mode 100644
-index 0000000000..dd8b463014
+index 0000000000..a5f49d2f7f
 --- /dev/null
 +++ b/tests/auto/widgets/extensions/resources/clipboard_ext/manifest.json
-@@ -0,0 +1,6 @@
+@@ -0,0 +1,10 @@
 +{
 +    "name": "Clipboard",
 +    "version": "1.0",
 +    "manifest_version": 3,
-+    "permissions": ["clipboardRead", "clipboardWrite"]
++    "permissions": [
++        "clipboardRead",
++        "clipboardWrite",
++        "offscreen"
++    ]
 +}
+diff --git a/tests/auto/widgets/extensions/resources/clipboard_ext/offscreen.html b/tests/auto/widgets/extensions/resources/clipboard_ext/offscreen.html
+new file mode 100644
+index 0000000000..15df15a39a
+--- /dev/null
++++ b/tests/auto/widgets/extensions/resources/clipboard_ext/offscreen.html
+@@ -0,0 +1,7 @@
++<!DOCTYPE html>
++<html>
++<body>
++<textarea></textarea>
++<script src="offscreen.js"></script>
++</body>
++</html>
+diff --git a/tests/auto/widgets/extensions/resources/clipboard_ext/offscreen.js b/tests/auto/widgets/extensions/resources/clipboard_ext/offscreen.js
+new file mode 100644
+index 0000000000..ce852eac27
+--- /dev/null
++++ b/tests/auto/widgets/extensions/resources/clipboard_ext/offscreen.js
+@@ -0,0 +1,4 @@
++const area = document.querySelector("textarea");
++area.value = "from the offscreen document";
++area.select();
++chrome.runtime.sendMessage("copied " + document.execCommand("copy"));
 diff --git a/tests/auto/widgets/extensions/resources/clipboard_ext/page.html b/tests/auto/widgets/extensions/resources/clipboard_ext/page.html
 new file mode 100644
-index 0000000000..7e33b83de9
+index 0000000000..e8a7d35887
 --- /dev/null
 +++ b/tests/auto/widgets/extensions/resources/clipboard_ext/page.html
 @@ -0,0 +1,7 @@
-+<!doctype html>
++<!DOCTYPE html>
 +<html>
 +<body>
 +<textarea></textarea>
@@ -158,10 +192,10 @@ index 0000000000..7e33b83de9
 +</html>
 diff --git a/tests/auto/widgets/extensions/resources/clipboard_ext/page.js b/tests/auto/widgets/extensions/resources/clipboard_ext/page.js
 new file mode 100644
-index 0000000000..813639a293
+index 0000000000..968723bb6d
 --- /dev/null
 +++ b/tests/auto/widgets/extensions/resources/clipboard_ext/page.js
-@@ -0,0 +1,12 @@
+@@ -0,0 +1,21 @@
 +// A password manager copies and pastes through a selected text area.
 +const area = document.querySelector("textarea");
 +function copy(text) {
@@ -174,8 +208,17 @@ index 0000000000..813639a293
 +    area.select();
 +    return document.execCommand("paste") ? area.value : "refused";
 +}
++// An offscreen document is not a privileged page, so it writes only with clipboardWrite.
++function copyOffscreen() {
++    chrome.runtime.onMessage.addListener((message) => document.title = message);
++    chrome.offscreen.createDocument({
++        url: "offscreen.html",
++        reasons: ["CLIPBOARD"],
++        justification: "test"
++    }).catch((error) => document.title = "failed: " + error.message);
++}
 diff --git a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
-index 03dd05bebb..0f70809f0b 100644
+index 03dd05bebb..8d068448cf 100644
 --- a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
 +++ b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
 @@ -3,6 +3,7 @@
@@ -194,7 +237,7 @@ index 03dd05bebb..0f70809f0b 100644
      void enableAfterStoragePathChange();
      void tabsWindowsAndScripting();
      void nativeMessaging();
-@@ -1432,6 +1434,33 @@ void tst_QWebEngineExtension::anOffscreenDocumentCanBeCreated()
+@@ -1432,6 +1434,37 @@ void tst_QWebEngineExtension::anOffscreenDocumentCanBeCreated()
      QTRY_COMPARE(m_page->title(), "offscreen ready"_L1);
  }
  
@@ -221,6 +264,10 @@ index 03dd05bebb..0f70809f0b 100644
 +    QTRY_COMPARE(loadSpy.size(), 1);
 +
 +    QCOMPARE(evaluateJavaScriptSync(&page, "paste()"), "from the reader"_L1);
++    evaluateJavaScriptSync(&page, "copyOffscreen()");
++    QTRY_COMPARE(page.title(), "copied true"_L1);
++    QTRY_COMPARE(QGuiApplication::clipboard()->text(), "from the offscreen document"_L1);
++    // Any page of an extension's own but its worker writes, with or without the permission.
 +    QCOMPARE(evaluateJavaScriptSync(&page, "copy('from the extension')").toBool(), true);
 +    QTRY_COMPARE(QGuiApplication::clipboard()->text(), "from the extension"_L1);
 +}
