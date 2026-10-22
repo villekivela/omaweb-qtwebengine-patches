@@ -9,7 +9,7 @@ this file is for.
 
 ## What changed
 
-Twenty-nine patches, applied in order to the released source. Fourteen add the part of Chromium's
+Thirty-two patches, applied in order to the released source. Fourteen add the part of Chromium's
 extension runtime that QtWebEngine compiles out: renderer bindings, the `tabs`, `windows`,
 `permissions`, `scripting`, `notifications` and `webNavigation` namespaces behind an embedder
 delegate, native messaging, and web accessible resources. Five of those are bug fixes in Qt's own
@@ -39,9 +39,14 @@ SVG icon is tried before its raster ones and taken once it is drawn, so an icon 
 colour scheme is shown rather than a raster one declared beside it. The twenty-eighth is a bug fix
 for a build without BlueZ, as this one is: Chromium is told there is no Bluetooth LE, so a page that
 asks what its passkeys can reach hears back rather than waiting on a Bluetooth adapter that never
-comes. The last removes Chromium's disguise for a missing push service in a window that keeps
-nothing: a page that subscribes there is refused at once, as in any other window, rather than after
-a question to the application.
+comes. The twenty-ninth removes Chromium's disguise for a missing push service in a window that
+keeps nothing: a page that subscribes there is refused at once, as in any other window, rather than
+after a question to the application. The thirtieth grants a page's clipboard write of text or a
+known image format during a click or a key press without asking the application, as Chrome does.
+The thirty-first adds one more piece of the extension runtime: an extension that declares
+`clipboardRead` or `clipboardWrite` reads or writes the clipboard without a gesture or a question.
+The last is a bug fix in Qt's own code: an offscreen document that selects text no longer crashes
+the engine.
 
 On x86_64 the engine is built with clang and LLD, with ThinLTO and Chrome's own PGO profile for its
 Chromium, where Qt's build would use GCC. On aarch64 it is built with GCC, as Qt's is.
