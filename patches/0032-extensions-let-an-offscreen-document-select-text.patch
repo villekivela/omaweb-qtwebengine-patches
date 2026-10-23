@@ -1,4 +1,4 @@
-From 8a446917cad836630fc3829957a3296db72dc03d Mon Sep 17 00:00:00 2001
+From 4fb69b4ae80cdc1421de2b60f048a9ad4c5978d5 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivel=C3=A4?=
  <5814559+villekivela@users.noreply.github.com>
 Date: Thu, 22 Oct 2026 09:59:44 +0000
@@ -155,7 +155,7 @@ index 0000000000..9241881ff1
 +    justification: "test"
 +}).catch((error) => document.title = "failed: " + error.message);
 diff --git a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
-index 8d068448cf..8299d5e730 100644
+index 9c9bfe2c59..0869039af4 100644
 --- a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
 +++ b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
 @@ -75,6 +75,7 @@ private Q_SLOTS:

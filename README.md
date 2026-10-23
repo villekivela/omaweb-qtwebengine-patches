@@ -476,7 +476,8 @@ Patches 0031 and 0032 have cases in `tst_qwebengineextension`, which the gate ru
 `anExtensionUsesTheClipboardItsPermissionsAllow` checks that a web page can neither copy nor paste
 with `execCommand` and no gesture, and that an extension that declares both permissions pastes from
 its page and copies from its offscreen document. The offscreen document is not a privileged page, so
-its copy is the one that needs `clipboardWrite`. `anOffscreenDocumentCanSelectText` selects text in
+its copy is the one that needs `clipboardWrite`. A second extension that declares neither permission
+copies from its own page and is refused a paste. `anOffscreenDocumentCanSelectText` selects text in
 an offscreen document and removes the text area; a stock engine dies with SIGSEGV in
 `RenderWidgetHostViewQt::OnUpdateTextInputStateCalled`.
 
