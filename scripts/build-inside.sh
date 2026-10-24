@@ -36,13 +36,18 @@ fi
 # One transaction. The upgrade can bring a newer pacman, and pacman 7.1's
 # download sandbox fails in a Docker container on macOS, so a second call
 # would stop the build there.
+#
+# gnu-free-fonts, because neither image ships a font and the list above brings
+# only fontconfig: with no font, Blink stops the renderer of every test page
+# that shapes text (check-fonts.sh, omaweb#766). It is the font Omaweb's CI
+# names.
 # shellcheck disable=SC2086 # the toolchain's packages are separate words
 pacman "$upgrade" --noconfirm --needed \
     base-devel git cmake ninja python python-html5lib nodejs npm gperf \
     qt6-base qt6-declarative qt6-tools qt6-websockets qt6-webchannel \
     qt6-positioning qt6-svg libxkbcommon libxkbcommon-x11 libxcomposite \
     libxcursor libxrandr libxtst libxdamage nss libdrm mesa pipewire \
-    libxslt libvpx re2 snappy minizip jsoncpp ffmpeg opus \
+    libxslt libvpx re2 snappy minizip jsoncpp ffmpeg opus gnu-free-fonts \
     $toolchain_packages > /dev/null
 
 # Up to 6.11, QtWebEngine builds against the Qt it belongs to or a newer one. An
@@ -106,10 +111,10 @@ sh /root/series/scripts/verify.sh "$tree" | tee /root/out/verify.txt
 # a gate that names a number refuses the day the suite grows, which is how a green run was
 # refused once already. The gate runs more than one test program, and each reports its own
 # totals, so every one of them has to read none failed and every one has to be there: the
-# write-barrier check, the extension tests, the DNS aliases, the certificate chain, and the
-# favicon for a page and for the Quick view. A program that dies before its totals leaves one
-# line fewer, and the floor of 3 let that through.
-if [ "$(grep -cE "^Totals: " /root/out/verify.txt)" -lt 6 ] \
+# write-barrier check, the fonts, the extension tests, the DNS aliases, the certificate chain,
+# the favicon for a page and for the Quick view, the page's passkeys and the clipboard. A program
+# that dies before its totals leaves one line fewer, and the floor of 3 let that through.
+if [ "$(grep -cE "^Totals: " /root/out/verify.txt)" -lt 9 ] \
     || grep -qE "^Totals: [0-9]+ passed, [1-9]" /root/out/verify.txt; then
     echo "the gate did not pass, so nothing is packaged"
     exit 2
