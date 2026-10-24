@@ -194,6 +194,29 @@ else
     echo "  the test did not finish cleanly, exit $?"
 fi
 
+# Patch 0030 grants a sanitized clipboard write during a gesture, so its cases live in Qt's
+# permission test. The stock run reads the first result line of each case, so
+# clipboardReadWritePermissionInitialState lists first the row without either setting, the one a
+# stock engine fails. clipboardReadWritePermission's clipboard-write query changes with it too.
+# Patches 0031 and 0032 are about an extension's documents, so their cases are in the extension
+# test above.
+permission="$tree/build/tests/auto/widgets/qwebenginepermission/tst_qwebenginepermission"
+permission_cases="clipboardReadWritePermissionInitialState clickedWriteIsNotAsked"
+[ -x "$permission" ] || "$tree/build.sh" tst_qwebenginepermission
+
+echo "=== patched engine, the clipboard a page writes during a gesture"
+# shellcheck disable=SC2086 # one argument per case
+if env "$path_var=$tree/build/lib" \
+    ${helper:+QTWEBENGINEPROCESS_PATH="$helper"} \
+    ${resources:+QTWEBENGINE_RESOURCES_PATH="$resources"} \
+    ${locales:+QTWEBENGINE_LOCALES_PATH="$locales"} \
+    "$permission" $permission_cases clipboardReadWritePermission -nocrashhandler -o -,txt 2>&1
+then
+    :
+else
+    echo "  the test did not finish cleanly, exit $?"
+fi
+
 echo "=== stock engine, where each of these must fail or crash"
 if [ ! -e "$stock/qt6/QtWebEngineProcess" ] && [ ! -e "$stock/QtWebEngineProcess" ] \
     && [ ! -d "$stock/QtWebEngineCore.framework" ]
@@ -209,11 +232,13 @@ stock_favicon_cases="redrawOnColorSchemeChange redrawOnNextVisitAfterColorScheme
 redrawAfterAPageStartsUnderAnotherScheme svgRanksAboveARasterBesideIt \
 svgRanksAboveARasterDeclaredAfterIt"
 for case in serviceWorkerLocalization enableAfterStoragePathChange tabsWindowsAndScripting \
-    nativeMessaging $stock_favicon_cases $page_cases
+    nativeMessaging anExtensionUsesTheClipboardItsPermissionsAllow \
+    anOffscreenDocumentCanSelectText $stock_favicon_cases $page_cases $permission_cases
 do
     program="$test"
     case " $favicon_cases " in *" $case "*) program="$favicon" ;; esac
     case " $page_cases " in *" $case "*) program="$page" ;; esac
+    case " $permission_cases " in *" $case "*) program="$permission" ;; esac
     output=$(env "$path_var=$stock" "$program" "$case" -nocrashhandler -o -,txt 2>&1) \
         && status=0 || status=$?
     verdict=$(echo "$output" | grep -E "^(PASS|FAIL).*$case" | head -1 | cut -d: -f1 | tr -d ' ')

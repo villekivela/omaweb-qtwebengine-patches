@@ -1,21 +1,22 @@
 # QtWebEngine extension patches
 
-Twenty-nine patches to QtWebEngine. Seventeen let it host a password manager's Chromium extension,
+Thirty-two patches to QtWebEngine. Eighteen let it host a password manager's Chromium extension,
 two add API that Omaweb's content blocking and certificate view ask for, one restores a trace macro
-that slowed every page, one turns V8's write barriers back on, one keeps an offscreen document from
+that slowed every page, one turns V8's write barriers back on, two keep an offscreen document from
 crashing the engine, one builds the tests against Qt 6.12, one keeps the content scripts any
 extension registers across a restart, one keeps a profile from crashing as it is deleted with an
 extension's message still waiting, one draws a favicon again when the colour scheme changes, one
 shows a page's SVG icon rather than a raster one beside it, one lets a page hear what its
-passkeys can reach in a build without Bluetooth, and one answers a push subscription the same in
-a window that keeps nothing.
+passkeys can reach in a build without Bluetooth, one answers a push subscription the same in
+a window that keeps nothing, and one lets a page write to the clipboard during a click without a
+question.
 Base is the released `qtwebengine-everywhere-src-6.11.2` tarball.
 
 Built for [omaweb#344](https://github.com/villekivela/omaweb/issues/344), which asks whether Omaweb
 can host Bitwarden and 1Password. The findings live in `docs/research/password-manager-extensions.md`
 in that repository.
 
-Ten of the twenty-nine are ordinary bug fixes headed for Gerrit, and 0018 and 0020 are Qt's own
+Eleven of the thirty-two are ordinary bug fixes headed for Gerrit, and 0018 and 0020 are Qt's own
 changes. The rest wait on one question to Qt, in `upstream/QTBUG-draft.md`. If Qt takes the work,
 this repository is deleted rather than maintained.
 
@@ -296,6 +297,35 @@ the console message are gone. `Notification.requestPermission()` does not pass t
 unchanged. See [omaweb#421](https://github.com/villekivela/omaweb/issues/421). _A behaviour change
 that drops Chromium's incognito disguise, which only means something where a push service exists._
 
+**0030, grant a sanitized clipboard write during a gesture.** Blink asks for
+`CLIPBOARD_SANITIZED_WRITE` only when a page writes text or a known image format during a click or a
+key press, and Chrome grants it by default. Qt granted it only with `JavascriptCanAccessClipboard`
+on, which also lets `document.execCommand("copy")` write with no gesture at all, and otherwise
+reported it as `ClipboardReadWrite`, the same type as a read, so an application asked about every
+copy button. `getStatusFromSettings` now grants it whatever the settings say, for the request and
+for `navigator.permissions.query`. A read, and a write without a gesture or in a format Chrome
+cannot sanitize, is still `CLIPBOARD_READ_WRITE` and still asks. See
+[omaweb#745](https://github.com/villekivela/omaweb/issues/745). _A behaviour change to Chrome's
+answer._
+
+**0031, answer an extension's clipboardRead and clipboardWrite.** Blink asks the frame's content
+settings client before the asynchronous clipboard requests a permission and before
+`document.execCommand` reads or writes, and Qt's `ContentSettingsObserverQt` answered no. It now
+answers from the extension context of the script running, as Chrome's
+`ChromeContentSettingsAgentDelegate` does: `clipboardRead` reads, and `clipboardWrite` or a
+privileged extension page other than a service worker writes. A password manager's offscreen
+document copies with no gesture and no view to ask from, so the answer has to come from the
+renderer. See [omaweb#745](https://github.com/villekivela/omaweb/issues/745). _Part of the extension
+runtime the open question below is about. Propose it with 0004._
+
+**0032, let an offscreen document select text.** A password manager copies from its offscreen
+document by selecting the password in a text area. The document's view has no delegate, as 0019
+found, and the text input state, selection and focused node changes the selection reports each
+reached for it, so the first such copy took the browser down. Each now returns first when there is
+no delegate. Stock QtWebEngine 6.11.2 crashes the same way. See
+[omaweb#745](https://github.com/villekivela/omaweb/issues/745). _A bug fix with a test. Submit as
+is._
+
 ## The open question
 
 `TabsDelegateQt` is internal, and `ExtensionsBrowserClientQt` fills it by treating every page of the
@@ -434,6 +464,22 @@ without the patch asks once, and the gate's stock run expects that case to fail.
 `notificationRequestStillReachesTheApplicationOffTheRecord` checks that
 `Notification.requestPermission()` still reaches the application off the record; it passes on both
 engines, as the control for the first.
+
+Patch 0030's cases are in `tst_qwebenginepermission`. `clickedWriteIsNotAsked` writes text from a
+script, which is asked about and denied, and then from a click, which writes without a request. The
+clipboard-write rows of `clipboardReadWritePermissionInitialState` and
+`clipboardReadWritePermission` expect `granted`, because that query asks about a sanitized write
+with a gesture. A stock engine reports `prompt` for the first row, which the gate's stock run
+checks.
+
+Patches 0031 and 0032 have cases in `tst_qwebengineextension`, which the gate runs whole.
+`anExtensionUsesTheClipboardItsPermissionsAllow` checks that a web page can neither copy nor paste
+with `execCommand` and no gesture, and that an extension that declares both permissions pastes from
+its page and copies from its offscreen document. The offscreen document is not a privileged page, so
+its copy is the one that needs `clipboardWrite`. A second extension that declares neither permission
+copies from its own page and is refused a paste. `anOffscreenDocumentCanSelectText` selects text in
+an offscreen document and removes the text area; a stock engine dies with SIGSEGV in
+`RenderWidgetHostViewQt::OnUpdateTextInputStateCalled`.
 
 ## Rebase record
 
