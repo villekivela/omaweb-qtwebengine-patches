@@ -1,4 +1,4 @@
-From 4bc1cf4c4a10276c1ff24a10d23a0379ae6ff618 Mon Sep 17 00:00:00 2001
+From a7b9b81216cead5f803786c8647eaa4d2ae3fd92 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivel=C3=A4?=
  <5814559+villekivela@users.noreply.github.com>
 Date: Sat, 24 Oct 2026 06:54:36 +0000
@@ -18,7 +18,8 @@ Define them as Chrome does:
 - chrome.app comes from the extension bindings system, which offers the
   "app" namespace to every web page (kWebAvailableFeatures). Copy
   Chrome's app.json schema into QtWebEngine's uncompiled schemas, give
-  it Chrome's feature in _webengine_api_features.json, and register
+  it Chrome's feature in _webengine_api_features.json, less the
+  blocklist of Google's own extensions, and register
   Chrome's AppHooksDelegate in the renderer API provider. The delegate
   answers every function in the renderer.
 - installState() asks the browser, and ExtensionFrameHost answered with
@@ -29,8 +30,8 @@ Define them as Chrome does:
   render thread starts, as ChromeContentRendererClient does.
 
 windowChromeAnswersAsChromeDoes reads the three in the main world and
-in a frame and compares them with Chromium 154's answers for a page
-that is not an installed app: the members of chrome.app, getDetails()
+in a same-origin, an about:blank and a srcdoc frame, and compares them
+with Chromium 154's answers for a page that is not an installed app: the members of chrome.app, getDetails()
 reading [native code], csi() and loadTimes() returning their fields,
 and installState() calling back with "not_installed".
 
@@ -45,8 +46,8 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  src/core/configure/BUILD.root.gn.in           |  4 +
  .../renderer/content_renderer_client_qt.cpp   |  5 ++
  .../extensions_renderer_api_provider_qt.cpp   |  6 +-
- .../qwebenginepage/tst_qwebenginepage.cpp     | 51 ++++++++++++
- 8 files changed, 166 insertions(+), 2 deletions(-)
+ .../qwebenginepage/tst_qwebenginepage.cpp     | 59 ++++++++++++++
+ 8 files changed, 174 insertions(+), 2 deletions(-)
  create mode 100644 src/3rdparty/chromium/qtwebengine/common/extensions/api/app.json
 
 diff --git a/src/3rdparty/chromium/extensions/browser/extension_frame_host.cc b/src/3rdparty/chromium/extensions/browser/extension_frame_host.cc
@@ -267,7 +268,7 @@ index d8e5298511..94284dc4eb 100644
                                                           bindings_system->messaging_service()));
      bindings->RegisterHooksDelegate("tabs", std::make_unique<TabsHooksDelegate>(
 diff --git a/tests/auto/widgets/qwebenginepage/tst_qwebenginepage.cpp b/tests/auto/widgets/qwebenginepage/tst_qwebenginepage.cpp
-index 77a3b2ddfe..93a4064d0b 100644
+index 77a3b2ddfe..e78c9801d4 100644
 --- a/tests/auto/widgets/qwebenginepage/tst_qwebenginepage.cpp
 +++ b/tests/auto/widgets/qwebenginepage/tst_qwebenginepage.cpp
 @@ -195,6 +195,7 @@ private Q_SLOTS:
@@ -278,19 +279,25 @@ index 77a3b2ddfe..93a4064d0b 100644
      void setHtmlWithJSAlert();
      void setHtmlWithModuleImport();
      void baseUrl_data();
-@@ -2534,6 +2535,56 @@ protected:
+@@ -2534,6 +2535,64 @@ protected:
      }
  };
  
 +// Chrome's renderer gives every page chrome.app, chrome.csi and chrome.loadTimes, and a page can
 +// tell a script's stand-in from them by reading a function's source. The expected answers are
-+// Chromium 154's for a page that is not an installed app.
++// Chromium 154's for a page that is not an installed app, in the main world and in a same-origin,
++// an about:blank and a srcdoc frame.
 +void tst_QWebEnginePage::windowChromeAnswersAsChromeDoes()
 +{
 +    HttpServer server;
 +    connect(&server, &HttpServer::newRequest, &server, [&](HttpReqRep *r) {
 +        r->setResponseHeader("Content-Type", "text/html");
-+        r->setResponseBody("<html><body><iframe src=\"/frame\"></iframe></body></html>");
++        if (r->requestPath() == "/frame")
++            r->setResponseBody("<html><body>frame</body></html>");
++        else
++            r->setResponseBody("<html><body><iframe src=\"/frame\"></iframe>"
++                               "<iframe src=\"about:blank\"></iframe>"
++                               "<iframe srcdoc=\"<p>srcdoc</p>\"></iframe></body></html>");
 +        r->sendResponse();
 +    });
 +    QVERIFY(server.start());
@@ -325,6 +332,8 @@ index 77a3b2ddfe..93a4064d0b 100644
 +            " | function | function () { [native code] } | number");
 +    QCOMPARE(answer(QStringLiteral("window")), chrome);
 +    QCOMPARE(answer(QStringLiteral("window.frames[0]")), chrome);
++    QCOMPARE(answer(QStringLiteral("window.frames[1]")), chrome);
++    QCOMPARE(answer(QStringLiteral("window.frames[2]")), chrome);
 +
 +    // The one answer that comes from the browser.
 +    evaluateJavaScriptSync(&page, "chrome.app.installState(s => window.installState = s)");

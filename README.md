@@ -326,18 +326,19 @@ no delegate. Stock QtWebEngine 6.11.2 crashes the same way. See
 [omaweb#745](https://github.com/villekivela/omaweb/issues/745). _A bug fix with a test. Submit as
 is._
 
-**0033, give every page chrome.app, chrome.csi and chrome.loadTimes.** Chrome's renderer defines
-the three on every page, and Google's sign-in turns away a Chrome-like browser without `chrome.app`
+**0033, give every page chrome.app, chrome.csi and chrome.loadTimes.** Chrome's renderer defines the
+three on every page, and Google's sign-in turns away a Chrome-like browser without `chrome.app`
 (`rrk=46`). A script can define a stand-in, but a page reads a function's source and finds plain
 JavaScript where Chrome's reads `[native code]`. The extension bindings system already offers the
 `app` namespace to every web page (`kWebAvailableFeatures`), so the patch copies Chrome's `app.json`
-into QtWebEngine's uncompiled schemas, gives it Chrome's feature, and registers Chrome's
-`AppHooksDelegate`, which answers every function in the renderer. `installState()` asks the browser,
-where `ExtensionFrameHost` answered with an empty string; QtWebEngine installs no hosted app, so it
-now answers `not_installed`, as Chrome does for such a page. `chrome.csi` and `chrome.loadTimes` are
-Chrome's v8 extension, registered when the render thread starts, as `ChromeContentRendererClient`
-does. See [omaweb#766](https://github.com/villekivela/omaweb/issues/766). _A behaviour change to
-Chrome's answer. Propose it with the extension runtime, since `chrome.app` needs its bindings._
+into QtWebEngine's uncompiled schemas, gives it Chrome's feature less the blocklist of Google's own
+extensions, and registers Chrome's `AppHooksDelegate`, which answers every function in the renderer.
+`installState()` asks the browser, where `ExtensionFrameHost` answered with an empty string;
+QtWebEngine installs no hosted app, so it now answers `not_installed`, as Chrome does for such a
+page. `chrome.csi` and `chrome.loadTimes` are Chrome's v8 extension, registered when the render
+thread starts, as `ChromeContentRendererClient` does. See
+[omaweb#766](https://github.com/villekivela/omaweb/issues/766). _A behaviour change to Chrome's
+answer. Propose it with the extension runtime, since `chrome.app` needs its bindings._
 
 ## The open question
 
@@ -486,12 +487,12 @@ with a gesture. A stock engine reports `prompt` for the first row, which the gat
 checks.
 
 Patch 0033's case is in `tst_qwebenginepage`. `windowChromeAnswersAsChromeDoes` reads
-`window.chrome` in a page's main world and in a same-origin frame and compares it with Chromium
-154's answer for a page that is not an installed app: the members of `chrome.app`, `isInstalled`
-false, `getDetails` reading `function getDetails() { [native code] }` and returning null,
-`runningState()` `cannot_run`, `csi()` and `loadTimes()` returning their fields from functions that
-read `[native code]`, and `installState()` calling back with `not_installed`. A stock engine gives
-an empty `window.chrome`, and the gate's stock run checks that.
+`window.chrome` in a page's main world and in a same-origin, an `about:blank` and a `srcdoc` frame,
+and compares it with Chromium 154's answer for a page that is not an installed app: the members of
+`chrome.app`, `isInstalled` false, `getDetails` reading `function getDetails() { [native code] }`
+and returning null, `runningState()` `cannot_run`, `csi()` and `loadTimes()` returning their fields
+from functions that read `[native code]`, and `installState()` calling back with `not_installed`. A
+stock engine gives an empty `window.chrome`, and the gate's stock run checks that.
 
 Patches 0031 and 0032 have cases in `tst_qwebengineextension`, which the gate runs whole.
 `anExtensionUsesTheClipboardItsPermissionsAllow` checks that a web page can neither copy nor paste
