@@ -1,4 +1,4 @@
-From a7b9b81216cead5f803786c8647eaa4d2ae3fd92 Mon Sep 17 00:00:00 2001
+From 8de2d803dc4fa6b7f896ebc817255ab234a23525 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivel=C3=A4?=
  <5814559+villekivela@users.noreply.github.com>
 Date: Sat, 24 Oct 2026 06:54:36 +0000
@@ -19,9 +19,9 @@ Define them as Chrome does:
   "app" namespace to every web page (kWebAvailableFeatures). Copy
   Chrome's app.json schema into QtWebEngine's uncompiled schemas, give
   it Chrome's feature in _webengine_api_features.json, less the
-  blocklist of Google's own extensions, and register
-  Chrome's AppHooksDelegate in the renderer API provider. The delegate
-  answers every function in the renderer.
+  blocklist of Google's own extensions, and register Chrome's
+  AppHooksDelegate in the renderer API provider. The delegate answers
+  every function in the renderer.
 - installState() asks the browser, and ExtensionFrameHost answered with
   an empty string. QtWebEngine installs no hosted app, so it now
   answers "not_installed", as Chrome does for such a page.
@@ -29,11 +29,12 @@ Define them as Chrome does:
   (chrome/renderer/loadtimes_extension_bindings.cc), registered when the
   render thread starts, as ChromeContentRendererClient does.
 
-windowChromeAnswersAsChromeDoes reads the three in the main world and
-in a same-origin, an about:blank and a srcdoc frame, and compares them
-with Chromium 154's answers for a page that is not an installed app: the members of chrome.app, getDetails()
-reading [native code], csi() and loadTimes() returning their fields,
-and installState() calling back with "not_installed".
+windowChromeAnswersAsChromeDoes reads the three in the main world and in
+a same-origin, an about:blank and a srcdoc frame, and compares them with
+Chromium 154's answers for a page that is not an installed app: the
+members of chrome.app, getDetails() reading [native code], csi() and
+loadTimes() returning their fields, and installState() calling back with
+"not_installed".
 
 See villekivela/omaweb#766.
 
