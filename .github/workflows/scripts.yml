@@ -14,6 +14,9 @@ name: Scripts
 # The write-barrier check reads a build tree, which takes hours to make, so its
 # test hands it stand-in trees holding the setting each way and none at all.
 #
+# The font check counts what fc-list answers, which on a runner is whatever the
+# runner has, so its test stands in an fc-list with no font, one, and none.
+#
 # The toolchain an architecture builds with picks the work space and what the
 # rented machine installs, and the profile fetch is held to Google's MD5, so
 # both are tested here: the fetch against a stand-in bucket.

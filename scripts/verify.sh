@@ -68,8 +68,7 @@ export QTWEBENGINE_CHROMIUM_FLAGS
 # Read from the build rather than run, and before the tests, so its verdict is there even when a
 # test never reaches one. Its Totals line goes to the gate with theirs.
 sh "$(dirname "$0")/check-write-barriers.sh" "$tree" || true
-# The fonts too, for the same reason: with none installed, every case whose page shapes text loses
-# its renderer, and the gate should name that before it lists the cases it took down.
+# The fonts too, so a machine with none says so before the cases it takes down.
 sh "$(dirname "$0")/check-fonts.sh" || true
 
 [ -x "$test" ] || "$tree/build.sh" tst_qwebengineextension

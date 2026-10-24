@@ -13,11 +13,12 @@ trap 'rm -rf "$work"' EXIT
 
 failed=0
 
-# A directory holding an fc-list that prints the given lines, or no fc-list when given "missing".
+# A directory holding an fc-list that prints the given lines and exits with the given status (0
+# when none is given), or no fc-list when given "missing".
 stand_in() {
     mkdir -p "$work/$1"
     [ "$2" = missing ] && return
-    printf '#!/bin/sh\nprintf "%%s" "%s"\n' "$2" > "$work/$1/fc-list"
+    printf '#!/bin/sh\nprintf "%%s" "%s"\nexit %s\n' "$2" "${3:-0}" > "$work/$1/fc-list"
     chmod +x "$work/$1/fc-list"
 }
 
@@ -43,8 +44,6 @@ check() {
     fi
 }
 
-# Neither container image the engine builds in ships a font. Blink then stops the renderer the
-# first time a page shapes text, and the gate reported it as three clipboard failures.
 stand_in none ""
 check none 1 "0 passed, 1 failed" "no font"
 
@@ -52,8 +51,11 @@ stand_in one "/usr/share/fonts/gnu-free/FreeSans.otf: FreeSans:style=Regular
 "
 check one 0 "1 passed, 0 failed" "font faces installed: 1"
 
-# A tree built on macOS has no fontconfig, and the system draws its text. Nothing is counted there,
-# and the line says so rather than passing.
+# An fc-list that fails has counted nothing, and that is a verdict too.
+stand_in fails "" 1
+check fails 1 "0 passed, 1 failed" "did not answer"
+
+# Without fc-list nothing is counted, and the line says so rather than passing.
 stand_in missing missing
 check missing 0 none "not counted"
 

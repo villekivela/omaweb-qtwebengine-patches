@@ -8,9 +8,10 @@
 # failing, with the renderer gone as "ProcessGone: 3 (5)", and the patches were not the cause. So
 # the fonts are counted before the tests run, and the gate names this first.
 #
-# A tree built on macOS has no fontconfig, and the system draws its text, so nothing is counted and
-# the line says so. The verdict is a Qt Test "Totals:" line, so the gate that reads the tests'
-# totals reads this too. Shell builtins only besides fc-list, so a test can stand one in.
+# A machine without fc-list, such as macOS without Homebrew's fontconfig, draws text through the
+# system, so nothing is counted there and the line says so. The verdict is a Qt Test "Totals:"
+# line, so the gate that reads the tests' totals reads this too. Shell builtins only besides
+# fc-list, because the test puts nothing on PATH but its stand-in.
 set -eu
 
 echo "=== fonts, which the test pages draw their text in"
@@ -19,12 +20,18 @@ if ! command -v fc-list > /dev/null 2>&1; then
     exit 0
 fi
 
-fonts="$(fc-list)"
+if ! fonts="$(fc-list)"; then
+    echo "FAIL!  : fc-list did not answer, so the fonts could not be counted"
+    echo "Totals: 0 passed, 1 failed"
+    exit 1
+fi
+# One face a line. Unglobbed, because a font's path or style can hold a bracket.
 count=0
+set -f
 IFS='
 '
-for font in $fonts; do
-    [ -n "$font" ] && count=$((count + 1))
+for _ in $fonts; do
+    count=$((count + 1))
 done
 
 if [ "$count" -eq 0 ]; then
