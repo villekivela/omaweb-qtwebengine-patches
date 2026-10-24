@@ -169,10 +169,12 @@ else
     echo "  the test did not finish cleanly, exit $?"
 fi
 
-# Two patches change what a page hears: what its passkeys can reach (0028) and how a push
-# subscription is answered (0029). Their cases live in Qt's page test, and only they run.
+# Three patches change what a page hears: what its passkeys can reach (0028), how a push
+# subscription is answered (0029) and what window.chrome holds (0033). Their cases live in Qt's
+# page test, and only they run.
 page="$tree/build/tests/auto/widgets/qwebenginepage/tst_qwebenginepage"
-page_cases="clientCapabilitiesAnswerWithoutBluetooth pushSubscribeAnswersAlikeOffTheRecord"
+page_cases="clientCapabilitiesAnswerWithoutBluetooth pushSubscribeAnswersAlikeOffTheRecord \
+windowChromeAnswersAsChromeDoes"
 # The stock run below reads the first result line of each case, so 0029's case lists its
 # off-the-record row first, the one a stock engine fails.
 # Patch 0029 has a control beside its case: a notifications request still reaches the
