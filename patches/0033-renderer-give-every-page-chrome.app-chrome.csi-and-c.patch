@@ -1,0 +1,350 @@
+From 8de2d803dc4fa6b7f896ebc817255ab234a23525 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Ville=20Kivel=C3=A4?=
+ <5814559+villekivela@users.noreply.github.com>
+Date: Sat, 24 Oct 2026 06:54:36 +0000
+Subject: [PATCH] renderer: give every page chrome.app, chrome.csi and
+ chrome.loadTimes
+
+Chrome's renderer gives every page window.chrome.app, chrome.csi and
+chrome.loadTimes, and QtWebEngine gave none of them. Google's sign-in
+turns away a Chrome-like browser without chrome.app ("This browser or
+app may not be secure", rrk=46). An application can define a stand-in
+with a script, but a page tells it from Chrome's by reading a
+function's source, which is plain JavaScript where Chrome's reads
+[native code].
+
+Define them as Chrome does:
+
+- chrome.app comes from the extension bindings system, which offers the
+  "app" namespace to every web page (kWebAvailableFeatures). Copy
+  Chrome's app.json schema into QtWebEngine's uncompiled schemas, give
+  it Chrome's feature in _webengine_api_features.json, less the
+  blocklist of Google's own extensions, and register Chrome's
+  AppHooksDelegate in the renderer API provider. The delegate answers
+  every function in the renderer.
+- installState() asks the browser, and ExtensionFrameHost answered with
+  an empty string. QtWebEngine installs no hosted app, so it now
+  answers "not_installed", as Chrome does for such a page.
+- chrome.csi and chrome.loadTimes are Chrome's v8 extension
+  (chrome/renderer/loadtimes_extension_bindings.cc), registered when the
+  render thread starts, as ChromeContentRendererClient does.
+
+windowChromeAnswersAsChromeDoes reads the three in the main world and in
+a same-origin, an about:blank and a srcdoc frame, and compares them with
+Chromium 154's answers for a page that is not an installed app: the
+members of chrome.app, getDetails() reading [native code], csi() and
+loadTimes() returning their fields, and installState() calling back with
+"not_installed".
+
+See villekivela/omaweb#766.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../browser/extension_frame_host.cc           |  4 +-
+ .../common/api/_webengine_api_features.json   | 16 ++++
+ .../common/extensions/api/app.json            | 81 +++++++++++++++++++
+ .../common/extensions/api/schema.gni          |  1 +
+ src/core/configure/BUILD.root.gn.in           |  4 +
+ .../renderer/content_renderer_client_qt.cpp   |  5 ++
+ .../extensions_renderer_api_provider_qt.cpp   |  6 +-
+ .../qwebenginepage/tst_qwebenginepage.cpp     | 59 ++++++++++++++
+ 8 files changed, 174 insertions(+), 2 deletions(-)
+ create mode 100644 src/3rdparty/chromium/qtwebengine/common/extensions/api/app.json
+
+diff --git a/src/3rdparty/chromium/extensions/browser/extension_frame_host.cc b/src/3rdparty/chromium/extensions/browser/extension_frame_host.cc
+index 137eaa5f9a..f75d76485f 100644
+--- a/src/3rdparty/chromium/extensions/browser/extension_frame_host.cc
++++ b/src/3rdparty/chromium/extensions/browser/extension_frame_host.cc
+@@ -86,7 +86,9 @@ void ExtensionFrameHost::RequestScriptInjectionPermission(
+ void ExtensionFrameHost::GetAppInstallState(
+     const GURL& requestor_url,
+     GetAppInstallStateCallback callback) {
+-  std::move(callback).Run(std::string());
++  // QtWebEngine installs no hosted app, so every page answers as Chrome answers for a page that
++  // is not one.
++  std::move(callback).Run("not_installed");
+ }
+ 
+ void ExtensionFrameHost::Request(mojom::RequestParamsPtr params,
+diff --git a/src/3rdparty/chromium/extensions/common/api/_webengine_api_features.json b/src/3rdparty/chromium/extensions/common/api/_webengine_api_features.json
+index fa0912ac5b..d649ac17ce 100644
+--- a/src/3rdparty/chromium/extensions/common/api/_webengine_api_features.json
++++ b/src/3rdparty/chromium/extensions/common/api/_webengine_api_features.json
+@@ -40,6 +40,22 @@
+   },
+   // The chrome-layer namespaces below are copied from
+   // chrome/common/extensions/api/_api_features.json. The embedder supplies the tab model.
++  // Any web page reads chrome.app, as in Chrome. Google's sign-in turns away a Chrome-like
++  // browser without it.
++  "app": {
++    "channel": "stable",
++    "extension_types": ["hosted_app", "extension", "legacy_packaged_app"],
++    "contexts": [
++      "privileged_extension",
++      "unprivileged_extension",
++      "content_script",
++      "web_page",
++      "privileged_web_page"
++    ],
++    "disallow_for_service_workers": true,
++    "max_manifest_version": 2,
++    "matches": ["<all_urls>"]
++  },
+   "action": {
+     "dependencies": ["manifest:action"],
+     "contexts": ["privileged_extension"]
+diff --git a/src/3rdparty/chromium/qtwebengine/common/extensions/api/app.json b/src/3rdparty/chromium/qtwebengine/common/extensions/api/app.json
+new file mode 100644
+index 0000000000..72e6b27ed2
+--- /dev/null
++++ b/src/3rdparty/chromium/qtwebengine/common/extensions/api/app.json
+@@ -0,0 +1,81 @@
++// Copied from //chrome/common/extensions/api/app.json for QtWebEngine. The renderer's
++// AppHooksDelegate answers every function, so nothing reaches the browser.
++[
++  {
++    "namespace": "app",
++    "description": "none",
++    "types": [
++      {
++        "id": "Details",
++        "description": "TODO (it's a manifest)",
++        "type": "object",
++        "properties": {},
++        "additionalProperties": { "type": "any" }
++      },
++      {
++        "id": "DOMWindow",
++        "type": "object",
++        "properties": {},
++        "additionalProperties": { "type": "any" }
++      },
++      {
++        "id": "InstallState",
++        "type": "string",
++        "enum": ["not_installed", "installed", "disabled"]
++      },
++      {
++        "id": "RunningState",
++        "type": "string",
++        "enum": ["running", "cannot_run", "ready_to_run"]
++      }
++    ],
++    "functions": [
++      {
++        "name": "getIsInstalled",
++        "description": "TODO",
++        "type": "function",
++        "parameters": [],
++        "returns": {
++          "name": "isInstalled",
++          "description": "TODO",
++          "type": "boolean"
++        }
++      },
++      {
++        "name": "installState",
++        "description": "TODO",
++        "type": "function",
++        "parameters": [],
++        "returns_async": {
++          "name": "callback",
++          "parameters": [
++            {
++              "$ref": "InstallState",
++              "name": "state"
++            }
++          ]
++        }
++      },
++      {
++        "name": "runningState",
++        "description": "TODO",
++        "type": "function",
++        "parameters": [],
++        "returns": {
++          "$ref": "RunningState"
++        }
++      },
++      {
++        "name": "getDetails",
++        "description": "TODO",
++        "type": "function",
++        "parameters": [],
++        "returns": {
++          "$ref": "Details",
++          "optional": true,
++          "description": "TODO"
++        }
++      }
++    ]
++  }
++]
+diff --git a/src/3rdparty/chromium/qtwebengine/common/extensions/api/schema.gni b/src/3rdparty/chromium/qtwebengine/common/extensions/api/schema.gni
+index 0597147afb..b0f45830e4 100644
+--- a/src/3rdparty/chromium/qtwebengine/common/extensions/api/schema.gni
++++ b/src/3rdparty/chromium/qtwebengine/common/extensions/api/schema.gni
+@@ -16,6 +16,7 @@ webengine_extensions_api_schema_files_ = [
+ # Schemas the bindings need but that generate no C++ types, as in Chrome's uncompiled_sources_.
+ webengine_extensions_api_uncompiled_files_ = [
+   "action.json",
++  "app.json",
+   "extension.json",
+ ]
+ 
+diff --git a/src/core/configure/BUILD.root.gn.in b/src/core/configure/BUILD.root.gn.in
+index 7946086c6b..b4e3d82e44 100644
+--- a/src/core/configure/BUILD.root.gn.in
++++ b/src/core/configure/BUILD.root.gn.in
+@@ -479,10 +479,14 @@ source_set("qtwebengine_sources") {
+       "//chrome/common/extensions/permissions/chrome_permission_message_provider.h",
+       "//chrome/common/extensions/permissions/chrome_permission_message_rules.cc",
+       "//chrome/common/extensions/permissions/chrome_permission_message_rules.h",
++      "//chrome/renderer/extensions/api/app_hooks_delegate.cc",
++      "//chrome/renderer/extensions/api/app_hooks_delegate.h",
+       "//chrome/renderer/extensions/api/extension_hooks_delegate.cc",
+       "//chrome/renderer/extensions/api/extension_hooks_delegate.h",
+       "//chrome/renderer/extensions/api/tabs_hooks_delegate.cc",
+       "//chrome/renderer/extensions/api/tabs_hooks_delegate.h",
++      "//chrome/renderer/loadtimes_extension_bindings.cc",
++      "//chrome/renderer/loadtimes_extension_bindings.h",
+       "//extensions/browser/zipfile_installer.cc",
+       "//extensions/browser/zipfile_installer.h",
+       "//components/update_client/update_query_params.cc",
+diff --git a/src/core/renderer/content_renderer_client_qt.cpp b/src/core/renderer/content_renderer_client_qt.cpp
+index 9f90d77d79..87e548f6ad 100644
+--- a/src/core/renderer/content_renderer_client_qt.cpp
++++ b/src/core/renderer/content_renderer_client_qt.cpp
+@@ -60,12 +60,14 @@
+ #include "extensions/extensions_renderer_api_provider_qt.h"
+ #include "extensions/extensions_renderer_client_qt.h"
+ 
++#include "chrome/renderer/loadtimes_extension_bindings.h"
+ #include "extensions/common/constants.h"
+ #include "extensions/renderer/api/core_extensions_renderer_api_provider.h"
+ #include "extensions/renderer/dispatcher.h"
+ #include "extensions/renderer/guest_view/mime_handler_view/mime_handler_view_container_manager.h"
+ #include "mojo/public/cpp/bindings/associated_remote.h"
+ #include "services/service_manager/public/cpp/binder_registry.h"
++#include "third_party/blink/public/web/web_script_controller.h"
+ #include "third_party/blink/public/web/web_security_policy.h"
+ #endif // ENABLE_EXTENSIONS
+ 
+@@ -136,6 +138,9 @@ void ContentRendererClientQt::RenderThreadStarted()
+             std::make_unique<extensions::ExtensionsRendererAPIProviderQt>());
+ 
+     extensions_renderer_client->RenderThreadStarted();
++
++    // chrome.loadTimes() and chrome.csi(), which Chrome's renderer gives every page.
++    blink::WebScriptController::RegisterExtension(extensions_v8::LoadTimesExtension::Get());
+ #endif
+ }
+ 
+diff --git a/src/core/renderer/extensions/extensions_renderer_api_provider_qt.cpp b/src/core/renderer/extensions/extensions_renderer_api_provider_qt.cpp
+index d8e5298511..94284dc4eb 100644
+--- a/src/core/renderer/extensions/extensions_renderer_api_provider_qt.cpp
++++ b/src/core/renderer/extensions/extensions_renderer_api_provider_qt.cpp
+@@ -5,6 +5,7 @@
+ #include "extensions_renderer_api_provider_qt.h"
+ 
+ #include "chrome/grit/renderer_resources.h"
++#include "chrome/renderer/extensions/api/app_hooks_delegate.h"
+ #include "chrome/renderer/extensions/api/extension_hooks_delegate.h"
+ #include "chrome/renderer/extensions/api/tabs_hooks_delegate.h"
+ #include "extensions/renderer/bindings/api_bindings_system.h"
+@@ -21,11 +22,14 @@ void ExtensionsRendererAPIProviderQt::PopulateSourceMap(ResourceBundleSourceMap
+ 
+ // chrome.tabs.sendMessage, chrome.tabs.connect and chrome.extension.getURL are answered in the
+ // renderer by these hooks rather than by a browser-side function; without them the calls reach
+-// the browser as unknown functions.
++// the browser as unknown functions. chrome.app is answered there too, as Chrome answers it.
+ void ExtensionsRendererAPIProviderQt::AddBindingsSystemHooks(Dispatcher *dispatcher,
+                                                              NativeExtensionBindingsSystem *bindings_system) const
+ {
+     APIBindingsSystem *bindings = bindings_system->api_system();
++    bindings->RegisterHooksDelegate("app", std::make_unique<AppHooksDelegate>(
++                                                   dispatcher, bindings->request_handler(),
++                                                   bindings_system->GetIPCMessageSender()));
+     bindings->RegisterHooksDelegate("extension", std::make_unique<ExtensionHooksDelegate>(
+                                                          bindings_system->messaging_service()));
+     bindings->RegisterHooksDelegate("tabs", std::make_unique<TabsHooksDelegate>(
+diff --git a/tests/auto/widgets/qwebenginepage/tst_qwebenginepage.cpp b/tests/auto/widgets/qwebenginepage/tst_qwebenginepage.cpp
+index 77a3b2ddfe..e78c9801d4 100644
+--- a/tests/auto/widgets/qwebenginepage/tst_qwebenginepage.cpp
++++ b/tests/auto/widgets/qwebenginepage/tst_qwebenginepage.cpp
+@@ -195,6 +195,7 @@ private Q_SLOTS:
+     void pushSubscribeAnswersAlikeOffTheRecord_data();
+     void pushSubscribeAnswersAlikeOffTheRecord();
+     void notificationRequestStillReachesTheApplicationOffTheRecord();
++    void windowChromeAnswersAsChromeDoes();
+     void setHtmlWithJSAlert();
+     void setHtmlWithModuleImport();
+     void baseUrl_data();
+@@ -2534,6 +2535,64 @@ protected:
+     }
+ };
+ 
++// Chrome's renderer gives every page chrome.app, chrome.csi and chrome.loadTimes, and a page can
++// tell a script's stand-in from them by reading a function's source. The expected answers are
++// Chromium 154's for a page that is not an installed app, in the main world and in a same-origin,
++// an about:blank and a srcdoc frame.
++void tst_QWebEnginePage::windowChromeAnswersAsChromeDoes()
++{
++    HttpServer server;
++    connect(&server, &HttpServer::newRequest, &server, [&](HttpReqRep *r) {
++        r->setResponseHeader("Content-Type", "text/html");
++        if (r->requestPath() == "/frame")
++            r->setResponseBody("<html><body>frame</body></html>");
++        else
++            r->setResponseBody("<html><body><iframe src=\"/frame\"></iframe>"
++                               "<iframe src=\"about:blank\"></iframe>"
++                               "<iframe srcdoc=\"<p>srcdoc</p>\"></iframe></body></html>");
++        r->sendResponse();
++    });
++    QVERIFY(server.start());
++
++    QWebEnginePage page;
++    QSignalSpy loadSpy(&page, &QWebEnginePage::loadFinished);
++    page.load(server.url("/"));
++    QTRY_COMPARE(loadSpy.size(), 1);
++
++    const auto answer = [&](const QString &window) {
++        return evaluateJavaScriptSync(&page, QStringLiteral(
++                "(() => { const c = %1.chrome; if (!c) return 'no chrome'; return ["
++                "Object.keys(c).sort().join(','), typeof c.app,"
++                "c.app && Object.getOwnPropertyNames(c.app).sort().join(','),"
++                "c.app && c.app.isInstalled, c.app && c.app.getDetails.toString(),"
++                "c.app && String(c.app.getDetails()), c.app && c.app.runningState(),"
++                "c.app && JSON.stringify(c.app.InstallState),"
++                "typeof c.csi, c.csi && c.csi.toString(),"
++                "c.csi && Object.keys(c.csi()).sort().join(','),"
++                "typeof c.loadTimes, c.loadTimes && c.loadTimes.toString(),"
++                "c.loadTimes && typeof c.loadTimes().requestTime].join(' | '); })()")
++                .arg(window)).toString();
++    };
++    const QString chrome = QStringLiteral(
++            "app,csi,loadTimes | object"
++            " | InstallState,RunningState,getDetails,getIsInstalled,installState,isInstalled,"
++            "runningState"
++            " | false | function getDetails() { [native code] } | null | cannot_run"
++            " | {\"DISABLED\":\"disabled\",\"INSTALLED\":\"installed\","
++            "\"NOT_INSTALLED\":\"not_installed\"}"
++            " | function | function () { [native code] } | onloadT,pageT,startE,tran"
++            " | function | function () { [native code] } | number");
++    QCOMPARE(answer(QStringLiteral("window")), chrome);
++    QCOMPARE(answer(QStringLiteral("window.frames[0]")), chrome);
++    QCOMPARE(answer(QStringLiteral("window.frames[1]")), chrome);
++    QCOMPARE(answer(QStringLiteral("window.frames[2]")), chrome);
++
++    // The one answer that comes from the browser.
++    evaluateJavaScriptSync(&page, "chrome.app.installState(s => window.installState = s)");
++    QTRY_COMPARE(evaluateJavaScriptSync(&page, "window.installState").toString(),
++                 QStringLiteral("not_installed"));
++}
++
+ void tst_QWebEnginePage::setHtmlWithJSAlert()
+ {
+     QString html("<html><head></head><body><script>alert('foo');</script><p>hello world</p></body></html>");
+-- 
+2.55.0
+

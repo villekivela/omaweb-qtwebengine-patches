@@ -1,6 +1,6 @@
 # QtWebEngine extension patches
 
-Thirty-two patches to QtWebEngine. Eighteen let it host a password manager's Chromium extension,
+Thirty-three patches to QtWebEngine. Eighteen let it host a password manager's Chromium extension,
 two add API that Omaweb's content blocking and certificate view ask for, one restores a trace macro
 that slowed every page, one turns V8's write barriers back on, two keep an offscreen document from
 crashing the engine, one builds the tests against Qt 6.12, one keeps the content scripts any
@@ -8,15 +8,15 @@ extension registers across a restart, one keeps a profile from crashing as it is
 extension's message still waiting, one draws a favicon again when the colour scheme changes, one
 shows a page's SVG icon rather than a raster one beside it, one lets a page hear what its
 passkeys can reach in a build without Bluetooth, one answers a push subscription the same in
-a window that keeps nothing, and one lets a page write to the clipboard during a click without a
-question.
+a window that keeps nothing, one lets a page write to the clipboard during a click without a
+question, and one gives every page Chrome's `chrome.app`, `chrome.csi` and `chrome.loadTimes`.
 Base is the released `qtwebengine-everywhere-src-6.11.2` tarball.
 
 Built for [omaweb#344](https://github.com/villekivela/omaweb/issues/344), which asks whether Omaweb
 can host Bitwarden and 1Password. The findings live in `docs/research/password-manager-extensions.md`
 in that repository.
 
-Eleven of the thirty-two are ordinary bug fixes headed for Gerrit, and 0018 and 0020 are Qt's own
+Eleven of the thirty-three are ordinary bug fixes headed for Gerrit, and 0018 and 0020 are Qt's own
 changes. The rest wait on one question to Qt, in `upstream/QTBUG-draft.md`. If Qt takes the work,
 this repository is deleted rather than maintained.
 
@@ -326,6 +326,20 @@ no delegate. Stock QtWebEngine 6.11.2 crashes the same way. See
 [omaweb#745](https://github.com/villekivela/omaweb/issues/745). _A bug fix with a test. Submit as
 is._
 
+**0033, give every page chrome.app, chrome.csi and chrome.loadTimes.** Chrome's renderer defines the
+three on every page, and Google's sign-in turns away a Chrome-like browser without `chrome.app`
+(`rrk=46`). A script can define a stand-in, but a page reads a function's source and finds plain
+JavaScript where Chrome's reads `[native code]`. The extension bindings system already offers the
+`app` namespace to every web page (`kWebAvailableFeatures`), so the patch copies Chrome's `app.json`
+into QtWebEngine's uncompiled schemas, gives it Chrome's feature less the blocklist of Google's own
+extensions, and registers Chrome's `AppHooksDelegate`, which answers every function in the renderer.
+`installState()` asks the browser, where `ExtensionFrameHost` answered with an empty string;
+QtWebEngine installs no hosted app, so it now answers `not_installed`, as Chrome does for such a
+page. `chrome.csi` and `chrome.loadTimes` are Chrome's v8 extension, registered when the render
+thread starts, as `ChromeContentRendererClient` does. See
+[omaweb#766](https://github.com/villekivela/omaweb/issues/766). _A behaviour change to Chrome's
+answer. Propose it with the extension runtime, since `chrome.app` needs its bindings._
+
 ## The open question
 
 `TabsDelegateQt` is internal, and `ExtensionsBrowserClientQt` fills it by treating every page of the
@@ -471,6 +485,14 @@ clipboard-write rows of `clipboardReadWritePermissionInitialState` and
 `clipboardReadWritePermission` expect `granted`, because that query asks about a sanitized write
 with a gesture. A stock engine reports `prompt` for the first row, which the gate's stock run
 checks.
+
+Patch 0033's case is in `tst_qwebenginepage`. `windowChromeAnswersAsChromeDoes` reads
+`window.chrome` in a page's main world and in a same-origin, an `about:blank` and a `srcdoc` frame,
+and compares it with Chromium 154's answer for a page that is not an installed app: the members of
+`chrome.app`, `isInstalled` false, `getDetails` reading `function getDetails() { [native code] }`
+and returning null, `runningState()` `cannot_run`, `csi()` and `loadTimes()` returning their fields
+from functions that read `[native code]`, and `installState()` calling back with `not_installed`. A
+stock engine gives an empty `window.chrome`, and the gate's stock run checks that.
 
 Patches 0031 and 0032 have cases in `tst_qwebengineextension`, which the gate runs whole.
 `anExtensionUsesTheClipboardItsPermissionsAllow` checks that a web page can neither copy nor paste
