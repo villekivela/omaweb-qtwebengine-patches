@@ -36,13 +36,19 @@ fi
 # One transaction. The upgrade can bring a newer pacman, and pacman 7.1's
 # download sandbox fails in a Docker container on macOS, so a second call
 # would stop the build there.
+#
+# A font, because neither image ships one and the gate's pages draw text: with
+# no font Blink stops the renderer the first time it shapes any, which failed
+# three clipboard cases on aarch64 for no fault of the patches (omaweb#766).
+# The x86_64 list brings only fontconfig, so it would fail the same way. It is
+# the font Omaweb's CI asks for by name.
 # shellcheck disable=SC2086 # the toolchain's packages are separate words
 pacman "$upgrade" --noconfirm --needed \
     base-devel git cmake ninja python python-html5lib nodejs npm gperf \
     qt6-base qt6-declarative qt6-tools qt6-websockets qt6-webchannel \
     qt6-positioning qt6-svg libxkbcommon libxkbcommon-x11 libxcomposite \
     libxcursor libxrandr libxtst libxdamage nss libdrm mesa pipewire \
-    libxslt libvpx re2 snappy minizip jsoncpp ffmpeg opus \
+    libxslt libvpx re2 snappy minizip jsoncpp ffmpeg opus gnu-free-fonts \
     $toolchain_packages > /dev/null
 
 # Up to 6.11, QtWebEngine builds against the Qt it belongs to or a newer one. An

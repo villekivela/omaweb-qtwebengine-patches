@@ -45,6 +45,13 @@ engine regressed or that a test no longer fails on a stock one. The second means
 the test has stopped proving anything, which is worth more attention than the
 first.
 
+**The gate fails on a machine with no font.** Blink stops the renderer of any
+page that shapes text with no font to fall back to, and logs only
+`ProcessGone: 3 (5)`. On the 6.11.2-16 aarch64 build that read as three
+clipboard cases failing, and the patches were not the cause. Neither container
+image ships a font, so `build-inside.sh` installs `gnu-free-fonts`, and
+`verify.sh` counts the fonts before the tests so the gate says this first.
+
 **Chromium moved underneath.** The expensive case, described below. Found as a
 build failure, and the fix is mechanical rather than clever.
 

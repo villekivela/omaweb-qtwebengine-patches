@@ -88,6 +88,18 @@ jobs:
       - name: Test the write-barrier check
         run: scripts/test-check-write-barriers.sh
 
+  fonts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Shellcheck
+        run: shellcheck scripts/check-fonts.sh scripts/test-check-fonts.sh
+
+      - name: Test the font check
+        run: scripts/test-check-fonts.sh
+
   toolchain:
     runs-on: ubuntu-latest
     timeout-minutes: 5
