@@ -1,8 +1,8 @@
-From a2b469d1485bcc747b96822a69b7630f8150ba91 Mon Sep 17 00:00:00 2001
+From 0ae582091b6f8b32904875b76dcb58352964d8b9 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivel=C3=A4?= <vkivela@hotmail.com>
 Date: Sat, 10 Oct 2026 18:30:44 +0000
-Subject: [PATCH] extensions: let a profile go while a message waits for a
- worker
+Subject: [PATCH 22/31] extensions: let a profile go while a message waits for
+ a worker
 
 A message to an extension's service worker waits in the worker's task
 queue until the worker is registered and started for it, and every
@@ -48,10 +48,10 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  4 files changed, 43 insertions(+), 2 deletions(-)
 
 diff --git a/src/core/extensions/extensions_browser_client_qt.cpp b/src/core/extensions/extensions_browser_client_qt.cpp
-index 6dda1a4882..0df306aef8 100644
+index 6aa5cec7d2..fdd963841d 100644
 --- a/src/core/extensions/extensions_browser_client_qt.cpp
 +++ b/src/core/extensions/extensions_browser_client_qt.cpp
-@@ -529,9 +529,9 @@ bool ExtensionsBrowserClientQt::AreExtensionsDisabled(const base::CommandLine &c
+@@ -534,9 +534,9 @@ bool ExtensionsBrowserClientQt::AreExtensionsDisabled(const base::CommandLine &c
      return false;
  }
  
@@ -127,10 +127,10 @@ index bc8007a94a..197ed71ea8 100644
  
      // BrowserContext implementation:
 diff --git a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
-index 1290b685fb..499f34914f 100644
+index cb2793994e..83458a04d7 100644
 --- a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
 +++ b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
-@@ -58,6 +58,7 @@ private Q_SLOTS:
+@@ -69,6 +69,7 @@ private Q_SLOTS:
      void anExtensionNotificationReachesTheProfilesPresenter();
      void anExtensionKeepsTrackOfTheNotificationsItIsShowing();
      void theReadersAnswerToANotificationReachesTheExtension();
@@ -138,7 +138,7 @@ index 1290b685fb..499f34914f 100644
      void everyFunctionTheNamespaceDeclaresCanBeCalled();
      void aPageCanLoadAWebAccessibleResource();
      void aResourceWithADynamicUrlIsReachableOnlyUnderIt();
-@@ -937,6 +938,22 @@ void tst_QWebEngineExtension::anOffscreenDocumentCanBeCreated()
+@@ -1428,6 +1429,22 @@ void tst_QWebEngineExtension::anOffscreenDocumentCanBeCreated()
      QTRY_COMPARE(m_page->title(), "offscreen ready"_L1);
  }
  
@@ -162,5 +162,5 @@ index 1290b685fb..499f34914f 100644
  {
      // Changing the storage path after construction rebuilds the profile's PrefService. The
 -- 
-2.55.0
+2.56.0
 

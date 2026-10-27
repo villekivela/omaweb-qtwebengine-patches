@@ -1,7 +1,7 @@
-From 934964590afa3abb6976062635f660adb4d2c06a Mon Sep 17 00:00:00 2001
+From f76145c05e5932e13b5af0871446e6f790dfe319 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivel=C3=A4?= <vkivela@hotmail.com>
 Date: Mon, 21 Sep 2026 18:34:17 +0300
-Subject: [PATCH 14/15] extensions: serve a web accessible resource to a page
+Subject: [PATCH 13/31] extensions: serve a web accessible resource to a page
 
 A page could not load a resource an extension declared web accessible.
 The request never reached the browser as itself: the renderer rewrote
@@ -339,5 +339,5 @@ index 3500fb0dbd..28c6a16e3f 100644
  {
      // Changing the storage path after construction rebuilds the profile's PrefService. The
 -- 
-2.54.0 (Apple Git-157)
+2.56.0
 

@@ -1,8 +1,8 @@
-From 4fb69b4ae80cdc1421de2b60f048a9ad4c5978d5 Mon Sep 17 00:00:00 2001
+From 476fcb45e01258925aba14d118433f13b21ecf20 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivel=C3=A4?=
  <5814559+villekivela@users.noreply.github.com>
 Date: Thu, 22 Oct 2026 09:59:44 +0000
-Subject: [PATCH] extensions: let an offscreen document select text
+Subject: [PATCH 30/31] extensions: let an offscreen document select text
 
 Selecting text in an offscreen document took the browser down. A
 password manager copies a password from its offscreen document by
@@ -46,10 +46,10 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  create mode 100644 tests/auto/widgets/extensions/resources/offscreen_text_ext/page.js
 
 diff --git a/src/core/render_widget_host_view_qt.cpp b/src/core/render_widget_host_view_qt.cpp
-index 1ad92f2dad..340672c5f0 100644
+index cb778207ba..07b5981471 100644
 --- a/src/core/render_widget_host_view_qt.cpp
 +++ b/src/core/render_widget_host_view_qt.cpp
-@@ -687,6 +687,11 @@ void RenderWidgetHostViewQt::OnUpdateTextInputStateCalled(content::TextInputMana
+@@ -690,6 +690,11 @@ void RenderWidgetHostViewQt::OnUpdateTextInputStateCalled(content::TextInputMana
      Q_UNUSED(updated_view);
      Q_UNUSED(did_update_state);
  
@@ -61,7 +61,7 @@ index 1ad92f2dad..340672c5f0 100644
      const ui::mojom::TextInputState *state = text_input_manager->GetTextInputState();
      if (!state) {
          // Do not reset input method state here because an editable node might be still focused and
-@@ -734,6 +739,9 @@ void RenderWidgetHostViewQt::OnSelectionBoundsChanged(content::TextInputManager
+@@ -737,6 +742,9 @@ void RenderWidgetHostViewQt::OnSelectionBoundsChanged(content::TextInputManager
  {
      Q_UNUSED(updated_view);
  
@@ -71,7 +71,7 @@ index 1ad92f2dad..340672c5f0 100644
      m_imState |= ImStateFlags::TextSelectionBoundsUpdated;
      if (m_imState == ImStateFlags::AllFlags
          || (m_imState == ImStateFlags::TextSelectionFlags
-@@ -766,6 +774,9 @@ void RenderWidgetHostViewQt::OnTextSelectionChanged(content::TextInputManager *t
+@@ -769,6 +777,9 @@ void RenderWidgetHostViewQt::OnTextSelectionChanged(content::TextInputManager *t
      }
  #endif // BUILDFLAG(IS_OZONE)
  
@@ -81,7 +81,7 @@ index 1ad92f2dad..340672c5f0 100644
      m_imState |= ImStateFlags::TextSelectionUpdated;
      if (m_imState == ImStateFlags::AllFlags
          || (m_imState == ImStateFlags::TextSelectionFlags
-@@ -1060,7 +1071,7 @@ const viz::LocalSurfaceId &RenderWidgetHostViewQt::GetLocalSurfaceId() const
+@@ -1070,7 +1081,7 @@ const viz::LocalSurfaceId &RenderWidgetHostViewQt::GetLocalSurfaceId() const
  void RenderWidgetHostViewQt::FocusedNodeChanged(bool is_editable_node, const gfx::Rect& node_bounds_in_screen)
  {
      Q_UNUSED(node_bounds_in_screen);
@@ -193,5 +193,5 @@ index 9c9bfe2c59..0869039af4 100644
  {
      // Chrome lets an extension that declares clipboardWrite write, and one that declares
 -- 
-2.55.0
+2.56.0
 

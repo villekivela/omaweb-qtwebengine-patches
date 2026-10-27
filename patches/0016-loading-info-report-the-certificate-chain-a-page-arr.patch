@@ -1,8 +1,8 @@
-From 79018497acb4e8bfa93965f5c36908077ac31b5e Mon Sep 17 00:00:00 2001
+From eace8c9518bdc2a6d903abf7665cfb927dde5644 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivela=CC=88?= <vkivela@hotmail.com>
 Date: Sat, 26 Sep 2026 12:26:44 +0300
-Subject: [PATCH] loading info: report the certificate chain a page arrived
- over
+Subject: [PATCH 16/31] loading info: report the certificate chain a page
+ arrived over
 
 A browser shows the reader the certificate of the page on show, and an
 application embedding QtWebEngine has no way to read it. A certificate
@@ -282,5 +282,5 @@ index 773421b8c5..22e3974f6a 100644
  
  private Q_SLOTS:
 -- 
-2.54.0 (Apple Git-157)
+2.56.0
 

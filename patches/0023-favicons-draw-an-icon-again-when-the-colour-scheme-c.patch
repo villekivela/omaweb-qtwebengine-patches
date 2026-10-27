@@ -1,7 +1,8 @@
-From 87d7df5a14a4a232620d4a3c82efe07e617b1c17 Mon Sep 17 00:00:00 2001
+From b87a97b0dfff5520cd6d2ddde7d8fad7c54513d9 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivel=C3=A4?= <vkivela@hotmail.com>
 Date: Sun, 11 Oct 2026 09:31:04 +0000
-Subject: [PATCH] favicons: draw an icon again when the colour scheme changes
+Subject: [PATCH 23/31] favicons: draw an icon again when the colour scheme
+ changes
 
 An SVG favicon can follow prefers-color-scheme, as chatgpt.com's does:
 black under a light scheme, white under a dark one. The engine draws it
@@ -689,5 +690,5 @@ index 4d3d99b5c2..c506630cd9 100644
  
  #include "tst_favicon.moc"
 -- 
-2.55.0
+2.56.0
 

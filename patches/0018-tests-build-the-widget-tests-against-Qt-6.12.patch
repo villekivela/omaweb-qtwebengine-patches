@@ -1,8 +1,8 @@
-From cc599c8ab940aea95ed363eacffe88ac5968cf5d Mon Sep 17 00:00:00 2001
+From 574fb889a4fd3e10fd3cc573741ad3bc7f1400d0 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivel=C3=A4?=
  <5814559+villekivela@users.noreply.github.com>
 Date: Thu, 8 Oct 2026 21:21:26 +0300
-Subject: [PATCH] tests: build the widget tests against Qt 6.12
+Subject: [PATCH 18/31] tests: build the widget tests against Qt 6.12
 
 Qt 6.12 removed QTEST_DISABLE_KEYPAD_NAVIGATION from QtTest, so
 W_QTEST_MAIN no longer compiles there, and with it every widget test
@@ -38,5 +38,5 @@ index 356d3c826c..3a3e0abbbf 100644
      QTEST_SET_MAIN_SOURCE_PATH \
      return QTest::qExec(&tc, argc, argv); \
 -- 
-2.55.0
+2.56.0
 

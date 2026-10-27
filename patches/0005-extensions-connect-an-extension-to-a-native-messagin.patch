@@ -1,7 +1,7 @@
-From 50619d6efeebd307da49f5dc712030aff7ac737f Mon Sep 17 00:00:00 2001
+From c7529e75572b0b0ba356551943dc802342b3a64a Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivela=CC=88?= <vkivela@hotmail.com>
 Date: Fri, 18 Sep 2026 19:38:52 +0300
-Subject: [PATCH 06/15] extensions: connect an extension to a native messaging
+Subject: [PATCH 05/31] extensions: connect an extension to a native messaging
  host
 
 runtime.connectNative was refused by the base messaging delegate, so an
@@ -2370,5 +2370,5 @@ index a70d1e98e0..8b1398f323 100644
  QTEST_MAIN(tst_QWebEngineExtension)
  #include "tst_qwebengineextension.moc"
 -- 
-2.54.0 (Apple Git-157)
+2.56.0
 

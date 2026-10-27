@@ -20,24 +20,24 @@ is 6.140.1 at the earliest. Where each stands in 6.140 is below the table.
 
 | Order | Patch | Report | Change | Status | What it is |
 | ----- | ----- | ------ | ------ | ------ | ---------- |
-| 1 | 0014 | [QTBUG-150590](https://bugreports.qt.io/browse/QTBUG-150590) | [772845](https://codereview.qt-project.org/c/qt/qtwebengine/+/772845) | merged | A page cannot load a web accessible resource |
+| 1 | 0013 | [QTBUG-150590](https://bugreports.qt.io/browse/QTBUG-150590) | [772845](https://codereview.qt-project.org/c/qt/qtwebengine/+/772845) | merged | A page cannot load a web accessible resource |
 | 2 | 0001 | [QTBUG-150591](https://bugreports.qt.io/browse/QTBUG-150591) | [772848](https://codereview.qt-project.org/c/qt/qtwebengine/+/772848) | merged | A localising service worker hangs forever |
-| 3 | 0010 | [QTBUG-150592](https://bugreports.qt.io/browse/QTBUG-150592) | [772849](https://codereview.qt-project.org/c/qt/qtwebengine/+/772849) | in review | Loading a loaded extension leaves it dead |
-| 4 | 0011 | [QTBUG-150593](https://bugreports.qt.io/browse/QTBUG-150593) | [772850](https://codereview.qt-project.org/c/qt/qtwebengine/+/772850) | in review | An extension document cannot close its own window |
-| 5 | 0003 | [QTBUG-150594](https://bugreports.qt.io/browse/QTBUG-150594) | waiting | – | `setExtensionEnabled` crashes after a storage path change |
-| 6 | 0019 | [QTBUG-151304](https://bugreports.qt.io/browse/QTBUG-151304) | [778807](https://codereview.qt-project.org/c/qt/qtwebengine/+/778807) | in review | Creating an offscreen document crashes the browser |
+| 3 | 0009 | [QTBUG-150592](https://bugreports.qt.io/browse/QTBUG-150592) | [772849](https://codereview.qt-project.org/c/qt/qtwebengine/+/772849) | in review | Loading a loaded extension leaves it dead |
+| 4 | 0010 | [QTBUG-150593](https://bugreports.qt.io/browse/QTBUG-150593) | [772850](https://codereview.qt-project.org/c/qt/qtwebengine/+/772850) | in review | An extension document cannot close its own window |
+| 5 | 0002 | [QTBUG-150594](https://bugreports.qt.io/browse/QTBUG-150594) | waiting | – | `setExtensionEnabled` crashes after a storage path change |
+| 6 | 0017 | [QTBUG-151304](https://bugreports.qt.io/browse/QTBUG-151304) | [778807](https://codereview.qt-project.org/c/qt/qtwebengine/+/778807) | in review | Creating an offscreen document crashes the browser |
 
 Each change carries `Fixes: QTBUG-…` and `Pick-to: 6.140`. Two more changes follow the first report:
 
 - [773048](https://codereview.qt-project.org/c/qt/qtwebengine/+/773048), merged, removes the renderer
   resource policy that 772845 left with no users.
 - [773908](https://codereview.qt-project.org/c/qt/qtwebengine/+/773908), in review, is the test that
-  a `use_dynamic_url` resource stays unreachable at its fixed URL, which patch 0014 carries too. It
+  a `use_dynamic_url` resource stays unreachable at its fixed URL, which patch 0013 carries too. It
   uses `Task-number: QTBUG-150590`, because it tests that fix rather than fixing anything.
 
 ## Where each change stands in 6.140
 
-Checked on 2026-10-05. The series' first 17 patches carry no Change-Id, so the merged ones were
+Checked on 2026-10-05. The series' first 16 patches carry no Change-Id, so the merged ones were
 matched by their reports and changes, and compared line by line. For the rest, the series was
 applied in order to each tree, and every upstream commit since the RC that touches a file the series
 touches was listed. Nothing else of the series is upstream.
@@ -45,37 +45,31 @@ touches was listed. Nothing else of the series is upstream.
 | Patch | Upstream | 6.140.0-rc | `6.140.0` | `6.140` | `dev` |
 | ----- | -------- | ---------- | --------- | ------- | ----- |
 | 0001 | 772848: `dev` `85c4b70af`, `6.140` `4f674b4e8` (change 773404) | no | no | yes | yes |
-| 0002 | qtwebengine-chromium 772104, in another form | no | yes | yes | yes |
-| 0010 | 772849, in review | no | no | no | no |
-| 0011 | 772850, in review | no | no | no | no |
-| 0014 | 772845: `dev` `182770309`, `6.140` `1aa9958ff` (change 773151) | no | no | yes | yes |
-| 0014 follow-up | 773048: `dev` `7bc989efe` | no | no | no | yes |
-| 0019 | 778807, in review | no | no | no | no |
-| 0018 | qtwebengine-chromium 770837 and 772657, through the pin to `1e645e7ec` | no | yes | yes | yes |
+| 0009 | 772849, in review | no | no | no | no |
+| 0010 | 772850, in review | no | no | no | no |
+| 0013 | 772845: `dev` `182770309`, `6.140` `1aa9958ff` (change 773151) | no | no | yes | yes |
+| 0013 follow-up | 773048: `dev` `7bc989efe` | no | no | no | yes |
+| 0017 | 778807, in review | no | no | no | no |
 
-The rest, 0003 to 0009, 0012, 0013 and 0015 to 0017, are in none of them. 0018 carries the
-Change-Ids of the two changes it backports.
+The rest, 0002 to 0008, 0011, 0012 and 0014 to 0016, are in none of them.
 
-- **0001 and 0014** merged on 2026-09-22 and were picked to `6.140` the same day and the next. The
+- **0001 and 0013** merged on 2026-09-22 and were picked to `6.140` the same day and the next. The
   RC is tagged on `6.140.0`, which split from `6.140` before the picks, so both still applied to it.
   Their source changes are the series' own, line for line. Only the tests differ. 0001's upstream
-  test has `QVERIFY2` with the extension's error where the patch has `QVERIFY`. 0014's upstream
+  test has `QVERIFY2` with the extension's error where the patch has `QVERIFY`. 0013's upstream
   test leaves out the dynamic URL case, which is 773908. Neither is picked to `6.140.0`, so the
   final 6.140.0 still needs both patches, and they drop at 6.140.1.
-- **0002** was never sent: it is a local build fix for the macOS 26 SDK, which removed
-  `kSBXProfilePureComputation`. qtwebengine-chromium 772104, "[Backport] Fix macOS 27 build of
-  `chrome` target" on `140-based`, merged 2026-09-18, removes the `kProfilePureComputation` member
-  and its uses outright. It reached `6.140.0`, `6.140` and `dev` with a Chromium update after the
-  RC, where 0002 no longer applies. It drops when the final 6.140.0 is qualified.
+- Two patches have left the series. One defined the pure-computation seatbelt profile name, a local
+  build fix for the macOS 26 SDK that was never sent. qtwebengine-chromium 772104, "[Backport] Fix
+  macOS 27 build of `chrome` target" on `140-based`, merged 2026-09-18, removes the member and its
+  uses outright. The other backported qtwebengine-chromium 770837 and 772657, merged on 2026-09-14
+  and 2026-09-21, which set `v8_disable_write_barriers` back to Chromium's default, for
+  [omaweb#574](https://github.com/villekivela/omaweb/issues/574). 6.11.3's tarball has
+  neither the member nor the `true`, so neither patch applies to it, and both dropped there
+  ([omaweb#802](https://github.com/villekivela/omaweb/issues/802)). `6.140.0`, `6.140` and `dev`
+  carry the changes too.
 
-- **0018** is Qt's own: qtwebengine-chromium 770837 and 772657 on `140-based`, merged on 2026-09-14
-  and 2026-09-21, which set `v8_disable_write_barriers` back to Chromium's default. It was
-  backported for [omaweb#574](https://github.com/villekivela/omaweb/issues/574) and sent nowhere.
-  The RC's tarball still has `true`. `6.140.0`, `6.140` and `dev` pin qtwebengine-chromium
-  `1e645e7ec`, where it is `false`, so 0018 no longer applies to the final 6.140.0 and drops when it
-  is qualified.
-
-Patch 0015 answers a report someone else had already filed, so it went there as a comment rather
+Patch 0014 answers a report someone else had already filed, so it went there as a comment rather
 than a sixth report. [QTBUG-149450](https://qt-project.atlassian.net/browse/QTBUG-149450) measures
 the same Speedometer 3.1 gap on Windows, and the comment names qtwebengine-chromium `baf701b9fb74`
 as the cause, with the macOS numbers. Its fix goes to `qtwebengine-chromium`, not `qtwebengine`.
@@ -83,10 +77,10 @@ The report is on Windows, where the removed line was an MSVC workaround, so what
 to be settled before a change is proposed.
 
 GCC folds the lookup without the patch, which the disassembly of this repository's own package
-shows, so the engine it ships gains nothing from 0015. A second comment on the report said so, with
+shows, so the engine it ships gains nothing from 0014. A second comment on the report said so, with
 a Speedometer before and after from the Omarchy VM. That before and after ran on Arch's engine, not
 this one, because the released Omaweb did not load `/usr/lib/omaweb` yet, so it measured nothing
-about 0015. A third comment corrects it. With the host idle, this repository's engine scores 22.7,
+about 0014. A third comment corrects it. With the host idle, this repository's engine scores 22.7,
 Arch's 22.5, and Chromium 153 24.5 on the same machine. The details are on
 [omaweb#355](https://github.com/villekivela/omaweb/issues/355) and
 [omaweb#356](https://github.com/villekivela/omaweb/issues/356). The patch stays, because it is the
@@ -143,7 +137,7 @@ appears to predate the base class owning one.
 
 ### Fix
 
-Patch 0014 deletes the Qt copy and the override, so the base class answers. Its `WillSendRequest`
+Patch 0013 deletes the Qt copy and the override, so the base class answers. Its `WillSendRequest`
 also takes `upstream_url`, which `ContentRendererClientQt::WillSendRequest` already receives and
 currently drops, so a resource reached through a redirect becomes allowed by the extension that
 redirected to it.
@@ -230,7 +224,7 @@ hold while the extension is disabled, which is why this was not caught.
 
 ### Fix
 
-Patch 0010 treats the same path loaded again as the same extension updated in place, through
+Patch 0009 treats the same path loaded again as the same extension updated in place, through
 `ExtensionRegistrar::AddExtension`, and implements the two reload delegate methods so
 `reloadExtension()` also finishes what it starts.
 
@@ -269,7 +263,7 @@ closes itself once it has filled a form, which is past one history entry within 
 
 ### Fix
 
-Patch 0011 sets `allow_scripts_to_close_windows` in
+Patch 0010 sets `allow_scripts_to_close_windows` in
 `ContentBrowserClientQt::OverrideWebPreferences` for documents served from an enabled extension that
 is not a hosted app, which is the condition Chrome applies.
 
@@ -306,7 +300,7 @@ Changing a profile's storage name, off-the-record flag or storage path rebuilds 
 
 ### Fix
 
-Patch 0003 points the existing `ExtensionPrefs` at the new `PrefService` instead of replacing an
+Patch 0002 points the existing `ExtensionPrefs` at the new `PrefService` instead of replacing an
 instance other services hold.
 
 This one is two changes: `ExtensionPrefs::ResetPrefService` in `qtwebengine-chromium`, guarded by
@@ -370,7 +364,7 @@ same unchecked dereference as `Hide()`.
 
 ### Fix
 
-Patch 0019 makes `Hide()` hide the delegate when there is one and otherwise cancel a deferred show,
+Patch 0017 makes `Hide()` hide the delegate when there is one and otherwise cancel a deferred show,
 so a delegate set later does not show a view Chromium hid, and makes `IsShowing()` answer false
 without a delegate. `Hide()` and `IsShowing()` are the same in 6.11.2, 6.140 and `dev`.
 

@@ -3,8 +3,8 @@
 # Usage: scripts/check-write-barriers.sh <tree>
 #
 # Qt's 6.11.2 turns them off, and with them V8's young generation, which cost JetStream a fifth of
-# its score (omaweb#356). Patch 0018 turns them back on, and 6.140.0 does so itself, so the patch
-# drops there and this is what is left to notice if a later Qt turns them off again. GN's default
+# its score (omaweb#356). A patch turned them back on until 6.11.3 and 6.140.0 did so themselves,
+# and this is what is left to notice if a later Qt turns them off again. GN's default
 # reaches the compiler as -DV8_DISABLE_WRITE_BARRIERS in the ninja file of V8's main library, so
 # that file's defines are read and the file is named. A tree where it is not found fails, rather
 # than passing on nothing read, because the day the build's layout moves is the day this would

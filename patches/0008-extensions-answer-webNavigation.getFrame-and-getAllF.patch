@@ -1,7 +1,7 @@
-From db4875d87926998c0ef2e04ac8db0e9a7192b319 Mon Sep 17 00:00:00 2001
+From cb1886841718fed21d61a1d4418c5127be48178d Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivela=CC=88?= <vkivela@hotmail.com>
 Date: Mon, 21 Sep 2026 12:12:51 +0300
-Subject: [PATCH 09/15] extensions: answer webNavigation.getFrame and
+Subject: [PATCH 08/31] extensions: answer webNavigation.getFrame and
  getAllFrames
 
 A password manager's worker registers its message listener inside
@@ -470,5 +470,5 @@ index 668629aaa0..2ab235bfee 100644
  {
      // Changing the storage path after construction rebuilds the profile's PrefService. The
 -- 
-2.54.0 (Apple Git-157)
+2.56.0
 

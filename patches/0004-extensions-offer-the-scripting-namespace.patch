@@ -1,7 +1,7 @@
-From b0406486214a7446d6246e35c089c4648e9cc3cb Mon Sep 17 00:00:00 2001
+From 3f551550092e1aed70ee43c61edf69dcaa2c9c49 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivela=CC=88?= <vkivela@hotmail.com>
 Date: Fri, 18 Sep 2026 18:12:40 +0300
-Subject: [PATCH 05/15] extensions: offer the scripting namespace
+Subject: [PATCH 04/31] extensions: offer the scripting namespace
 
 Bitwarden asks the browser to inject its autofill content script through
 chrome.scripting.executeScript, which QtWebEngine did not offer, so a
@@ -1881,5 +1881,5 @@ index b37ef1ec81..a70d1e98e0 100644
  QTEST_MAIN(tst_QWebEngineExtension)
  #include "tst_qwebengineextension.moc"
 -- 
-2.54.0 (Apple Git-157)
+2.56.0
 

@@ -108,8 +108,8 @@ reconcile.
 
 ## When Chromium moves
 
-Qt bumps its Chromium fork every few releases. This is the only expensive case, because patches 0005
-and 0006 carry copies of Chrome files that go stale:
+Qt bumps its Chromium fork every few releases. This is the only expensive case, because patches 0004
+and 0005 carry copies of Chrome files that go stale:
 
 - `chrome/browser/extensions/api/scripting/scripting_api.{cc,h}` and `scripting.idl`
 - `chrome/browser/extensions/api/messaging/` — `launch_context*`, `native_message_process_host`,
@@ -123,22 +123,22 @@ Re-copy each from the new Chromium and redo two include rewrites per file: the f
 the generated schema header both move from `chrome/` to `qtwebengine/`. Rebuild and let the compiler
 find whatever else moved.
 
-Patch 0022 changes the copied `scripting_api.{cc,h}` after 0005: an update that leaves
+Patch 0020 changes the copied `scripting_api.{cc,h}` after 0004: an update that leaves
 `persistAcrossSessions` out keeps what the script had. Reapply that change to the new copy until
 Chromium has it, or `whatIsKeptFollowsUnregisterAndUpdate` goes red.
 
-0022 also adds `src/core/extensions/user_script_listener_qt.{cpp,h}`, Chrome's
+0020 also adds `src/core/extensions/user_script_listener_qt.{cpp,h}`, Chrome's
 `chrome/browser/extensions/user_script_listener.cc` rewritten for one profile, because that file is
 not in Qt's tree. Compare it with the new Chromium's, which is where a change to when a navigation
 waits for an extension's scripts would show.
 
-Patch 0033 copies a tenth schema, `app.json`, with no change but its header, and copies Chrome's
+Patch 0031 copies a tenth schema, `app.json`, with no change but its header, and copies Chrome's
 `app` feature into `extensions/common/api/_webengine_api_features.json`. Re-copy both from the new
 Chromium. It compiles `chrome/renderer/extensions/api/app_hooks_delegate.cc` and
 `chrome/renderer/loadtimes_extension_bindings.cc` where they are, so a change there shows as a build
 failure or in `windowChromeAnswersAsChromeDoes`.
 
-Measured once, across Chromium 140 to 146: those files changed by 4 to 13 lines each, and patch 0003
+Measured once, across Chromium 140 to 146: those files changed by 4 to 13 lines each, and patch 0002
 lost two of the six calls it makes because those migrations finished upstream. Under an hour. All
 five embedder hooks the design depends on were still there with the same names.
 
@@ -154,7 +154,7 @@ Chromium, and they cannot see that from the outside.
 The target is one night. A Qt release carrying security fixes gets rebased and built the same
 evening and published the next day. That delay is acceptable.
 
-If a rebase cannot make that window, drop patches 0004 to 0006 and ship anyway. 0001 and 0003 are
+If a rebase cannot make that window, drop patches 0003 to 0005 and ship anyway. 0001 and 0002 are
 small and apply to anything, so the engine still carries the Chromium fix, and Known extensions go
 missing until a follow-up engine update restores them. Say so in the release notes: the vault data
 is untouched and comes back with the extension.

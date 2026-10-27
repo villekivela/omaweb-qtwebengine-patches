@@ -1,7 +1,7 @@
-From 400570f8ab80088bddc0312628bb300af7c24df8 Mon Sep 17 00:00:00 2001
+From 5c57a3ee6ba7e060bce17d82d4e614e5d5a3a715 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivel=C3=A4?= <vkivela@hotmail.com>
 Date: Mon, 12 Oct 2026 04:42:08 +0000
-Subject: [PATCH] favicons: rank a page's SVG icon above its raster ones
+Subject: [PATCH 25/31] favicons: rank a page's SVG icon above its raster ones
 
 chatgpt.com declares /favicon.ico sizes="any", a black ICO with 16, 32
 and 48 pixel frames, ahead of an SVG that follows prefers-color-scheme.
@@ -287,5 +287,5 @@ index c506630cd9..2f8e4c7bc5 100644
  
  #include "tst_favicon.moc"
 -- 
-2.55.0
+2.56.0
 

@@ -1,7 +1,7 @@
-From dd369483ef58520d97f18439414f95df6a744388 Mon Sep 17 00:00:00 2001
+From 44ad2eeced368e23ca18fd51db9cbf0010928f2f Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivela=CC=88?= <vkivela@hotmail.com>
 Date: Fri, 18 Sep 2026 17:47:06 +0300
-Subject: [PATCH 04/15] extensions: offer the tabs, windows, permissions and
+Subject: [PATCH 03/31] extensions: offer the tabs, windows, permissions and
  event namespaces
 
 Compile Chrome's schemas for tabs, windows, permissions, webNavigation,
@@ -36,11 +36,11 @@ they are and registered by the renderer API provider.
  .../common/extensions/api/commands.json       |   72 +
  .../common/extensions/api/context_menus.json  |  412 ++++
  .../common/extensions/api/extension.json      |  276 +++
- .../common/extensions/api/permissions.json    |  211 ++
+ .../common/extensions/api/permissions.json    |  211 +++
  .../common/extensions/api/privacy.json        |  259 +++
  .../common/extensions/api/schema.gni          |   15 +
- .../common/extensions/api/tabs.json           | 1718 ++++++++++++++++-
- .../common/extensions/api/web_navigation.json |  743 +++++++
+ .../common/extensions/api/tabs.json           | 1662 ++++++++++++++++-
+ .../common/extensions/api/web_navigation.json |  743 ++++++++
  .../common/extensions/api/windows.json        |  538 ++++++
  src/core/configure/BUILD.root.gn.in           |    5 +
  .../extensions_browser_client_qt.cpp          |   66 +
@@ -50,7 +50,7 @@ they are and registered by the renderer API provider.
  src/core/profile_adapter.h                    |    4 +
  .../extensions_renderer_api_provider_qt.cpp   |   17 +
  .../extensions_renderer_api_provider_qt.h     |    2 +-
- 31 files changed, 5817 insertions(+), 55 deletions(-)
+ 31 files changed, 5789 insertions(+), 27 deletions(-)
  create mode 100644 src/3rdparty/chromium/qtwebengine/browser/extensions/api/permissions/permissions_api.cc
  create mode 100644 src/3rdparty/chromium/qtwebengine/browser/extensions/api/permissions/permissions_api.h
  create mode 100644 src/3rdparty/chromium/qtwebengine/browser/extensions/api/permissions/permissions_api_helpers.cc
@@ -3034,7 +3034,7 @@ diff --git a/src/3rdparty/chromium/qtwebengine/common/extensions/api/tabs.json b
 index fa0bfb4891..0e38e9f9b6 100644
 --- a/src/3rdparty/chromium/qtwebengine/common/extensions/api/tabs.json
 +++ b/src/3rdparty/chromium/qtwebengine/common/extensions/api/tabs.json
-@@ -1,95 +1,529 @@
+@@ -1,38 +1,747 @@
 -// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 -// Use of this source code is governed by a BSD-style license that can be
 -// found in the LICENSE file.
@@ -3233,7 +3233,7 @@ index fa0bfb4891..0e38e9f9b6 100644
 +            "optional": true,
 +            "description": "The session ID used to uniquely identify a tab obtained from the $(ref:sessions) API."
 +          }
-+        }
+         }
 +      },
 +      {
 +        "id": "ZoomSettingsMode",
@@ -3289,7 +3289,7 @@ index fa0bfb4891..0e38e9f9b6 100644
 +            "optional": true,
 +            "description": "Used to return the default zoom level for the current tab in calls to tabs.getZoomSettings."
 +          }
-         }
++        }
 +      },
 +      {
 +        "id": "WindowType",
@@ -3324,19 +3324,14 @@ index fa0bfb4891..0e38e9f9b6 100644
        }
      },
      "functions": [
-       {
--        "name": "update",
++      {
 +        "name": "get",
-         "type": "function",
--        "description": "Modifies the properties of a tab. Properties that are not specified in <var>updateProperties</var> are not modified.",
++        "type": "function",
 +        "description": "Retrieves details about the specified tab.",
-         "parameters": [
-           {
-             "type": "integer",
-             "name": "tabId",
--            "minimum": 0,
--            "optional": true,
--            "description": "Defaults to the selected tab of the <a href='windows#current-window'>current window</a>."
++        "parameters": [
++          {
++            "type": "integer",
++            "name": "tabId",
 +            "minimum": 0
 +          }
 +        ],
@@ -3376,34 +3371,25 @@ index fa0bfb4891..0e38e9f9b6 100644
 +            "type": "integer",
 +            "name": "tabId",
 +            "minimum": 0
-           },
-           {
-             "type": "object",
--            "name": "updateProperties",
++          },
++          {
++            "type": "object",
 +            "name": "connectInfo",
-             "properties": {
--              "url": {
++            "properties": {
 +              "name": {
-                 "type": "string",
-                 "optional": true,
--                "description": "A URL to navigate the tab to. JavaScript URLs are not supported; use $(ref:tabs.executeScript) instead."
++                "type": "string",
++                "optional": true,
 +                "description": "Is passed into onConnect for content scripts that are listening for the connection event."
-               },
--              "active": {
--                "type": "boolean",
++              },
 +              "frameId": {
 +                "type": "integer",
-                 "optional": true,
--                "description": "Whether the tab should be active. Does not affect whether the window is focused (see $(ref:windows.update))."
++                "optional": true,
 +                "minimum": 0,
 +                "description": "Open a port to a specific <a href='webNavigation#frame_ids'>frame</a> identified by <code>frameId</code> instead of all frames in the tab."
-               },
--              "highlighted": {
--                "type": "boolean",
++              },
 +              "documentId": {
 +                "type": "string",
-                 "optional": true,
--                "description": "Adds or removes the tab from the current selection."
++                "optional": true,
 +                "description": "Open a port to a specific <a href='webNavigation#document_ids'>document</a> identified by <code>documentId</code> instead of all frames in the tab."
 +              }
 +            },
@@ -3469,9 +3455,7 @@ index fa0bfb4891..0e38e9f9b6 100644
 +                "optional": true,
 +                "minimum": 0,
 +                "description": "Send a message to a specific <a href='webNavigation#frame_ids'>frame</a> identified by <code>frameId</code> instead of all frames in the tab."
-               },
--              "selected": {
--                "deprecated": "Please use <em>highlighted</em>.",
++              },
 +              "documentId": {
 +                "type": "string",
 +                "optional": true,
@@ -3573,50 +3557,40 @@ index fa0bfb4891..0e38e9f9b6 100644
 +                "description": "The URL to initially navigate the tab to. Fully-qualified URLs must include a scheme (i.e., 'http://www.google.com', not 'www.google.com'). Relative URLs are relative to the current page within the extension. Defaults to the New Tab Page."
 +              },
 +              "active": {
-                 "type": "boolean",
-                 "optional": true,
--                "description": "Whether the tab should be selected."
++                "type": "boolean",
++                "optional": true,
 +                "description": "Whether the tab should become the active tab in the window. Does not affect whether the window is focused (see $(ref:windows.update)). Defaults to <var>true</var>."
-               },
--              "pinned": {
++              },
 +              "selected": {
 +                "deprecated": "Please use <em>active</em>.",
-                 "type": "boolean",
-                 "optional": true,
--                "description": "Whether the tab should be pinned."
++                "type": "boolean",
++                "optional": true,
 +                "description": "Whether the tab should become the selected tab in the window. Defaults to <var>true</var>"
-               },
--              "muted": {
++              },
 +              "pinned": {
-                 "type": "boolean",
-                 "optional": true,
--                "description": "Whether the tab should be muted."
++                "type": "boolean",
++                "optional": true,
 +                "description": "Whether the tab should be pinned. Defaults to <var>false</var>"
-               },
-               "openerTabId": {
-                 "type": "integer",
-                 "minimum": 0,
-                 "optional": true,
--                "description": "The ID of the tab that opened this tab. If specified, the opener tab must be in the same window as this tab."
--              },
--              "autoDiscardable": {
--                "type": "boolean",
--                "optional": true,
--                "description": "Whether the tab should be discarded automatically by the browser when resources are low."
++              },
++              "openerTabId": {
++                "type": "integer",
++                "minimum": 0,
++                "optional": true,
 +                "description": "The ID of the tab that opened this tab. If specified, the opener tab must be in the same window as the newly created tab."
-               }
-             }
-           }
-@@ -101,11 +535,1203 @@
-             {
-               "name": "tab",
-               "$ref": "Tab",
--              "optional": true,
--              "description": "Details about the updated tab. The $(ref:tabs.Tab) object does not contain <code>url</code>, <code>pendingUrl</code>, <code>title</code>, and <code>favIconUrl</code> if the <code>\"tabs\"</code> permission has not been requested."
++              }
++            }
++          }
++        ],
++        "returns_async": {
++          "name": "callback",
++          "optional": true,
++          "parameters": [
++            {
++              "name": "tab",
++              "$ref": "Tab",
 +              "description": "The created tab."
-             }
-           ]
--        }
++            }
++          ]
 +        },
 +        "nocompile": true
 +      },
@@ -3821,79 +3795,27 @@ index fa0bfb4891..0e38e9f9b6 100644
 +        },
 +        "nocompile": true
 +      },
-+      {
-+        "name": "update",
-+        "type": "function",
-+        "description": "Modifies the properties of a tab. Properties that are not specified in <var>updateProperties</var> are not modified.",
-+        "parameters": [
-+          {
-+            "type": "integer",
-+            "name": "tabId",
-+            "minimum": 0,
-+            "optional": true,
-+            "description": "Defaults to the selected tab of the <a href='windows#current-window'>current window</a>."
-+          },
-+          {
-+            "type": "object",
-+            "name": "updateProperties",
-+            "properties": {
-+              "url": {
-+                "type": "string",
-+                "optional": true,
+       {
+         "name": "update",
+         "type": "function",
+@@ -52,7 +761,7 @@
+               "url": {
+                 "type": "string",
+                 "optional": true,
+-                "description": "A URL to navigate the tab to. JavaScript URLs are not supported; use $(ref:tabs.executeScript) instead."
 +                "description": "A URL to navigate the tab to. JavaScript URLs are not supported; use $(ref:scripting.executeScript) instead."
-+              },
-+              "active": {
-+                "type": "boolean",
-+                "optional": true,
-+                "description": "Whether the tab should be active. Does not affect whether the window is focused (see $(ref:windows.update))."
-+              },
-+              "highlighted": {
-+                "type": "boolean",
-+                "optional": true,
-+                "description": "Adds or removes the tab from the current selection."
-+              },
-+              "selected": {
-+                "deprecated": "Please use <em>highlighted</em>.",
-+                "type": "boolean",
-+                "optional": true,
-+                "description": "Whether the tab should be selected."
-+              },
-+              "pinned": {
-+                "type": "boolean",
-+                "optional": true,
-+                "description": "Whether the tab should be pinned."
-+              },
-+              "muted": {
-+                "type": "boolean",
-+                "optional": true,
-+                "description": "Whether the tab should be muted."
-+              },
-+              "openerTabId": {
-+                "type": "integer",
-+                "minimum": 0,
-+                "optional": true,
-+                "description": "The ID of the tab that opened this tab. If specified, the opener tab must be in the same window as this tab."
-+              },
-+              "autoDiscardable": {
-+                "type": "boolean",
-+                "optional": true,
-+                "description": "Whether the tab should be discarded automatically by the browser when resources are low."
-+              }
-+            }
-+          }
-+        ],
-+        "returns_async": {
-+          "name": "callback",
-+          "optional": true,
-+          "parameters": [
-+            {
-+              "name": "tab",
-+              "$ref": "Tab",
-+              "optional": true,
+               },
+               "active": {
+                 "type": "boolean",
+@@ -102,10 +811,927 @@
+               "name": "tab",
+               "$ref": "Tab",
+               "optional": true,
+-              "description": "Details about the updated tab. The $(ref:tabs.Tab) object does not contain <code>url</code>, <code>pendingUrl</code>, <code>title</code>, and <code>favIconUrl</code> if the <code>\"tabs\"</code> permission has not been requested."
 +              "description": "Details about the updated tab. The <code>url</code>, <code>pendingUrl</code>, <code>title</code> and <code>favIconUrl</code> properties are only included on the $(ref:tabs.Tab) object if the extension has the <code>\"tabs\"</code> permission or has host permissions for the page."
-+            }
-+          ]
-+        }
+             }
+           ]
+         }
 +      },
 +      {
 +        "name": "move",
@@ -6108,10 +6030,10 @@ index 0000000000..a434f5a199
 +  }
 +]
 diff --git a/src/core/configure/BUILD.root.gn.in b/src/core/configure/BUILD.root.gn.in
-index cf9a3fe749..7946086c6b 100644
+index bb21317347..17088f2d53 100644
 --- a/src/core/configure/BUILD.root.gn.in
 +++ b/src/core/configure/BUILD.root.gn.in
-@@ -463,6 +463,7 @@ source_set("qtwebengine_sources") {
+@@ -466,6 +466,7 @@ source_set("qtwebengine_sources") {
        "//extensions:extensions_resources",
        "//extensions/strings",
        "//qtwebengine/browser/extensions/api:api_registration",
@@ -6119,7 +6041,7 @@ index cf9a3fe749..7946086c6b 100644
        "//qtwebengine/common/extensions/api:api",
        "//qtwebengine/browser/extensions/webui:mojo_bindings",
        "//qtwebengine/browser/extensions/resources",
-@@ -478,6 +479,10 @@ source_set("qtwebengine_sources") {
+@@ -481,6 +482,10 @@ source_set("qtwebengine_sources") {
        "//chrome/common/extensions/permissions/chrome_permission_message_provider.h",
        "//chrome/common/extensions/permissions/chrome_permission_message_rules.cc",
        "//chrome/common/extensions/permissions/chrome_permission_message_rules.h",
@@ -6374,5 +6296,5 @@ index edb43976c1..7527a362cf 100644
      void RequireWebViewModules(ScriptContext *context) const override { }
  };
 -- 
-2.54.0 (Apple Git-157)
+2.56.0
 
