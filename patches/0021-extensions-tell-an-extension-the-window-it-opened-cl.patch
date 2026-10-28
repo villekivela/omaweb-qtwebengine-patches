@@ -1,7 +1,8 @@
-From 4637697b574ae0cd36cba9472b68de870fd2125a Mon Sep 17 00:00:00 2001
+From 85509fda952a510709dc6b027495f10d741b9214 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivel=C3=A4?= <vkivela@hotmail.com>
 Date: Sat, 10 Oct 2026 13:44:21 +0000
-Subject: [PATCH] extensions: tell an extension the window it opened closed
+Subject: [PATCH 21/31] extensions: tell an extension the window it opened
+ closed
 
 windows.create answered with the one id every window call reports, so
 the page an extension opened had no id of its own, and the series
@@ -163,21 +164,21 @@ index bb52d21705..a83648fbd7 100644
 -    ++index;
 -    const bool active = tab == active_tab;
 -    if (query.active && *query.active != active)
--      continue;
--    if (query.highlighted && *query.highlighted != active)
--      continue;
--    if (query.pinned && *query.pinned)
--      continue;
--    if (query.audible && *query.audible != tab->IsCurrentlyAudible())
 +  for (int window_id : registry->GetWindowIds(browser_context())) {
 +    if (only_window && *only_window != window_id)
        continue;
--    if (query.discarded && *query.discarded)
+-    if (query.highlighted && *query.highlighted != active)
 +    if (query.current_window && *query.current_window != (window_id == current_window))
        continue;
--    if (query.frozen && *query.frozen)
+-    if (query.pinned && *query.pinned)
 +    if (query.last_focused_window && *query.last_focused_window != (window_id == current_window))
        continue;
+-    if (query.audible && *query.audible != tab->IsCurrentlyAudible())
+-      continue;
+-    if (query.discarded && *query.discarded)
+-      continue;
+-    if (query.frozen && *query.frozen)
+-      continue;
 -    if (query.index && *query.index != index)
 -      continue;
 -    if (query.status != tabs::TabStatus::kNone) {
@@ -202,7 +203,7 @@ index bb52d21705..a83648fbd7 100644
 -        matched = matched || pattern.MatchesURL(url);
 -      if (!matched)
 +      if (query.highlighted && *query.highlighted != active)
-+        continue;
+         continue;
 +      if (query.pinned && *query.pinned)
 +        continue;
 +      if (query.audible && *query.audible != tab->IsCurrentlyAudible())
@@ -220,7 +221,7 @@ index bb52d21705..a83648fbd7 100644
 +      }
 +      if (query.title &&
 +          !base::MatchPattern(base::UTF16ToUTF8(tab->GetTitle()), *query.title)) {
-         continue;
++        continue;
 +      }
 +      if (!url_patterns.empty()) {
 +        const GURL& url = tab->GetLastCommittedURL();
@@ -578,9 +579,9 @@ index fd1c428e9a..923c4e6504 100644
 +    if (GetTabId(window) == tab_id)
 +      return window;
 +  }
-+  return nullptr;
-+}
-+
+   return nullptr;
+ }
+ 
 +void TabRegistryQt::OpenWindow(content::WebContents* web_contents,
 +                               api::windows::WindowType type) {
 +  const int window_id = ++last_window_id_;
@@ -621,9 +622,9 @@ index fd1c428e9a..923c4e6504 100644
 +    if (window->web_contents() == web_contents)
 +      return window.get();
 +  }
-   return nullptr;
- }
- 
++  return nullptr;
++}
++
 +void TabRegistryQt::ForgetContext(content::BrowserContext* context) {
 +  std::erase_if(windows_, [context](const auto& entry) {
 +    return entry.second->context() == context;
@@ -1509,5 +1510,5 @@ index c3e28363e9..cb2793994e 100644
  QTEST_MAIN(tst_QWebEngineExtension)
  #include "tst_qwebengineextension.moc"
 -- 
-2.55.0
+2.56.0
 

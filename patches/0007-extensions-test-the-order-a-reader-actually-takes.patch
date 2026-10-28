@@ -1,7 +1,7 @@
-From 83dc91e0d7930e59a69ed472d45a7acf75e27a3b Mon Sep 17 00:00:00 2001
+From a41343cb1d5c902dfa93763bd53a17567b5384ca Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivela=CC=88?= <vkivela@hotmail.com>
 Date: Mon, 21 Sep 2026 09:37:46 +0300
-Subject: [PATCH 08/15] extensions: test the order a reader actually takes
+Subject: [PATCH 07/31] extensions: test the order a reader actually takes
 
 Every existing case loads an extension into a profile that is not yet
 running anything. A reader does the opposite: the browser is open, a
@@ -117,5 +117,5 @@ index 65537ba634..668629aaa0 100644
  {
      // Changing the storage path after construction rebuilds the profile's PrefService. The
 -- 
-2.54.0 (Apple Git-157)
+2.56.0
 

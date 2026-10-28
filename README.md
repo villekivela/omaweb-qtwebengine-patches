@@ -1,8 +1,8 @@
 # QtWebEngine extension patches
 
-Thirty-three patches to QtWebEngine. Eighteen let it host a password manager's Chromium extension,
+Thirty-one patches to QtWebEngine. Seventeen let it host a password manager's Chromium extension,
 two add API that Omaweb's content blocking and certificate view ask for, one restores a trace macro
-that slowed every page, one turns V8's write barriers back on, two keep an offscreen document from
+that slowed every page, two keep an offscreen document from
 crashing the engine, one builds the tests against Qt 6.12, one keeps the content scripts any
 extension registers across a restart, one keeps a profile from crashing as it is deleted with an
 extension's message still waiting, one draws a favicon again when the colour scheme changes, one
@@ -10,14 +10,14 @@ shows a page's SVG icon rather than a raster one beside it, one lets a page hear
 passkeys can reach in a build without Bluetooth, one answers a push subscription the same in
 a window that keeps nothing, one lets a page write to the clipboard during a click without a
 question, and one gives every page Chrome's `chrome.app`, `chrome.csi` and `chrome.loadTimes`.
-Base is the released `qtwebengine-everywhere-src-6.11.2` tarball.
+Base is the released `qtwebengine-everywhere-src-6.11.3` tarball.
 
 Built for [omaweb#344](https://github.com/villekivela/omaweb/issues/344), which asks whether Omaweb
 can host Bitwarden and 1Password. The findings live in `docs/research/password-manager-extensions.md`
 in that repository.
 
-Eleven of the thirty-three are ordinary bug fixes headed for Gerrit, and 0018 and 0020 are Qt's own
-changes. The rest wait on one question to Qt, in `upstream/QTBUG-draft.md`. If Qt takes the work,
+Eleven of the thirty-one are ordinary bug fixes headed for Gerrit, and 0018 is Qt's own
+change. The rest wait on one question to Qt, in `upstream/QTBUG-draft.md`. If Qt takes the work,
 this repository is deleted rather than maintained.
 
 ## Running it
@@ -44,66 +44,63 @@ registries. Qt serves none of them fully, so an extension that calls `chrome.i18
 its service worker hangs forever, and an extension page never receives events its own worker gets.
 _A bug fix with a test. Submit as is._
 
-**0002, define the pure-computation seatbelt profile name.** The macOS 26 SDK dropped the constant.
-_A local build fix. Not part of the series, do not submit._
-
-**0003, keep ExtensionPrefs valid when the PrefService is rebuilt.** Changing a profile's storage
+**0002, keep ExtensionPrefs valid when the PrefService is rebuilt.** Changing a profile's storage
 path replaces the pref service. Qt replaces the `ExtensionPrefs` instance too, while other keyed
 services keep the pointer they cached, and `setExtensionEnabled` then crashes. _A bug fix with a
 test. Submit as is._
 
-**0004, offer the tabs, windows, permissions and event namespaces.** Compiles Chrome's schemas with
+**0003, offer the tabs, windows, permissions and event namespaces.** Compiles Chrome's schemas with
 the unimplemented functions marked `nocompile`, and implements the read side of `tabs` and `windows`
 on a tab registry behind an embedder delegate. _A feature. Needs public API first, see below._
 
-**0005, offer the scripting namespace.** Chrome's `scripting_api.cc` compiles with two include paths
-changed. It reaches a tab through the delegate from 0004. _Follows 0004._
+**0004, offer the scripting namespace.** Chrome's `scripting_api.cc` compiles with two include paths
+changed. It reaches a tab through the delegate from 0003. _Follows 0003._
 
-**0006, connect an extension to a native messaging host.** Chrome's host manifest parser, process
+**0005, connect an extension to a native messaging host.** Chrome's host manifest parser, process
 launcher and port dispatcher, with the manifest looked up through QtWebEngine path keys. _Follows
-0004._
+0003._
 
-**0007, let an extension ask the application to open a page.** `tabs.create` and `windows.create`
+**0006, let an extension ask the application to open a page.** `tabs.create` and `windows.create`
 arrive where a page's own `window.open()` arrives, so the application decides what opening a page
 means. Bitwarden reaches this when its popup asks to open in a window of its own, which is how it
-shows its settings: it has no options page, only routes inside the popup document. _Follows 0004._
+shows its settings: it has no options page, only routes inside the popup document. _Follows 0003._
 
-**0008, test the order a reader actually takes.** The browser is open, a page is up, and then an
+**0007, test the order a reader actually takes.** The browser is open, a page is up, and then an
 extension is turned on. Every earlier case loads an extension into a profile running nothing. _Tests
 only._
 
-**0009, answer webNavigation.getFrame and getAllFrames.** A password manager's worker registers its
+**0008, answer webNavigation.getFrame and getAllFrames.** A password manager's worker registers its
 listener inside asynchronous set-up, so the first page's message is dropped, in Chrome as here; the
 worker then reaches back into every frame of every open tab, and that needs `getAllFrames`. Answered
 off the tab registry and the frame's own state, without Chrome's tab-strip observer. The events stay
-declared and unraised. _Follows 0004._
+declared and unraised. _Follows 0003._
 
-**0010, keep a running extension working when its path is loaded again.** Loading a loaded path sent
+**0009, keep a running extension working when its path is loaded again.** Loading a loaded path sent
 the extension round as a reload, which disabled it and handed the reload to an empty delegate: the
 worker went and never came back. _A bug fix with a test. Submit as is._
 
-**0011, let an extension document close its own window.** A popup that routes by hash cannot close
+**0010, let an extension document close its own window.** A popup that routes by hash cannot close
 itself, because Blink only lets a page close a window it opened. Chrome exempts extension documents
 in a file QtWebEngine does not build. _A bug fix with a test. Submit as is._
 
-**0012, offer the notifications namespace.** 1Password registers `notifications.onClicked` at the top
+**0011, offer the notifications namespace.** 1Password registers `notifications.onClicked` at the top
 level of its worker, so without the namespace the worker throws on its first line and never starts.
 A notification goes to the application the way a page's does, and the reader's answer comes back as
-`onClicked` and `onClosed`. _A feature. Follows 0004._
+`onClicked` and `onClosed`. _A feature. Follows 0003._
 
-**0013, answer every function the schemas declare.** A function a schema declares and nothing
+**0012, answer every function the schemas declare.** A function a schema declares and nothing
 registers throws where the extension called it, so twenty-one of them did. `action` and
 `contextMenus` keep what an extension asks the chrome to show and answer with it; `commands.getAll`
-reports the manifest's. _A feature. Follows 0004._
+reports the manifest's. _A feature. Follows 0003._
 
-**0014, serve a web accessible resource to a page.** QtWebEngine kept its own copy of the renderer's
+**0013, serve a web accessible resource to a page.** QtWebEngine kept its own copy of the renderer's
 resource policy, from before the base class had one, and nothing ever told that copy which
 extensions had loaded. Every request for a web accessible resource was rewritten to
 `chrome-extension://invalid/`. It stops any extension that declares a small content script and
 imports its real bundle. A second test holds the other half: a resource declared with
 `use_dynamic_url` stays unreachable at its fixed URL. _A bug fix with a test. Submit as is._
 
-**0015, look up a trace category at compile time again.** Qt's copy of Perfetto drops the
+**0014, look up a trace category at compile time again.** Qt's copy of Perfetto drops the
 `constexpr` variable that forces a trace point's category index to be computed while compiling, so
 clang left the lookup to run on every call: a string search through 275 categories, with tracing
 off, behind every `TRACE_EVENT`. Blink puts one on each canvas 2D call, and Speedometer 3.1 in a
@@ -112,7 +109,7 @@ bare `WebEngineView` went from 25.5 to 33.9. The header is Chromium 140's, uncha
 [QTBUG-149450](https://qt-project.atlassian.net/browse/QTBUG-149450). The Windows build needs a
 form MSVC accepts._
 
-**0016, let a request interceptor ask for the host's DNS aliases.** A tracker served from a
+**0015, let a request interceptor ask for the host's DNS aliases.** A tracker served from a
 subdomain of the page's own site, with a CNAME pointing at the tracker's real host, never shows the
 tracker's name to an interceptor. `QWebEngineUrlRequestInfo::requestDnsAliases()` asks for them:
 the host is resolved through the profile's own network context and host cache, and the interceptor
@@ -127,7 +124,7 @@ and Omaweb's content blocking is what asks. See
 [omaweb#354](https://github.com/villekivela/omaweb/issues/354) and ADR 0050. _A feature with tests,
 written as Qt API. Propose it as one._
 
-**0017, report the certificate chain a page arrived over.** A certificate failure carries the chain
+**0016, report the certificate chain a page arrived over.** A certificate failure carries the chain
 it was raised for, and a page whose certificate verified raises nothing, so an application has no
 way to show the reader the certificate of the page on show. `QWebEngineLoadingInfo::certificateChain()`
 returns it for a finished main-frame load: the chain Chromium's verifier built, from the server's
@@ -136,17 +133,7 @@ A load that made no TLS connection carries none. See
 [omaweb#325](https://github.com/villekivela/omaweb/issues/325) and ADR 0054. _A feature with tests,
 written as Qt API. Propose it as one._
 
-**0018, turn V8's write barriers back on.** Qt's 6.11.2 builds V8 with `v8_disable_write_barriers =
-true`, which also gives it a single generation. Every allocation goes to the old space, and the
-collector can neither scavenge nor mark incrementally. Qt restored Chromium's default in
-qtwebengine-chromium 770837 and 772657, which 6.140.0 carries, and 0018 is the two as one backport,
-with their Change-Ids and bug numbers. On aarch64 it took JetStream 2.2 from 0.742 to 0.947 of
-Chromium 140's score. On x86_64, turning them on by hand had taken it from 0.718 to 0.917. See
-[omaweb#574](https://github.com/villekivela/omaweb/issues/574) and
-[omaweb#356](https://github.com/villekivela/omaweb/issues/356). _Qt's change. It drops when the
-series moves to 6.140.0._
-
-**0019, let an extension create an offscreen document.** `chrome.offscreen.createDocument` crashed
+**0017, let an extension create an offscreen document.** `chrome.offscreen.createDocument` crashed
 the engine every time. An offscreen document lives in contents the extension system creates itself,
 so its views have no delegate, and `RenderWidgetHostViewQt::Hide()` dereferenced the missing one
 when Chromium hid the document's first speculative frame. `Hide()` now handles a missing delegate as
@@ -155,17 +142,17 @@ browser crashed on resume from suspend because of it
 ([omaweb#646](https://github.com/villekivela/omaweb/issues/646)). _A bug fix with a test. Send it to
 Gerrit; `upstream/bug-reports.md` has the report._
 
-**0020, build the widget tests against Qt 6.12.** Qt 6.12 removed `QTEST_DISABLE_KEYPAD_NAVIGATION`,
+**0018, build the widget tests against Qt 6.12.** Qt 6.12 removed `QTEST_DISABLE_KEYPAD_NAVIGATION`,
 which did nothing, so `W_QTEST_MAIN` stopped compiling and took every widget test program with it,
 the extension tests the gate runs among them. Engine 6.11.2-6 was built against Qt 6.12, as Arch
 builds its own ([omaweb#660](https://github.com/villekivela/omaweb/issues/660)), and the series keeps
 building on 6.11.2, which readers have
 ([omaweb#674](https://github.com/villekivela/omaweb/issues/674)). Qt removed the same line in
-qtwebengine c9300848e28e for QTBUG-147006, and 0020 is that change backported with its Change-Id. It
+qtwebengine c9300848e28e for QTBUG-147006, and 0018 is that change backported with its Change-Id. It
 touches only the tests, so the engine a reader installs is the same with or without it. _Qt's change.
 It drops when the series moves to 6.140.0._
 
-**0021, report where a window is, as the application says.** `chrome.windows` answered with one
+**0019, report where a window is, as the application says.** `chrome.windows` answered with one
 window carrying no `left`, `top`, `width` or `height`, and Chrome always reports all four. Bitwarden
 places its passkey prompt at `window.left + window.width - popupWidth - 15`, which without them is
 `NaN`, and the schema refuses the `windows.create` that follows. Only the application knows where
@@ -174,9 +161,9 @@ say: the engine calls it with the page the call came from, or with null for a wo
 puts the answer in every window it reports, `windows.create`'s and populated ones included. Without
 a provider the window is at `0, 0` with the size of the asking view. See
 [omaweb#684](https://github.com/villekivela/omaweb/issues/684) and ADR 0064. _Part of the tab model
-the open question below is about. Propose it with 0004._
+the open question below is about. Propose it with 0003._
 
-**0022, keep registered content scripts across a restart.** A content script an extension registers
+**0020, keep registered content scripts across a restart.** A content script an extension registers
 with `chrome.scripting` persists across sessions unless it says otherwise, and every one was gone
 after a restart, because `ExtensionSystemQt` had no store to keep them in. A regular profile now has
 Chrome's, under `Extension Scripts` in its storage path. An off-the-record profile has none, and its
@@ -197,9 +184,9 @@ waits for that write when it is deleted or set up on another path. The patch als
 `updateContentScripts`, which turned a persistent script into a session one whenever the update left
 `persistAcrossSessions` out, because it looked the old value up in a set it had not filled yet.
 Chromium's `main` has the same code. See [omaweb#686](https://github.com/villekivela/omaweb/issues/686).
-_Follows 0005. Report the update bug to Chromium._
+_Follows 0004. Report the update bug to Chromium._
 
-**0023, tell an extension the window it opened closed.** `windows.create` answered with the one id
+**0021, tell an extension the window it opened closed.** `windows.create` answered with the one id
 every window call reports, so the page an extension opened had no id of its own, and the series
 raised none of the `tabs` and `windows` events it declares. Bitwarden ends a passkey request, and
 lets the site fall back, when its prompt's window is removed, so a reader who closed the prompt
@@ -209,12 +196,12 @@ an extension finds its prompt by address and removes it, as Bitwarden does. When
 goes, however it went, every extension listening hears `tabs.onRemoved` and then
 `windows.onRemoved`, as in Chrome, and a stopped worker is woken to hear them. `windows.remove` and
 `tabs.remove` close such a page the way its own `window.close()` does, and refuse the browser's
-window and the reader's tabs. The engine cannot see where the application shows the page, so 0026
+window and the reader's tabs. The engine cannot see where the application shows the page, so 0024
 lets the application say when it shows one as a tab. See
 [omaweb#687](https://github.com/villekivela/omaweb/issues/687). _Part of the tab model the open
-question below is about. Propose it with 0004._
+question below is about. Propose it with 0003._
 
-**0024, let a profile go while a message waits for a worker.** A message to an extension's worker
+**0022, let a profile go while a message waits for a worker.** A message to an extension's worker
 waits in the worker's task queue until the worker is registered and started for it, and every
 message does, because the start is a round trip even for a running worker. Deleting the profile in
 that wait crashed the application on a `CHECK`: the queue drops its messages as the profile's
@@ -223,12 +210,12 @@ whether to report to `MessageTracker`. That answered true for any pointer, so th
 service up on a destroyed context. Chrome answers from its `ProfileManager`, which a profile leaves
 before it is destroyed. Now `ProfileQt` keeps the set of profiles whose destruction has not begun
 and leaves it first, and `IsValidContext` answers from that set without following the pointer. It is
-what made 0012's `theReadersAnswerToANotificationReachesTheExtension` crash in about one run in
+what made 0011's `theReadersAnswerToANotificationReachesTheExtension` crash in about one run in
 fifteen alone and one full-suite run in thirty: its last poll leaves a message waiting. See
 [omaweb#696](https://github.com/villekivela/omaweb/issues/696). _A bug fix with a test. Submit as
 is._
 
-**0025, draw a favicon again when the colour scheme changes.** An SVG favicon can follow
+**0023, draw a favicon again when the colour scheme changes.** An SVG favicon can follow
 `prefers-color-scheme`, as chatgpt.com's does, and the engine draws it under the scheme the page is
 told. The application's scheme changing left every page on show with the earlier drawing. The web
 theme took the new scheme and nothing told the pages, so the one `QStyleHints` connection, now made
@@ -243,8 +230,8 @@ again, the address on the next turn of the event loop, because the Quick view re
 property a turn after it is told. See [omaweb#700](https://github.com/villekivela/omaweb/issues/700).
 _A bug fix with tests. Submit as is._
 
-**0026, let the application say a page is a tab.** A page an extension opened with `windows.create`
-is a window of its own from 0023 on, and an application may show it as one of the reader's tabs
+**0024, let the application say a page is a tab.** A page an extension opened with `windows.create`
+is a window of its own from 0021 on, and an application may show it as one of the reader's tabs
 instead, as Omaweb does with Glance off or when the reader keeps a Glance. The extension then held a
 window the reader could not see, could close the reader's tab with `tabs.remove`, and did not find
 the page among the browser window's tabs. `QWebEngineExtensionManager::setPageIsTab` takes the
@@ -258,10 +245,10 @@ the call answers with the browser's window. The mark lives on the `WebContents`,
 own page shown as a tab is listed as one, where the delegate leaves every other extension page out.
 See [omaweb#694](https://github.com/villekivela/omaweb/issues/694). _Part of the tab model the open
 question below is about: the first thing the application says about which pages are tabs. Propose
-it with 0004._
+it with 0003._
 
-**0027, rank a page's SVG icon above its raster ones.** chatgpt.com declares a black ICO for any size
-ahead of an SVG that follows `prefers-color-scheme`, so 0025 had nothing to redraw: the tab showed
+**0025, rank a page's SVG icon above its raster ones.** chatgpt.com declares a black ICO for any size
+ahead of an SVG that follows `prefers-color-scheme`, so 0023 had nothing to redraw: the tab showed
 the ICO. Chromium's `FaviconHandler` ranks an icon declared for any size, or for none, at 1 before
 fetching it, scores an SVG's one drawing, made at the largest size wanted, below 1 against the 16
 and 32 pixels a tab wants, and goes on to a raster with exact frames, which scores 1. Chromium's
@@ -272,7 +259,7 @@ candidate carries no type from its `<link>`, so an SVG is known by its address: 
 [omaweb#700](https://github.com/villekivela/omaweb/issues/700). _A behaviour change with tests,
 where upstream may prefer the `<link>` type carried through Blink. Propose it with that question._
 
-**0028, say there is no Bluetooth LE in a build without BlueZ.** The engine is built with
+**0026, say there is no Bluetooth LE in a build without BlueZ.** The engine is built with
 `use_bluez=false`, so `BluetoothAdapter::CreateAdapter()` is Chromium's stub and makes no adapter,
 and Qt's `BluetoothAdapterFactory::GetAdapter()` drops its callers' callbacks when there is none.
 `PublicKeyCredential.getClientCapabilities()` waits on every capability it reports, the hybrid
@@ -286,7 +273,7 @@ conditional mediation reported available, as Chromium on Linux reports it. See
 [omaweb#711](https://github.com/villekivela/omaweb/issues/711). _A bug fix for Qt's build without
 BlueZ, headed for Gerrit._
 
-**0029, answer a push subscription alike in a window that keeps nothing.** The engine has no push
+**0027, answer a push subscription alike in a window that keeps nothing.** The engine has no push
 service unless the application switches one on, and Omaweb never does. Where there is none,
 `PushMessagingManager::Register` rejects with `SERVICE_NOT_AVAILABLE` at once, except in an
 off-the-record profile: there Chromium hides the missing service by asking for the notifications
@@ -297,7 +284,7 @@ the console message are gone. `Notification.requestPermission()` does not pass t
 unchanged. See [omaweb#421](https://github.com/villekivela/omaweb/issues/421). _A behaviour change
 that drops Chromium's incognito disguise, which only means something where a push service exists._
 
-**0030, grant a sanitized clipboard write during a gesture.** Blink asks for
+**0028, grant a sanitized clipboard write during a gesture.** Blink asks for
 `CLIPBOARD_SANITIZED_WRITE` only when a page writes text or a known image format during a click or a
 key press, and Chrome grants it by default. Qt granted it only with `JavascriptCanAccessClipboard`
 on, which also lets `document.execCommand("copy")` write with no gesture at all, and otherwise
@@ -308,7 +295,7 @@ cannot sanitize, is still `CLIPBOARD_READ_WRITE` and still asks. See
 [omaweb#745](https://github.com/villekivela/omaweb/issues/745). _A behaviour change to Chrome's
 answer._
 
-**0031, answer an extension's clipboardRead and clipboardWrite.** Blink asks the frame's content
+**0029, answer an extension's clipboardRead and clipboardWrite.** Blink asks the frame's content
 settings client before the asynchronous clipboard requests a permission and before
 `document.execCommand` reads or writes, and Qt's `ContentSettingsObserverQt` answered no. It now
 answers from the extension context of the script running, as Chrome's
@@ -316,17 +303,17 @@ answers from the extension context of the script running, as Chrome's
 privileged extension page other than a service worker writes. A password manager's offscreen
 document copies with no gesture and no view to ask from, so the answer has to come from the
 renderer. See [omaweb#745](https://github.com/villekivela/omaweb/issues/745). _Part of the extension
-runtime the open question below is about. Propose it with 0004._
+runtime the open question below is about. Propose it with 0003._
 
-**0032, let an offscreen document select text.** A password manager copies from its offscreen
-document by selecting the password in a text area. The document's view has no delegate, as 0019
+**0030, let an offscreen document select text.** A password manager copies from its offscreen
+document by selecting the password in a text area. The document's view has no delegate, as 0017
 found, and the text input state, selection and focused node changes the selection reports each
 reached for it, so the first such copy took the browser down. Each now returns first when there is
 no delegate. Stock QtWebEngine 6.11.2 crashes the same way. See
 [omaweb#745](https://github.com/villekivela/omaweb/issues/745). _A bug fix with a test. Submit as
 is._
 
-**0033, give every page chrome.app, chrome.csi and chrome.loadTimes.** Chrome's renderer defines the
+**0031, give every page chrome.app, chrome.csi and chrome.loadTimes.** Chrome's renderer defines the
 three on every page, and Google's sign-in turns away a Chrome-like browser without `chrome.app`
 (`rrk=46`). A script can define a stand-in, but a page reads a function's source and finds plain
 JavaScript where Chrome's reads `[native code]`. The extension bindings system already offers the
@@ -346,7 +333,7 @@ answer. Propose it with the extension runtime, since `chrome.app` needs its bind
 profile as a tab. That guess is fine for a prototype and wrong for Qt: the extension's own popup
 turns up in `tabs.query()`.
 
-Before 0004 can be proposed, an application needs a way to say which of its pages are tabs and which
+Before 0003 can be proposed, an application needs a way to say which of its pages are tabs and which
 one is active. That is what the QTBUG draft asks for. Ask before writing the API.
 
 ## Tests
@@ -361,28 +348,28 @@ worth having:
 - `anExtensionOpensAPage` fails
 - `anOffscreenDocumentCanBeCreated` crashes, signal 11
 
-Patch 0016's eight cases live in Qt's own `tst_qwebengineurlrequestinterceptor`, and the gate runs
-only those, beside the extension tests. Patch 0017's case lives in Qt's `tst_certificateerror`,
+Patch 0015's eight cases live in Qt's own `tst_qwebengineurlrequestinterceptor`, and the gate runs
+only those, beside the extension tests. Patch 0016's case lives in Qt's `tst_certificateerror`,
 which has the test server's certificate, and the gate runs it the same way. `scripts/verify.sh` runs
 all three and reports them. Neither compiles against a stock build, which has no API for them to
-call, so there is no stock run to compare: removing the line that keeps the chain fails 0017's case.
-Patch 0021's three cases, `aWindowIsWhereTheApplicationSaysItIs`,
+call, so there is no stock run to compare: removing the line that keeps the chain fails 0016's case.
+Patch 0019's three cases, `aWindowIsWhereTheApplicationSaysItIs`,
 `withoutAnAnswerAWindowIsWhereItsViewIs` and `aProviderCanReplaceItselfWhileItIsAsked`, are in the
 extension tests and do not compile without the patch either. Taking the four numbers out of
 `windows_api.cc` fails the first two, and calling the stored provider rather than a copy fails the
-third. Patch 0023's cases, `anExtensionIsToldTheWindowItOpenedClosed`,
+third. Patch 0021's cases, `anExtensionIsToldTheWindowItOpenedClosed`,
 `everyWayTheWindowClosesIsReported`, `anExtensionFindsItsWindowByAddressAndClosesIt` and
 `aWindowClosedWhileTheNextPageOpensIsNotAnswered`, fail on the series without it: `windows.create`
 answers with the browser's window, no event arrives, `tabs.query` cannot find the window's tab, and
 `windows.remove` and `tabs.remove` are refused. `aStoppedWorkerIsWokenToHearItsWindowClosed` waits
 for the worker's thirty-second idle stop, and fails when the router does not wake it.
-Patch 0026's cases, `aWindowTheApplicationShowsAsATabJoinsTheBrowsersWindow` and
+Patch 0024's cases, `aWindowTheApplicationShowsAsATabJoinsTheBrowsersWindow` and
 `aPageTakenAsATabWhileItOpensIsNeverAWindow`, do not compile without the patch, which adds the call
 they make. With the call doing nothing they fail: `tabs.query` finds the page in its own window, and
 `windows.create` answers with that window.
 
-Patch 0022's nine cases restart a profile on the same storage path, disable and enable the
-extension, or load it again changed. They compile on the series without 0022. Five of the first six,
+Patch 0020's nine cases restart a profile on the same storage path, disable and enable the
+extension, or load it again changed. They compile on the series without 0020. Five of the first six,
 all but the disabled case, were run there, and each failed, because no store is written. The update
 and restored-tab cases came with the patch's second version and failed on its first, which kept the
 old version's script and let a page load before the kept script was read. The lost-permission case
@@ -419,16 +406,16 @@ off-the-record profile off the disk: past it, the extension's pages do not run t
 nothing could register. The patch's own check that such a profile gets no store has no case that can
 fail today for the same reason.
 
-Patch 0024's case, `aProfileMayGoWhileAMessageWaitsForTheWorker`, crashes on every run without it:
+Patch 0022's case, `aProfileMayGoWhileAMessageWaitsForTheWorker`, crashes on every run without it:
 its worker's script runs for a second and a half before the worker can be registered, and its
 content script messages the worker as the page loads, so `cleanup()` deletes the profile with the
 message still waiting behind the registration. With `late_listener_ext`, whose content script pings
 the same way but whose worker script runs at once, the unfixed engine crashed in fifteen runs of
 thirty. Answering true from `IsValidContext` again crashes it, and so does leaving the set at the
 end of `~ProfileQt` rather than at the start. The fix touches only stock Qt code, but the case's
-fixture comes with 0009, so the case does not exist on a stock build.
+fixture comes with 0008, so the case does not exist on a stock build.
 
-Patch 0025's cases live in Qt's favicon tests: `redrawOnColorSchemeChange`,
+Patch 0023's cases live in Qt's favicon tests: `redrawOnColorSchemeChange`,
 `redrawOnNextVisitAfterColorSchemeChange`, `redrawAfterAPageStartsUnderAnotherScheme` and
 `sameDrawingIsNotReportedAgain` in `tst_favicon`, and
 `test_faviconRedrawnWhenColorSchemeChanges` in the Quick tests' `tst_favicon.qml`, which the gate
@@ -451,26 +438,27 @@ Each part is red when broken:
 - when the address is reported again at once rather than on the next turn, the Quick case fails:
   the view never reports the empty address
 
-Patch 0027's cases, `svgRanksAboveARasterBesideIt`, `svgRanksAboveARasterDeclaredAfterIt` and
-`rasterShownWhenTheSvgFails`, are in `tst_favicon` beside 0025's. Each loads a page that declares
+Patch 0025's cases, `svgRanksAboveARasterBesideIt`, `svgRanksAboveARasterDeclaredAfterIt` and
+`rasterShownWhenTheSvgFails`, are in `tst_favicon` beside 0023's. Each loads a page that declares
 `qtmulti.ico`, with 16, 32 and 64 pixel frames, for any size beside an SVG. The first declares the
 ICO first, as chatgpt.com does; the second declares the SVG first, which Blink reports last, so the
 ICO was fetched first and the SVG never was, and only the sort makes it pass. Both fail on a stock
 engine, which shows the ICO, and the gate's stock run checks them. The third names an SVG that does
 not exist and passes there too: it guards the fallback the patch keeps.
 
-Patch 0018 has no test case, because what it changes is how V8 is compiled. The gate reads that
-instead. `scripts/check-write-barriers.sh` fails a tree whose V8 is compiled with
-`-DV8_DISABLE_WRITE_BARRIERS`, as 6.11.2 is without the patch, and names the ninja file it read. It
-stays after 0018 drops, so a later Qt that turns the barriers off again is noticed.
+V8's write barriers have no test case, because what turns them off is how V8 is compiled. The gate
+reads that instead. `scripts/check-write-barriers.sh` fails a tree whose V8 is compiled with
+`-DV8_DISABLE_WRITE_BARRIERS`, as Qt's 6.11.2 is, and names the ninja file it read. 6.11.3 and
+6.140.0 turn the barriers on themselves, so the check is what notices a later Qt that turns them off
+again.
 
-Patch 0028's case, `clientCapabilitiesAnswerWithoutBluetooth`, is in `tst_qwebenginepage`. It
+Patch 0026's case, `clientCapabilitiesAnswerWithoutBluetooth`, is in `tst_qwebenginepage`. It
 loads a page at an `https` address, a secure context, asks `getClientCapabilities()`, and checks
 that the answer comes within ten seconds with no hybrid transport, no platform authenticator, no
 passkey platform authenticator and conditional mediation available. On a stock engine, built without
 BlueZ as Arch's is, no answer comes, and the gate's stock run checks that.
 
-Patch 0029's cases are in `tst_qwebenginepage` too. `pushSubscribeAnswersAlikeOffTheRecord`
+Patch 0027's cases are in `tst_qwebenginepage` too. `pushSubscribeAnswersAlikeOffTheRecord`
 registers a service worker from a page on an off-the-record and on an on-the-record profile,
 subscribes, and checks that the application is never asked for a permission and that both reject
 with `AbortError: Registration failed - push service not available`. Off the record, an engine
@@ -479,14 +467,14 @@ without the patch asks once, and the gate's stock run expects that case to fail.
 `Notification.requestPermission()` still reaches the application off the record; it passes on both
 engines, as the control for the first.
 
-Patch 0030's cases are in `tst_qwebenginepermission`. `clickedWriteIsNotAsked` writes text from a
+Patch 0028's cases are in `tst_qwebenginepermission`. `clickedWriteIsNotAsked` writes text from a
 script, which is asked about and denied, and then from a click, which writes without a request. The
 clipboard-write rows of `clipboardReadWritePermissionInitialState` and
 `clipboardReadWritePermission` expect `granted`, because that query asks about a sanitized write
 with a gesture. A stock engine reports `prompt` for the first row, which the gate's stock run
 checks.
 
-Patch 0033's case is in `tst_qwebenginepage`. `windowChromeAnswersAsChromeDoes` reads
+Patch 0031's case is in `tst_qwebenginepage`. `windowChromeAnswersAsChromeDoes` reads
 `window.chrome` in a page's main world and in a same-origin, an `about:blank` and a `srcdoc` frame,
 and compares it with Chromium 154's answer for a page that is not an installed app: the members of
 `chrome.app`, `isInstalled` false, `getDetails` reading `function getDetails() { [native code] }`
@@ -494,7 +482,7 @@ and returning null, `runningState()` `cannot_run`, `csi()` and `loadTimes()` ret
 from functions that read `[native code]`, and `installState()` calling back with `not_installed`. A
 stock engine gives an empty `window.chrome`, and the gate's stock run checks that.
 
-Patches 0031 and 0032 have cases in `tst_qwebengineextension`, which the gate runs whole.
+Patches 0029 and 0030 have cases in `tst_qwebengineextension`, which the gate runs whole.
 `anExtensionUsesTheClipboardItsPermissionsAllow` checks that a web page can neither copy nor paste
 with `execCommand` and no gesture, and that an extension that declares both permissions pastes from
 its page and copies from its offscreen document. The offscreen document is not a privileged page, so

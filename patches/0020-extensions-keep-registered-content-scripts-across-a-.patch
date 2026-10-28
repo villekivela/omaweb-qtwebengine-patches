@@ -1,8 +1,9 @@
-From d08de5b32ece87dea411de654c1788425509d5c5 Mon Sep 17 00:00:00 2001
+From 09ea124a55f3472fbfb1230fbb245b0cc856c37c Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivel=C3=A4?=
  <5814559+villekivela@users.noreply.github.com>
 Date: Sat, 10 Oct 2026 12:09:25 +0300
-Subject: [PATCH] extensions: keep registered content scripts across a restart
+Subject: [PATCH 20/31] extensions: keep registered content scripts across a
+ restart
 
 chrome.scripting.registerContentScripts keeps a script across sessions
 unless the extension says otherwise, and in QtWebEngine every one was

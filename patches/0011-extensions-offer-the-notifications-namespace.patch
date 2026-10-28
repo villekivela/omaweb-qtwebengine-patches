@@ -1,7 +1,7 @@
-From 69628c3257fd72abc3060e534f8001f0264acaaa Mon Sep 17 00:00:00 2001
+From 46318daa062bea7a94f3b33b60ad0d0078041a15 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivela=CC=88?= <vkivela@hotmail.com>
 Date: Mon, 21 Sep 2026 13:39:54 +0300
-Subject: [PATCH 12/15] extensions: offer the notifications namespace
+Subject: [PATCH 11/31] extensions: offer the notifications namespace
 
 1Password registers notifications.onClicked and onButtonClicked at the
 top level of its worker. The namespace was absent, so the worker threw
@@ -906,8 +906,8 @@ new file mode 100644
 index 0000000000000000000000000000000000000000..91740ca76159c90c7d904255c56f0733e3ae6c1c
 GIT binary patch
 literal 68
-zcmeAS@N?(olHy`uVBq!ia0vp^j3CUx1|;Q0k8}blZci7-kcwN$DG5Lh8v~O;;{|;n
-Oi^0>?&t;ucLK6URFbux{
+zcmeAS@N?(olHy`uVBq!ia0y~yU|<Ac4mJh`26@pVoeT^N+@3CuAr-fhQxX^$7}yw?
+V3>q)!GcYhPc)I$ztaD0e0swF@48H&X
 
 literal 0
 HcmV?d00001
@@ -1124,5 +1124,5 @@ index 27a65d420c..f0d60b31be 100644
  {
      // Changing the storage path after construction rebuilds the profile's PrefService. The
 -- 
-2.54.0 (Apple Git-157)
+2.56.0
 

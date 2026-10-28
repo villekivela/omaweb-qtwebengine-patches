@@ -1,9 +1,9 @@
-From db3117c507d5b8a35f9b847df1a0250b2462e306 Mon Sep 17 00:00:00 2001
+From 887ea8089c225f82a9411dbc3099575142e4c1e2 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivel=C3=A4?=
  <5814559+villekivela@users.noreply.github.com>
 Date: Thu, 22 Oct 2026 09:56:13 +0000
-Subject: [PATCH] extensions: answer clipboardRead and clipboardWrite as Chrome
- does
+Subject: [PATCH 29/31] extensions: answer clipboardRead and clipboardWrite as
+ Chrome does
 
 An extension that declares clipboardWrite could not copy without a
 gesture, and one that declares clipboardRead was asked before it read.
@@ -337,5 +337,5 @@ index 03dd05bebb..9c9bfe2c59 100644
  {
      // A message to an extension's worker waits in a queue until the worker is registered and
 -- 
-2.55.0
+2.56.0
 

@@ -1,8 +1,8 @@
-From d4783b08c7d1d93aa6e8d40e33a01eff62c8dee9 Mon Sep 17 00:00:00 2001
+From 7cfef1fc46390c69acc5f5d489c4d8ec7e7fcc45 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivela=CC=88?= <vkivela@hotmail.com>
 Date: Fri, 25 Sep 2026 09:11:04 +0300
-Subject: [PATCH] interceptor: let a request interceptor ask for the host's DNS
- aliases
+Subject: [PATCH 15/31] interceptor: let a request interceptor ask for the
+ host's DNS aliases
 
 A content blocker judges a request by its host, and a tracker served
 from a subdomain of the page's own site, with a DNS CNAME pointing at
@@ -725,5 +725,5 @@ index 2550580e24..5f2f9d1448 100644
  QTEST_MAIN(tst_QWebEngineUrlRequestInterceptor)
  #include "tst_qwebengineurlrequestinterceptor.moc"
 -- 
-2.54.0 (Apple Git-157)
+2.56.0
 

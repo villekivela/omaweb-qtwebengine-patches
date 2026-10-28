@@ -1,8 +1,8 @@
-From 833908403b41d6a8fb2d4400fb5b326af8d5a861 Mon Sep 17 00:00:00 2001
+From 30a496396fcf3bd0b41c8b9af784a67a4e6b0af3 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivel=C3=A4?= <vkivela@hotmail.com>
 Date: Mon, 12 Oct 2026 06:15:46 +0000
-Subject: [PATCH] push: answer a subscription alike in a window that keeps
- nothing
+Subject: [PATCH 27/31] push: answer a subscription alike in a window that
+ keeps nothing
 
 PushManager.subscribe() asked the application for the notifications
 permission in an off-the-record profile before it said no. The engine
@@ -254,5 +254,5 @@ index 6012bc186c..77a3b2ddfe 100644
  {
  public:
 -- 
-2.55.0
+2.56.0
 

@@ -1,7 +1,7 @@
-From b5fa7407d727edec67fb20bf7e43c4085537d4af Mon Sep 17 00:00:00 2001
+From c16114d7ba5d6e5ea97ae9ee18bc5ec46661054a Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivela=CC=88?= <vkivela@hotmail.com>
 Date: Fri, 18 Sep 2026 17:47:04 +0300
-Subject: [PATCH 03/15] extensions: keep ExtensionPrefs valid when the
+Subject: [PATCH 02/31] extensions: keep ExtensionPrefs valid when the
  PrefService is rebuilt
 
 Changing a profile's storage name, off-the-record flag or storage path
@@ -143,5 +143,5 @@ index ecbb5b791d..b37ef1ec81 100644
  QTEST_MAIN(tst_QWebEngineExtension)
  #include "tst_qwebengineextension.moc"
 -- 
-2.54.0 (Apple Git-157)
+2.56.0
 

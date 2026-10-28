@@ -1,8 +1,8 @@
-From a2c2ac5afe87600454720985563349339d2a2ece Mon Sep 17 00:00:00 2001
+From 793e4c6411dd95bc71bb3c8acd168bc53aa23754 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivel=C3=A4?= <vkivela@hotmail.com>
 Date: Mon, 12 Oct 2026 05:42:04 +0000
-Subject: [PATCH] bluetooth: say there is no Bluetooth LE in a build without
- BlueZ
+Subject: [PATCH 26/31] bluetooth: say there is no Bluetooth LE in a build
+ without BlueZ
 
 A page that asked PublicKeyCredential.getClientCapabilities() never
 heard back. Chromium answers once every capability it reports has
@@ -98,5 +98,5 @@ index 82b7707b87..6012bc186c 100644
  {
  public:
 -- 
-2.55.0
+2.56.0
 

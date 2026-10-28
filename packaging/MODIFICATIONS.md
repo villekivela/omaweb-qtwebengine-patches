@@ -1,6 +1,6 @@
 # A modified QtWebEngine
 
-This package is not Qt's build of QtWebEngine 6.11.2. It is that release with a patch series
+This package is not Qt's build of QtWebEngine 6.11.3. It is that release with a patch series
 applied, and it installs into `/usr/lib/omaweb` so that the distribution's `qt6-webengine` stays
 where it is and every other Qt application on the machine keeps the engine it had.
 
@@ -9,43 +9,42 @@ this file is for.
 
 ## What changed
 
-Thirty-three patches, applied in order to the released source. Fourteen add the part of Chromium's
+Thirty-one patches, applied in order to the released source. Thirteen add the part of Chromium's
 extension runtime that QtWebEngine compiles out: renderer bindings, the `tabs`, `windows`,
 `permissions`, `scripting`, `notifications` and `webNavigation` namespaces behind an embedder
 delegate, native messaging, and web accessible resources. Five of those are bug fixes in Qt's own
-code rather than additions. The fifteenth restores Perfetto's `track_event_macros.h` to the version
-Chromium ships, which Qt's copy changes. The sixteenth lets a request interceptor ask for the DNS
-aliases of a request's host, and the seventeenth reports the certificate chain a page arrived over
-on `QWebEngineLoadingInfo`. The eighteenth turns V8's write barriers back on, which Qt's 6.11.2
-build turns off and its 6.140.0 turns on again. The nineteenth is a bug fix in Qt's own code: an
-extension that creates an offscreen document no longer crashes the engine. The twentieth is Qt's
+code rather than additions. The fourteenth restores Perfetto's `track_event_macros.h` to the version
+Chromium ships, which Qt's copy changes. The fifteenth lets a request interceptor ask for the DNS
+aliases of a request's host, and the sixteenth reports the certificate chain a page arrived over
+on `QWebEngineLoadingInfo`. The seventeenth is a bug fix in Qt's own code: an
+extension that creates an offscreen document no longer crashes the engine. The eighteenth is Qt's
 own change to the engine's tests, so that they build against Qt 6.12; it changes nothing that is
-installed. The twenty-first adds one more piece of the extension runtime: the application says
+installed. The nineteenth adds one more piece of the extension runtime: the application says
 where the window holding a page is, and the `windows` namespace reports it to an extension. The
-twenty-second keeps the content scripts an extension registers to persist across a restart, in the
+twentieth keeps the content scripts an extension registers to persist across a restart, in the
 profile's storage path, forgets them when another version of the extension is loaded, holds a page
 they are for until they are read, writes a profile's preferences before it is deleted or set up on
 another path, and fixes Chromium's `scripting` namespace keeping one only for the session after an
-update that leaves its persistence out. The twenty-third adds one more piece of the extension
+update that leaves its persistence out. The twenty-first adds one more piece of the extension
 runtime: a page an extension opens is a window of its own, and the extension is told when it closes.
-The twenty-fourth is a bug fix in Qt's own code: deleting a profile while an extension's message
-waits for its worker no longer crashes the application. The twenty-fifth is a bug fix in Qt's own
+The twenty-second is a bug fix in Qt's own code: deleting a profile while an extension's message
+waits for its worker no longer crashes the application. The twenty-third is a bug fix in Qt's own
 code as well: when the application's colour scheme changes, pages are told it, and a favicon drawn
 for the earlier scheme is drawn again, at once for a page on show and on the next visit for any
-other. The twenty-sixth adds `QWebEngineExtensionManager::setPageIsTab`, through which the
+other. The twenty-fourth adds `QWebEngineExtensionManager::setPageIsTab`, through which the
 application says it shows a page an extension opened as one of its tabs, so the page leaves the
-window of its own for the browser's. The twenty-seventh changes Chromium's favicon ranking: a page's
+window of its own for the browser's. The twenty-fifth changes Chromium's favicon ranking: a page's
 SVG icon is tried before its raster ones and taken once it is drawn, so an icon that follows the
-colour scheme is shown rather than a raster one declared beside it. The twenty-eighth is a bug fix
+colour scheme is shown rather than a raster one declared beside it. The twenty-sixth is a bug fix
 for a build without BlueZ, as this one is: Chromium is told there is no Bluetooth LE, so a page that
 asks what its passkeys can reach hears back rather than waiting on a Bluetooth adapter that never
-comes. The twenty-ninth removes Chromium's disguise for a missing push service in a window that
+comes. The twenty-seventh removes Chromium's disguise for a missing push service in a window that
 keeps nothing: a page that subscribes there is refused at once, as in any other window, rather than
-after a question to the application. The thirtieth grants a page's clipboard write of text or a
+after a question to the application. The twenty-eighth grants a page's clipboard write of text or a
 known image format during a click or a key press without asking the application, as Chrome does.
-The thirty-first adds one more piece of the extension runtime: an extension that declares
+The twenty-ninth adds one more piece of the extension runtime: an extension that declares
 `clipboardRead` or `clipboardWrite` reads or writes the clipboard without a gesture or a question.
-The thirty-second is a bug fix in Qt's own code: an offscreen document that selects text no longer
+The thirtieth is a bug fix in Qt's own code: an offscreen document that selects text no longer
 crashes the engine. The last gives every page Chrome's `chrome.app`, `chrome.csi` and
 `chrome.loadTimes`, defined as Chrome's renderer defines them, which Google's sign-in reads.
 
@@ -59,7 +58,7 @@ toolchain each architecture is built with.
 
 `toolchain/module-version.patch` versions the engine's modules after the engine rather than after
 the Qt it is built against, as Qt's own 6.140.0 does, so its libraries, headers and CMake package say
-6.11.2 on any Qt. It changes the top-level `CMakeLists.txt` and four `find_package` calls under
+6.11.3 on any Qt. It changes the top-level `CMakeLists.txt` and four `find_package` calls under
 `src/`, and no code.
 
 Each patch is a single commit with its own message explaining what it changes and why. They are in
@@ -72,11 +71,11 @@ The base is the released source tarball, which carries the Chromium tree it buil
 `src/3rdparty`:
 
 ```text
-https://download.qt.io/official_releases/qt/6.11/6.11.2/submodules/qtwebengine-everywhere-src-6.11.2.tar.xz
+https://download.qt.io/official_releases/qt/6.11/6.11.3/submodules/qtwebengine-everywhere-src-6.11.3.tar.xz
 ```
 
-`scripts/refresh.sh 6.11.2` fetches that tarball, unpacks it, commits it under the tag
-`v6.11.2-tarball` and applies the series on top, so the modification is a range of commits rather
+`scripts/refresh.sh 6.11.3` fetches that tarball, unpacks it, commits it under the tag
+`v6.11.3-tarball` and applies the series on top, so the modification is a range of commits rather
 than a description of one. `scripts/build-inside.sh` is the build.
 
 ## Replacing this engine

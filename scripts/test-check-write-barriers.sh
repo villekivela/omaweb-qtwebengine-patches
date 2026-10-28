@@ -49,7 +49,7 @@ ninja="build/src/core/Release/aarch64/obj/v8/v8_base_without_compiler.ninja"
 stand_in off "-DV8_ENABLE_WEBASSEMBLY -DV8_DISABLE_WRITE_BARRIERS -DV8_ENABLE_SINGLE_GENERATION"
 check off 1 "0 passed, 1 failed" "off/$ninja"
 
-# With patch 0018, or from 6.140.0 on.
+# From 6.11.3 and 6.140.0 on.
 stand_in on "-DV8_ENABLE_WEBASSEMBLY -DV8_ENABLE_LAZY_SOURCE_POSITIONS"
 check on 0 "1 passed, 0 failed" "on/$ninja"
 

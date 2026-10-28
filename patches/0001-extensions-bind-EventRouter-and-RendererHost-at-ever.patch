@@ -1,7 +1,7 @@
-From 1b33a6bf643441ae9535eedcbdb84371730f626f Mon Sep 17 00:00:00 2001
+From 83129b3720d73da36eb37bdf4e3d2b3ad01cdd75 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivela=CC=88?= <vkivela@hotmail.com>
 Date: Fri, 18 Sep 2026 17:47:01 +0300
-Subject: [PATCH 01/15] extensions: bind EventRouter and RendererHost at every
+Subject: [PATCH 01/31] extensions: bind EventRouter and RendererHost at every
  registration point
 
 chrome.i18n.getMessage() is a synchronous mojo call to RendererHost, which
@@ -174,5 +174,5 @@ index 7077ee9694..ecbb5b791d 100644
  QTEST_MAIN(tst_QWebEngineExtension)
  #include "tst_qwebengineextension.moc"
 -- 
-2.54.0 (Apple Git-157)
+2.56.0
 

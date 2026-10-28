@@ -1,7 +1,8 @@
-From bd2946da642cadbb88c0623ea7cb2f02b88ab3f2 Mon Sep 17 00:00:00 2001
+From 1c7a12d9cdc8e8cfb607f9af3669ca82f18ed09c Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivel=C3=A4?= <vkivela@hotmail.com>
 Date: Sat, 10 Oct 2026 10:55:47 +0300
-Subject: [PATCH] extensions: report where a window is, as the application says
+Subject: [PATCH 19/31] extensions: report where a window is, as the
+ application says
 
 chrome.windows answered with one window carrying an id, focus, incognito,
 type, state and tabs, and no left, top, width or height. Chrome always
@@ -616,5 +617,5 @@ index 52c2a26be3..1290b685fb 100644
  QTEST_MAIN(tst_QWebEngineExtension)
  #include "tst_qwebengineextension.moc"
 -- 
-2.55.0
+2.56.0
 

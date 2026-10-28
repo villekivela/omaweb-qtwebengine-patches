@@ -1,7 +1,7 @@
-From 2e4e0b39e5eaa08240a48f33b80b8968286afc23 Mon Sep 17 00:00:00 2001
+From ea4b57ea66ff63d8a4d6967488d546b0c8882e1a Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivel=C3=A4?= <vkivela@hotmail.com>
 Date: Sun, 11 Oct 2026 12:49:55 +0000
-Subject: [PATCH] extensions: let the application say a page is a tab
+Subject: [PATCH 24/31] extensions: let the application say a page is a tab
 
 A page an extension opens with windows.create is a window of its own,
 and an application may show it as one of the reader's tabs instead:
@@ -438,5 +438,5 @@ index 83458a04d7..03dd05bebb 100644
  QTEST_MAIN(tst_QWebEngineExtension)
  #include "tst_qwebengineextension.moc"
 -- 
-2.55.0
+2.56.0
 

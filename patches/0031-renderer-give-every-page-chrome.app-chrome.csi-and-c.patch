@@ -1,8 +1,8 @@
-From 8de2d803dc4fa6b7f896ebc817255ab234a23525 Mon Sep 17 00:00:00 2001
+From dec00c98605eb44478a53d3cfb1e99f802080026 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivel=C3=A4?=
  <5814559+villekivela@users.noreply.github.com>
 Date: Sat, 24 Oct 2026 06:54:36 +0000
-Subject: [PATCH] renderer: give every page chrome.app, chrome.csi and
+Subject: [PATCH 31/31] renderer: give every page chrome.app, chrome.csi and
  chrome.loadTimes
 
 Chrome's renderer gives every page window.chrome.app, chrome.csi and
@@ -193,10 +193,10 @@ index 0597147afb..b0f45830e4 100644
  ]
  
 diff --git a/src/core/configure/BUILD.root.gn.in b/src/core/configure/BUILD.root.gn.in
-index 7946086c6b..b4e3d82e44 100644
+index 17088f2d53..9b01324727 100644
 --- a/src/core/configure/BUILD.root.gn.in
 +++ b/src/core/configure/BUILD.root.gn.in
-@@ -479,10 +479,14 @@ source_set("qtwebengine_sources") {
+@@ -482,10 +482,14 @@ source_set("qtwebengine_sources") {
        "//chrome/common/extensions/permissions/chrome_permission_message_provider.h",
        "//chrome/common/extensions/permissions/chrome_permission_message_rules.cc",
        "//chrome/common/extensions/permissions/chrome_permission_message_rules.h",
@@ -346,5 +346,5 @@ index 77a3b2ddfe..e78c9801d4 100644
  {
      QString html("<html><head></head><body><script>alert('foo');</script><p>hello world</p></body></html>");
 -- 
-2.55.0
+2.56.0
 
