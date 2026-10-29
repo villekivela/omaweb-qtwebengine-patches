@@ -25,13 +25,40 @@ run-to-run spread: Speedometer 24.74 against 24.10 and 24.77, JetStream 368.2 ag
 ## The patch
 
 `clang.patch` is applied by `refresh.sh` to a clang build only, after the series. It is not part of
-the series: it changes how the engine is compiled, not what its code does. It does four things:
+the series: it changes how the engine is compiled, not what its code does. It does five things:
 
 - It turns on LLD and ThinLTO, which Qt allows only when Qt itself was built for LLD.
 - It turns on PGO when a profile is given, which Qt never does.
 - It turns on V8's builtins profile on its own, which V8 takes only with Chrome's.
 - Where V8's builtins profile no longer fits a builtin, it has V8 build that builtin without the
   profile instead of stopping the build. Qt's V8 is not built quite as Chrome's.
+- It links `QtWebEngineCore` with Chrome's `thinlto_optimize_max`, `--lto-O2`, where Chromium links
+  every target but Chrome's own at `--lto-O0`.
+
+## The link level
+
+At `--lto-O0` ThinLTO imports functions across files and then neither inlines nor optimizes what it
+imported, so the whole-program pass that ThinLTO is for does nothing. Chrome's own targets take
+`thinlto_optimize_max` in `chrome/BUILD.gn`. `QtWebEngineCore` is the library Qt builds in their
+place, in `src/core/configure/BUILD.root.gn.in`, and kept Chromium's default.
+
+Measured on 6.11.3 x86_64, a Ryzen 7 PRO 7840HS composited on its GPU, three runs of each suite with
+the same Omaweb binary (villekivela/omaweb#886), Omaweb's own mean score:
+
+| Suite            | `--lto-O0` | `--lto-O2` | Change |
+| ---------------- | ---------- | ---------- | ------ |
+| Speedometer 3.1  | 20.06      | 22.51      | +12.2% |
+| JetStream 2.2    | 360.43     | 363.57     | +0.9%  |
+| MotionMark 1.3.2 | 2695.96    | 3063.84    | +13.6% |
+
+The latest Chromium's Speedometer runs spread by 1.4% and 1.3% in the two sessions, so Speedometer's
+gain is outside it, and JetStream's is not. The link takes longer: 449 s cold with ten threads, at
+3.9 GB of the container's anonymous memory, against 3.5 GB at `--lto-O0` with sixteen. A relink with
+a warm ThinLTO cache took 39 s.
+
+`scripts/check-lto-level.sh` reads the level from `QtWebEngineCore_lflags.rsp`, the link flags GN
+writes and the CMake link reads, and the gate runs it, so a Qt or Chromium that drops the config is
+noticed. A GCC build links without ThinLTO and passes.
 
 ## The module version
 
