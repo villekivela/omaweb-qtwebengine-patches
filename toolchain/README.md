@@ -43,7 +43,8 @@ imported, so the whole-program pass that ThinLTO is for does nothing. Chrome's o
 place, in `src/core/configure/BUILD.root.gn.in`, and kept Chromium's default.
 
 Measured on 6.11.3 x86_64, a Ryzen 7 PRO 7840HS composited on its GPU, three runs of each suite with
-the same Omaweb binary (villekivela/omaweb#886), Omaweb's own mean score:
+the same Omaweb binary ([omaweb#886](https://github.com/villekivela/omaweb/issues/886)), Omaweb's
+own mean score:
 
 | Suite            | `--lto-O0` | `--lto-O2` | Change |
 | ---------------- | ---------- | ---------- | ------ |
@@ -51,8 +52,8 @@ the same Omaweb binary (villekivela/omaweb#886), Omaweb's own mean score:
 | JetStream 2.2    | 360.43     | 363.57     | +0.9%  |
 | MotionMark 1.3.2 | 2695.96    | 3063.84    | +13.6% |
 
-The latest Chromium's Speedometer runs spread by 1.4% and 1.3% in the two sessions, so Speedometer's
-gain is outside it, and JetStream's is not. The link takes longer: 449 s cold with ten threads, at
+Omaweb's own Speedometer runs spread by 0.5% and 0.7% and the latest Chromium's by 1.4% and 1.3%,
+so Speedometer's gain is outside both and JetStream's is not. MotionMark's spread up to 6.8%. The link takes longer: 449 s cold with ten threads, at
 3.9 GB of the container's anonymous memory, against 3.5 GB at `--lto-O0` with sixteen. A relink with
 a warm ThinLTO cache took 39 s.
 

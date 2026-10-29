@@ -49,9 +49,15 @@ check o0 1 "0 passed, 1 failed" "o0/$rsp"
 stand_in o2 "-fPIC -flto=thin -Wl,--thinlto-jobs=all -Wl,--lto-O2 -fuse-ld=lld"
 check o2 0 "1 passed, 0 failed" "o2/$rsp"
 
-# A level that only starts the same way is not the one.
+# Below O2 by one level is still below it.
 stand_in o1 "-fPIC -flto=thin -Wl,--lto-O1"
 check o1 1 "0 passed, 1 failed" "o1/$rsp"
+
+# The linker takes the last level it is given, so a target's own config after the default counts.
+stand_in o0then2 "-flto=thin -Wl,--lto-O0 -Wl,--lto-O2"
+check o0then2 0 "1 passed, 0 failed" "o0then2/$rsp"
+stand_in o2then0 "-flto=thin -Wl,--lto-O2 -Wl,--lto-O0"
+check o2then0 1 "0 passed, 1 failed" "o2then0/$rsp"
 
 # aarch64 builds with GCC and links no ThinLTO, so it has no level to hold.
 stand_in gcc "-fPIC -Wl,--gc-sections -Wl,-z,relro"
