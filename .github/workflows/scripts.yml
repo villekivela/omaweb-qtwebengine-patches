@@ -91,6 +91,18 @@ jobs:
       - name: Test the write-barrier check
         run: scripts/test-check-write-barriers.sh
 
+  lto-level:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Shellcheck
+        run: shellcheck scripts/check-lto-level.sh scripts/test-check-lto-level.sh
+
+      - name: Test the ThinLTO level check
+        run: scripts/test-check-lto-level.sh
+
   fonts:
     runs-on: ubuntu-latest
     timeout-minutes: 5

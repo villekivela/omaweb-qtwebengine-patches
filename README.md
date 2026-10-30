@@ -452,6 +452,10 @@ reads that instead. `scripts/check-write-barriers.sh` fails a tree whose V8 is c
 6.140.0 turn the barriers on themselves, so the check is what notices a later Qt that turns them off
 again.
 
+The link level has no test case either. `scripts/check-lto-level.sh` fails a tree whose engine
+library links with ThinLTO below `--lto-O2`, or names no level, and names the response file it read.
+`clang.patch` gives the library Chrome's level; see `toolchain/README.md`.
+
 Patch 0026's case, `clientCapabilitiesAnswerWithoutBluetooth`, is in `tst_qwebenginepage`. It
 loads a page at an `https` address, a secure context, asks `getClientCapabilities()`, and checks
 that the answer comes within ten seconds with no hybrid transport, no platform authenticator, no

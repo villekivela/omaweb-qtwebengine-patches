@@ -85,3 +85,17 @@ diff --git a/src/3rdparty/chromium/v8/BUILD.gn b/src/3rdparty/chromium/v8/BUILD.
        ]
  
        if (!v8_enable_builtins_profiling && v8_enable_builtins_reordering) {
+diff --git a/src/core/configure/BUILD.root.gn.in b/src/core/configure/BUILD.root.gn.in
+index 9b01324727..2ad50b8d13 100644
+--- a/src/core/configure/BUILD.root.gn.in
++++ b/src/core/configure/BUILD.root.gn.in
+@@ -113,6 +113,9 @@ shared_library("QtWebEngineCore") {
+     ":QtWebEngineCore_config",
+     "//build/config:precompiled_headers"
+   ]
++  # Chromium links every target at --lto-O0 but Chrome itself, which this library stands for.
++  configs -= [ "//build/config/compiler:thinlto_optimize_default" ]
++  configs += [ "//build/config/compiler:thinlto_optimize_max" ]
+   include_dirs = [
+     "//skia/config",
+     "//third_party",

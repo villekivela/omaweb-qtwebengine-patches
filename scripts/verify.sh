@@ -66,8 +66,9 @@ fi
 export QTWEBENGINE_CHROMIUM_FLAGS
 
 # Read from the build rather than run, and before the tests, so its verdict is there even when a
-# test never reaches one. Its Totals line goes to the gate with theirs.
+# test never reaches one. Their Totals lines go to the gate with the tests'.
 sh "$(dirname "$0")/check-write-barriers.sh" "$tree" || true
+sh "$(dirname "$0")/check-lto-level.sh" "$tree" || true
 # The fonts too, so a machine with none says so before the cases it takes down.
 sh "$(dirname "$0")/check-fonts.sh" || true
 
