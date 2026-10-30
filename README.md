@@ -512,6 +512,7 @@ an offscreen document and removes the text area; a stock engine dies with SIGSEG
 | 6.11.2-13, series grown to 25 | 21 already applied, 4 more, no conflicts | incremental | 81 of 81 | none |
 | 6.11.2-14, series grown to 26 | x86_64 25 already applied, 1 more; aarch64 24 already applied, 2 more; no conflicts | incremental | 84 of 84 on each | none |
 | 6.11.2-15, series grown to 29 | 26 already applied, 3 more, no conflicts | incremental | 93 of 93 on each | none |
+| 6.11.3-2, x86_64 linked at `--lto-O2` | 31 already applied, no conflicts | relinked | 111 of 111 on x86_64 | none |
 
 The rows after the first are the series growing, and the last is the same series rebuilt with each
 architecture's toolchain and published as 6.11.2-5 (omaweb#576), rather than Qt moving. They
@@ -524,6 +525,12 @@ and compiled the engine clean, then stopped where the tests compile, because Qt 
 `QTEST_DISABLE_KEYPAD_NAVIGATION`. 0020 is Qt's own one-line removal, and the row is the run that
 added it to that tree. aarch64 was built on the Mac from the same commit, `32be1d7`, against Arch
 Linux ARM's Qt 6.11.2, and its gate read the same: 37 of 37, 10 of 10, 3 of 3 and 1 of 1.
+
+6.11.3-2 changed no patch. `toolchain/clang.patch` links the engine library at `--lto-O2`
+(omaweb#886), so the x86_64 tree that built 6.11.3-1 regenerated its GN files and relinked that one
+library: 47 s with a warm ThinLTO cache, where a cold link takes 449 s. The tree was checked to be
+the tarball with this series applied rather than run through `refresh.sh` again, so the row was
+written by hand. aarch64 builds with GCC, which the change does not reach, and stays on 6.11.3-1.
 
 That row is the easy case. 6.11.1 and 6.11.2 share a Chromium base, so nothing under patches 0005
 and 0006 moved.
