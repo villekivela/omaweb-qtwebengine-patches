@@ -53,7 +53,9 @@ Chromium, where Qt's build would use GCC. On aarch64 it is built with GCC, as Qt
 `toolchain/clang.patch` opens the clang build in Qt's build files, `cmake/QtToolchainHelpers.cmake`
 and `src/core/CMakeLists.txt`, and edits Chromium's `v8/BUILD.gn`: where V8's builtins profile no
 longer fits a builtin, V8's snapshot step builds that builtin without it instead of stopping. It
-changes how the engine is compiled, not what its code does. `scripts/engine-toolchain.sh` names the
+also links `QtWebEngineCore` with ThinLTO's optimizations, `--lto-O2`, as Chrome's own targets are
+linked, in `src/core/configure/BUILD.root.gn.in`. It changes how the engine is compiled, not what
+its code does. `scripts/engine-toolchain.sh` names the
 toolchain each architecture is built with.
 
 `toolchain/module-version.patch` versions the engine's modules after the engine rather than after
