@@ -526,11 +526,11 @@ and compiled the engine clean, then stopped where the tests compile, because Qt 
 added it to that tree. aarch64 was built on the Mac from the same commit, `32be1d7`, against Arch
 Linux ARM's Qt 6.11.2, and its gate read the same: 37 of 37, 10 of 10, 3 of 3 and 1 of 1.
 
-6.11.3-2 changed no patch. `toolchain/clang.patch` links the engine library at `--lto-O2` (omaweb#886),
-so the x86_64 tree that built 6.11.3-1 regenerated its GN files and relinked that one library: 47 s
-with a warm ThinLTO cache, where a cold link takes 449 s. The tree was checked to be the tarball with
-this series applied rather than run through `refresh.sh` again, so the row was written by hand.
-aarch64 builds with GCC, which the change does not reach, and stays on 6.11.3-1.
+6.11.3-2 changed no patch. `toolchain/clang.patch` links the engine library at `--lto-O2`
+(omaweb#886), so the x86_64 tree that built 6.11.3-1 regenerated its GN files and relinked that one
+library: 47 s with a warm ThinLTO cache, where a cold link takes 449 s. The tree was checked to be
+the tarball with this series applied rather than run through `refresh.sh` again, so the row was
+written by hand. aarch64 builds with GCC, which the change does not reach, and stays on 6.11.3-1.
 
 That row is the easy case. 6.11.1 and 6.11.2 share a Chromium base, so nothing under patches 0005
 and 0006 moved.
