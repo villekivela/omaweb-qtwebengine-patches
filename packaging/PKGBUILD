@@ -12,7 +12,7 @@
 
 pkgname=omaweb-qtwebengine
 pkgver=6.11.3
-pkgrel=1
+pkgrel=2
 pkgdesc="QtWebEngine with Omaweb's extension patches, installed beside Omaweb"
 arch=('x86_64' 'aarch64')
 url="https://github.com/villekivela/omaweb-qtwebengine-patches"
@@ -46,7 +46,7 @@ optdepends=('qt6-tools: the QWebEngineView plugin for Qt Designer')
 # The notices travel with this file rather than with the tarball, so correcting
 # one does not cost a rebuild.
 source=('MODIFICATIONS.md' 'LGPL-3.0-only.txt' 'chromium-LICENSE.txt')
-sha256sums=('3e683e8b6d581ae22e19ffc072a276a7aa1dac01982257d0bd4631519243d923'
+sha256sums=('3a5aaf6b9df5709263c950c1f8973c4fee48d850c5ef25ca1fde2cf2b82c0dcb'
             'da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768'
             '368cca1106be99d39ecd32a38d8305585d802a475effb66380b91ffc9bcf709b')
 
