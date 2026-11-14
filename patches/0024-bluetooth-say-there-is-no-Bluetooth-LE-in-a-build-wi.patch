@@ -1,7 +1,7 @@
-From 793e4c6411dd95bc71bb3c8acd168bc53aa23754 Mon Sep 17 00:00:00 2001
+From 8bd17c5ee4b09566d3ef20a5b4adac31ac619f4d Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivel=C3=A4?= <vkivela@hotmail.com>
 Date: Mon, 12 Oct 2026 05:42:04 +0000
-Subject: [PATCH 26/31] bluetooth: say there is no Bluetooth LE in a build
+Subject: [PATCH 24/30] bluetooth: say there is no Bluetooth LE in a build
  without BlueZ
 
 A page that asked PublicKeyCredential.getClientCapabilities() never
@@ -54,10 +54,10 @@ index c5c88bdd3d..047c841d95 100644
    return true;
  #else
 diff --git a/tests/auto/widgets/qwebenginepage/tst_qwebenginepage.cpp b/tests/auto/widgets/qwebenginepage/tst_qwebenginepage.cpp
-index 82b7707b87..6012bc186c 100644
+index cd811cd1b9..bbc4539d65 100644
 --- a/tests/auto/widgets/qwebenginepage/tst_qwebenginepage.cpp
 +++ b/tests/auto/widgets/qwebenginepage/tst_qwebenginepage.cpp
-@@ -191,6 +191,7 @@ private Q_SLOTS:
+@@ -199,6 +199,7 @@ private Q_SLOTS:
      void setHtmlWithImageResource();
      void setHtmlWithStylesheetResource();
      void setHtmlWithBaseURL();
@@ -65,7 +65,7 @@ index 82b7707b87..6012bc186c 100644
      void setHtmlWithJSAlert();
      void setHtmlWithModuleImport();
      void baseUrl_data();
-@@ -2402,6 +2403,31 @@ void tst_QWebEnginePage::setHtmlWithBaseURL()
+@@ -2417,6 +2418,31 @@ void tst_QWebEnginePage::setHtmlWithBaseURL()
      QCOMPARE(m_view->page()->history()->count(), 0);
  }
  

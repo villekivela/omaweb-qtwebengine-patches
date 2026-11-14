@@ -1,7 +1,7 @@
-From 7b339a74ec37088ceb00c48aa61da4a1f138ecf2 Mon Sep 17 00:00:00 2001
+From 8bed7767076b2f29691e6afc75ac3df938af4786 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivela=CC=88?= <vkivela@hotmail.com>
 Date: Sat, 19 Sep 2026 23:02:38 +0300
-Subject: [PATCH 06/31] extensions: let an extension ask the application to
+Subject: [PATCH 06/30] extensions: let an extension ask the application to
  open a page
 
 tabs.create and windows.create arrive where a page's own window.open()
@@ -380,7 +380,7 @@ index d20c54a0b1..fe30b19892 100644
          return false;
      (async () => {
 diff --git a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
-index 8b1398f323..65537ba634 100644
+index 493370e5f2..b06c2d0174 100644
 --- a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
 +++ b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
 @@ -7,6 +7,7 @@
@@ -391,7 +391,7 @@ index 8b1398f323..65537ba634 100644
  #include <QtWebEngineCore/qwebengineextensionmanager.h>
  #include <httpserver.h>
  #include <QtCore/qscopeguard.h>
-@@ -49,6 +50,7 @@ private Q_SLOTS:
+@@ -50,6 +51,7 @@ private Q_SLOTS:
      void enableAfterStoragePathChange();
      void tabsWindowsAndScripting();
      void nativeMessaging();
@@ -399,7 +399,7 @@ index 8b1398f323..65537ba634 100644
  
  private:
      int installedFiles();
-@@ -547,5 +549,36 @@ void tst_QWebEngineExtension::nativeMessaging()
+@@ -563,5 +565,36 @@ void tst_QWebEngineExtension::nativeMessaging()
  #endif
  }
  

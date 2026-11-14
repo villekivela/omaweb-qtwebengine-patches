@@ -1,7 +1,7 @@
-From 356c6613b4548584350a8a52a5c9c0501f6dcdf5 Mon Sep 17 00:00:00 2001
+From 7dd12548e93e40500e82979d454ff3dd572b2f2c Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivela=CC=88?= <vkivela@hotmail.com>
 Date: Mon, 21 Sep 2026 12:53:01 +0300
-Subject: [PATCH 10/31] extensions: let an extension document close its own
+Subject: [PATCH 10/30] extensions: let an extension document close its own
  window
 
 A page may not close a window it did not open once its history is longer
@@ -27,7 +27,7 @@ refusal needed. With the preference left alone it fails on Blink's own
  2 files changed, 48 insertions(+)
 
 diff --git a/src/core/content_browser_client_qt.cpp b/src/core/content_browser_client_qt.cpp
-index ae77f889f8..ed29e37461 100644
+index bd0c464507..c207a79e36 100644
 --- a/src/core/content_browser_client_qt.cpp
 +++ b/src/core/content_browser_client_qt.cpp
 @@ -291,6 +291,27 @@ void ContentBrowserClientQt::OverrideWebPreferences(content::WebContents *webCon
@@ -59,10 +59,10 @@ index ae77f889f8..ed29e37461 100644
      if (!view->client())
          return;
 diff --git a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
-index 04cac13c4e..27a65d420c 100644
+index 79b2b5c942..2d2ea2ec8e 100644
 --- a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
 +++ b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
-@@ -53,6 +53,7 @@ private Q_SLOTS:
+@@ -54,6 +54,7 @@ private Q_SLOTS:
      void aMessageSentWhileTheWorkerIsStartingIsDelivered();
      void aWorkerThatListensLateCanReachThePageThatAlreadyAsked();
      void loadingTheSamePathTwiceLeavesOneWorkingExtension();
@@ -70,7 +70,7 @@ index 04cac13c4e..27a65d420c 100644
      void enableAfterStoragePathChange();
      void tabsWindowsAndScripting();
      void nativeMessaging();
-@@ -600,6 +601,32 @@ void tst_QWebEngineExtension::loadingTheSamePathTwiceLeavesOneWorkingExtension()
+@@ -616,6 +617,32 @@ void tst_QWebEngineExtension::loadingTheSamePathTwiceLeavesOneWorkingExtension()
                   "hello from the worker"_L1);
  }
  

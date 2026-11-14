@@ -1,0 +1,50 @@
+From 778e84c9088c54cf65db626dd7efde596fc1f197 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Ville=20Kivel=C3=A4?=
+ <5814559+villekivela@users.noreply.github.com>
+Date: Sat, 14 Nov 2026 18:39:25 +0200
+Subject: [PATCH 30/30] ozone: link without X11 when Qt has GLX
+
+The engine fails to link where webengine_ozone_x11 is off and Qt's
+xcb_glx_plugin is on, as both of Omaweb's builds are: undefined
+GLXHelper::instance(). GbmBufferFactory::instance() asks for the GLX
+helper under xcb_glx_plugin alone, while glx_helper.cpp is compiled only
+with ozone X11.
+
+This is Qt's own change to the same line, backported unchanged. It is
+on dev and picked to 6.12, but not on the 6.140.0 release. It drops when
+the series moves to an engine that carries it.
+
+qtwebengine ca137f50ec704caecba07f8c4a30fb046999ce02:
+Change-Id: I636220cddca993cf534253d0228852ef7eed4e77
+
+omaweb#484
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/core/ozone/gbm_buffer_factory.cpp | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/core/ozone/gbm_buffer_factory.cpp b/src/core/ozone/gbm_buffer_factory.cpp
+index 4b72b5fe2b..3a315c59cc 100644
+--- a/src/core/ozone/gbm_buffer_factory.cpp
++++ b/src/core/ozone/gbm_buffer_factory.cpp
+@@ -8,6 +8,7 @@
+ #include "ozone/glx_helper.h"
+ #include "ozone/ozone_util_qt.h"
+ 
++#include "ui/base/ozone_buildflags.h"
+ #include "ui/gfx/buffer_format_util.h"
+ #include "ui/gfx/linux/drm_util_linux.h"
+ #include "ui/gfx/linux/gbm_buffer.h"
+@@ -70,7 +71,7 @@ static base::ScopedFD openDrmNodePath(const std::string &path)
+ 
+ GbmBufferFactory *GbmBufferFactory::instance()
+ {
+-#if QT_CONFIG(xcb_glx_plugin)
++#if BUILDFLAG(IS_OZONE_X11) && QT_CONFIG(xcb_glx_plugin)
+     if (OzoneUtilQt::usingGLX())
+         return GLXHelper::instance()->gbmFactory();
+ #endif
+-- 
+2.56.0
+

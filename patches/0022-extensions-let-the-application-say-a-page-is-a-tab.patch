@@ -1,7 +1,7 @@
-From ea4b57ea66ff63d8a4d6967488d546b0c8882e1a Mon Sep 17 00:00:00 2001
+From 96e31818c80e11fd173eda03ad3b631c4eee8d76 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivel=C3=A4?= <vkivela@hotmail.com>
 Date: Sun, 11 Oct 2026 12:49:55 +0000
-Subject: [PATCH 24/31] extensions: let the application say a page is a tab
+Subject: [PATCH 22/30] extensions: let the application say a page is a tab
 
 A page an extension opens with windows.create is a window of its own,
 and an application may show it as one of the reader's tabs instead:
@@ -110,10 +110,10 @@ index 7bf421f6bd..62aa36d96c 100644
    bool IsWindowOfItsOwn(content::WebContents* web_contents) const;
    // The page holding the window |window_id| of |context|, or null.
 diff --git a/src/core/api/qwebengineextensionmanager.cpp b/src/core/api/qwebengineextensionmanager.cpp
-index 70b18f3e53..4fd8016929 100644
+index 8fad40c1fe..12c7ef42ce 100644
 --- a/src/core/api/qwebengineextensionmanager.cpp
 +++ b/src/core/api/qwebengineextensionmanager.cpp
-@@ -208,5 +208,29 @@ void QWebEngineExtensionManager::setWindowGeometryProvider(
+@@ -205,5 +205,29 @@ void QWebEngineExtensionManager::setWindowGeometryProvider(
      d_ptr->setWindowGeometryProvider(std::move(provider));
  }
  
@@ -237,7 +237,7 @@ index fdd963841d..8d1a15f287 100644
  
  std::vector<content::WebContents *> ExtensionsBrowserClientQt::GetTabs(content::BrowserContext *context)
 diff --git a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
-index 83458a04d7..03dd05bebb 100644
+index 3a569e4a83..0d7da7a2a5 100644
 --- a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
 +++ b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
 @@ -88,6 +88,9 @@ private Q_SLOTS:

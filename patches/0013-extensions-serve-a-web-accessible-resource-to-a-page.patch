@@ -1,7 +1,7 @@
-From f76145c05e5932e13b5af0871446e6f790dfe319 Mon Sep 17 00:00:00 2001
+From 560d972f6f2515e608968a1eb584868236eba05b Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivel=C3=A4?= <vkivela@hotmail.com>
 Date: Mon, 21 Sep 2026 18:34:17 +0300
-Subject: [PATCH 13/31] extensions: serve a web accessible resource to a page
+Subject: [PATCH 13/30] extensions: serve a web accessible resource to a page
 
 A page could not load a resource an extension declared web accessible.
 The request never reached the browser as itself: the renderer rewrote
@@ -233,10 +233,10 @@ index 0000000000..8a205e8dc3
 @@ -0,0 +1 @@
 +shared
 diff --git a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
-index 3500fb0dbd..28c6a16e3f 100644
+index 00d4c793bc..ceec7cbf76 100644
 --- a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
 +++ b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
-@@ -59,6 +59,8 @@ private Q_SLOTS:
+@@ -60,6 +60,8 @@ private Q_SLOTS:
      void anExtensionKeepsTrackOfTheNotificationsItIsShowing();
      void theReadersAnswerToANotificationReachesTheExtension();
      void everyFunctionTheNamespaceDeclaresCanBeCalled();
@@ -245,7 +245,7 @@ index 3500fb0dbd..28c6a16e3f 100644
      void enableAfterStoragePathChange();
      void tabsWindowsAndScripting();
      void nativeMessaging();
-@@ -830,6 +832,92 @@ void tst_QWebEngineExtension::everyFunctionTheNamespaceDeclaresCanBeCalled()
+@@ -846,6 +848,92 @@ void tst_QWebEngineExtension::everyFunctionTheNamespaceDeclaresCanBeCalled()
      }
  }
  

@@ -1,8 +1,8 @@
-From 887ea8089c225f82a9411dbc3099575142e4c1e2 Mon Sep 17 00:00:00 2001
+From 04ce512bef922d07808132e4f58180e3dbeb6ffa Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivel=C3=A4?=
  <5814559+villekivela@users.noreply.github.com>
 Date: Thu, 22 Oct 2026 09:56:13 +0000
-Subject: [PATCH 29/31] extensions: answer clipboardRead and clipboardWrite as
+Subject: [PATCH 27/30] extensions: answer clipboardRead and clipboardWrite as
  Chrome does
 
 An extension that declares clipboardWrite could not copy without a
@@ -267,7 +267,7 @@ index 0000000000..6ae5205fa3
 +    return document.execCommand("paste") ? area.value : "refused";
 +}
 diff --git a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
-index 03dd05bebb..9c9bfe2c59 100644
+index 0d7da7a2a5..36007ce80d 100644
 --- a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
 +++ b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
 @@ -3,6 +3,7 @@
@@ -279,15 +279,15 @@ index 03dd05bebb..9c9bfe2c59 100644
  #include <QtWebEngineCore/qwebengineprofile.h>
  #include <QtWebEngineCore/qwebenginepage.h>
 @@ -74,6 +75,7 @@ private Q_SLOTS:
+     void everyFunctionTheNamespaceDeclaresCanBeCalled();
      void aPageCanLoadAWebAccessibleResource();
      void aResourceWithADynamicUrlIsReachableOnlyUnderIt();
-     void anOffscreenDocumentCanBeCreated();
 +    void anExtensionUsesTheClipboardItsPermissionsAllow();
      void enableAfterStoragePathChange();
      void tabsWindowsAndScripting();
      void nativeMessaging();
-@@ -1432,6 +1434,49 @@ void tst_QWebEngineExtension::anOffscreenDocumentCanBeCreated()
-     QTRY_COMPARE(m_page->title(), "offscreen ready"_L1);
+@@ -1432,6 +1434,49 @@ void tst_QWebEngineExtension::aResourceWithADynamicUrlIsReachableOnlyUnderIt()
+     QCOMPARE(evaluateJavaScriptSync(m_page, "window.underFixed"), "threw"_L1);
  }
  
 +void tst_QWebEngineExtension::anExtensionUsesTheClipboardItsPermissionsAllow()

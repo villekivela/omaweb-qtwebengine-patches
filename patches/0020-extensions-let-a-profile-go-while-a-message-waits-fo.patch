@@ -1,7 +1,7 @@
-From 0ae582091b6f8b32904875b76dcb58352964d8b9 Mon Sep 17 00:00:00 2001
+From 7750bee4d376cef248a28ee6623fd1983fc44e3d Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivel=C3=A4?= <vkivela@hotmail.com>
 Date: Sat, 10 Oct 2026 18:30:44 +0000
-Subject: [PATCH 22/31] extensions: let a profile go while a message waits for
+Subject: [PATCH 20/30] extensions: let a profile go while a message waits for
  a worker
 
 A message to an extension's service worker waits in the worker's task
@@ -64,7 +64,7 @@ index 6aa5cec7d2..fdd963841d 100644
  
  bool ExtensionsBrowserClientQt::IsSameContext(BrowserContext *first,
 diff --git a/src/core/profile_qt.cpp b/src/core/profile_qt.cpp
-index 7e715a9131..99caacc8b3 100644
+index 4b120f357e..34cc4a1725 100644
 --- a/src/core/profile_qt.cpp
 +++ b/src/core/profile_qt.cpp
 @@ -18,6 +18,8 @@
@@ -112,7 +112,7 @@ index 7e715a9131..99caacc8b3 100644
      BrowserContextDependencyManager::GetInstance()->DestroyBrowserContextServices(this);
      // Remembering push subscriptions and not persisting notification permissions would
 diff --git a/src/core/profile_qt.h b/src/core/profile_qt.h
-index bc8007a94a..197ed71ea8 100644
+index 52c2d04233..5a358a006f 100644
 --- a/src/core/profile_qt.h
 +++ b/src/core/profile_qt.h
 @@ -28,6 +28,10 @@ public:
@@ -127,10 +127,10 @@ index bc8007a94a..197ed71ea8 100644
  
      // BrowserContext implementation:
 diff --git a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
-index cb2793994e..83458a04d7 100644
+index 467dc0fa6f..3a569e4a83 100644
 --- a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
 +++ b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
-@@ -69,6 +69,7 @@ private Q_SLOTS:
+@@ -70,6 +70,7 @@ private Q_SLOTS:
      void anExtensionNotificationReachesTheProfilesPresenter();
      void anExtensionKeepsTrackOfTheNotificationsItIsShowing();
      void theReadersAnswerToANotificationReachesTheExtension();
@@ -138,8 +138,8 @@ index cb2793994e..83458a04d7 100644
      void everyFunctionTheNamespaceDeclaresCanBeCalled();
      void aPageCanLoadAWebAccessibleResource();
      void aResourceWithADynamicUrlIsReachableOnlyUnderIt();
-@@ -1428,6 +1429,22 @@ void tst_QWebEngineExtension::anOffscreenDocumentCanBeCreated()
-     QTRY_COMPARE(m_page->title(), "offscreen ready"_L1);
+@@ -1428,6 +1429,22 @@ void tst_QWebEngineExtension::aResourceWithADynamicUrlIsReachableOnlyUnderIt()
+     QCOMPARE(evaluateJavaScriptSync(m_page, "window.underFixed"), "threw"_L1);
  }
  
 +void tst_QWebEngineExtension::aProfileMayGoWhileAMessageWaitsForTheWorker()

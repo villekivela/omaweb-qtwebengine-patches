@@ -1,7 +1,7 @@
-From ad1a46fb9fb57d636ab12d424390f9b9ae1286f4 Mon Sep 17 00:00:00 2001
+From 3fae1e41625f251bd160d080064668d66a56b8a0 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivela=CC=88?= <vkivela@hotmail.com>
 Date: Mon, 21 Sep 2026 15:18:27 +0300
-Subject: [PATCH 12/31] extensions: answer every function the schemas declare
+Subject: [PATCH 12/30] extensions: answer every function the schemas declare
 
 A function a schema declares and nothing registers is not inert. The
 dispatcher reports it as an unknown API and it throws where the
@@ -1113,10 +1113,10 @@ index 4343325e20..6946998b6e 100644
          chrome.notifications.create("first", {
              type: "basic",
 diff --git a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
-index f0d60b31be..3500fb0dbd 100644
+index 5aef1f0b0d..00d4c793bc 100644
 --- a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
 +++ b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
-@@ -58,6 +58,7 @@ private Q_SLOTS:
+@@ -59,6 +59,7 @@ private Q_SLOTS:
      void anExtensionNotificationReachesTheProfilesPresenter();
      void anExtensionKeepsTrackOfTheNotificationsItIsShowing();
      void theReadersAnswerToANotificationReachesTheExtension();
@@ -1124,7 +1124,7 @@ index f0d60b31be..3500fb0dbd 100644
      void enableAfterStoragePathChange();
      void tabsWindowsAndScripting();
      void nativeMessaging();
-@@ -756,6 +757,79 @@ void tst_QWebEngineExtension::theReadersAnswerToANotificationReachesTheExtension
+@@ -772,6 +773,79 @@ void tst_QWebEngineExtension::theReadersAnswerToANotificationReachesTheExtension
      QTRY_COMPARE(events(), R"([["clicked","first"],["closed","first",true]])"_L1);
  }
  

@@ -1,7 +1,7 @@
-From 85509fda952a510709dc6b027495f10d741b9214 Mon Sep 17 00:00:00 2001
+From 6a726a10c7e346a99067d213ee15632be66bf688 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivel=C3=A4?= <vkivela@hotmail.com>
 Date: Sat, 10 Oct 2026 13:44:21 +0000
-Subject: [PATCH 21/31] extensions: tell an extension the window it opened
+Subject: [PATCH 19/30] extensions: tell an extension the window it opened
  closed
 
 windows.create answered with the one id every window call reports, so
@@ -1043,7 +1043,7 @@ index 0000000000..ceb8255ed5
 +chrome.windows.onRemoved.addListener(windowId => window.heardOfNormalWindows.push(windowId),
 +                                     { windowTypes: ["normal"] })
 diff --git a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
-index c3e28363e9..cb2793994e 100644
+index 270a872e99..467dc0fa6f 100644
 --- a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
 +++ b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
 @@ -80,6 +80,13 @@ private Q_SLOTS:

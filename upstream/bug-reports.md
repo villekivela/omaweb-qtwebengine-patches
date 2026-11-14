@@ -13,10 +13,11 @@ Four touch `qtwebengine` alone and can go up in any order. The `ExtensionPrefs` 
 change in `qtwebengine-chromium`, so it is two changes with a dependency and is worth sending last,
 once the others have shown the reviewers what this is about.
 
-All six are filed. Five are on Gerrit, and two of those have merged into `dev` and been picked to
-`6.140`. The fifth report waits on an answer about where its fix belongs. The patches whose change
-has merged stay in the series until Omaweb's engine is built on a Qt release that carries them, which
-is 6.140.1 at the earliest. Where each stands in 6.140 is below the table.
+All six are filed. Five are on Gerrit, and three of those have merged. The fifth report waits on an
+answer about where its fix belongs. The patches whose change has merged stay in the series until
+Omaweb's engine is built on a Qt release that carries them. 6.140.0 carries the offscreen document
+fix, so that patch has left the series, and 0001 and 0013 stay until 6.140.1 at the earliest. Where
+each stands in 6.140 is below the table.
 
 | Order | Patch | Report | Change | Status | What it is |
 | ----- | ----- | ------ | ------ | ------ | ---------- |
@@ -25,7 +26,7 @@ is 6.140.1 at the earliest. Where each stands in 6.140 is below the table.
 | 3 | 0009 | [QTBUG-150592](https://bugreports.qt.io/browse/QTBUG-150592) | [772849](https://codereview.qt-project.org/c/qt/qtwebengine/+/772849) | in review | Loading a loaded extension leaves it dead |
 | 4 | 0010 | [QTBUG-150593](https://bugreports.qt.io/browse/QTBUG-150593) | [772850](https://codereview.qt-project.org/c/qt/qtwebengine/+/772850) | in review | An extension document cannot close its own window |
 | 5 | 0002 | [QTBUG-150594](https://bugreports.qt.io/browse/QTBUG-150594) | waiting | – | `setExtensionEnabled` crashes after a storage path change |
-| 6 | 0017 | [QTBUG-151304](https://bugreports.qt.io/browse/QTBUG-151304) | [778807](https://codereview.qt-project.org/c/qt/qtwebengine/+/778807) | in review | Creating an offscreen document crashes the browser |
+| 6 | – | [QTBUG-151304](https://bugreports.qt.io/browse/QTBUG-151304) | [778807](https://codereview.qt-project.org/c/qt/qtwebengine/+/778807) | merged, in 6.140.0 | Creating an offscreen document crashes the browser |
 
 Each change carries `Fixes: QTBUG-…` and `Pick-to: 6.140`. Two more changes follow the first report:
 
@@ -42,6 +43,10 @@ matched by their reports and changes, and compared line by line. For the rest, t
 applied in order to each tree, and every upstream commit since the RC that touches a file the series
 touches was listed. Nothing else of the series is upstream.
 
+The `6.140.0` column was checked again against the released tarball on 2026-11-14 (omaweb#484). Its
+`Hide()` and `IsShowing()` are the offscreen document fix line for line, and Qt's release notes list
+QTBUG-151304 as fixed. 0001 and 0013 are still not in it: the series applies both.
+
 | Patch | Upstream | 6.140.0-rc | `6.140.0` | `6.140` | `dev` |
 | ----- | -------- | ---------- | --------- | ------- | ----- |
 | 0001 | 772848: `dev` `85c4b70af`, `6.140` `4f674b4e8` (change 773404) | no | no | yes | yes |
@@ -49,7 +54,7 @@ touches was listed. Nothing else of the series is upstream.
 | 0010 | 772850, in review | no | no | no | no |
 | 0013 | 772845: `dev` `182770309`, `6.140` `1aa9958ff` (change 773151) | no | no | yes | yes |
 | 0013 follow-up | 773048: `dev` `7bc989efe` | no | no | no | yes |
-| 0017 | 778807, in review | no | no | no | no |
+| the offscreen document fix | 778807 | no | yes | – | – |
 
 The rest, 0002 to 0008, 0011, 0012 and 0014 to 0016, are in none of them.
 
@@ -364,9 +369,10 @@ same unchecked dereference as `Hide()`.
 
 ### Fix
 
-Patch 0017 makes `Hide()` hide the delegate when there is one and otherwise cancel a deferred show,
-so a delegate set later does not show a view Chromium hid, and makes `IsShowing()` answer false
-without a delegate. `Hide()` and `IsShowing()` are the same in 6.11.2, 6.140 and `dev`.
+The series' patch 0017, up to 6.11.3, makes `Hide()` hide the delegate when there is one and
+otherwise cancel a deferred show, so a delegate set later does not show a view Chromium hid, and
+makes `IsShowing()` answer false without a delegate. `Hide()` and `IsShowing()` are the same in
+6.11.2, 6.140 and `dev`.
 
 On Gerrit as [778807](https://codereview.qt-project.org/c/qt/qtwebengine/+/778807), in review,
 against `dev` with `Pick-to: 6.140`, `Fixes: QTBUG-151304` and Change-Id

@@ -1,7 +1,7 @@
-From 4c339115c859f94cc3eb60f8393098be077edd12 Mon Sep 17 00:00:00 2001
+From a6f02eeceaaf130f07f5c1536bac30116234920c Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivela=CC=88?= <vkivela@hotmail.com>
 Date: Mon, 21 Sep 2026 12:35:01 +0300
-Subject: [PATCH 09/31] extensions: keep a running extension working when its
+Subject: [PATCH 09/30] extensions: keep a running extension working when its
  path is loaded again
 
 Loading a path that was already loaded sent the extension round as a
@@ -106,10 +106,10 @@ index 34d3c5c39c..320321b476 100644
      bool CanEnableExtension(const extensions::Extension *extension) override { return true; }
      bool CanDisableExtension(const extensions::Extension *extension) override { return true; }
 diff --git a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
-index 2ab235bfee..04cac13c4e 100644
+index b30d0daed6..79b2b5c942 100644
 --- a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
 +++ b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
-@@ -52,6 +52,7 @@ private Q_SLOTS:
+@@ -53,6 +53,7 @@ private Q_SLOTS:
      void aPopupOnAProfileWithItsOwnStorageHasItsApis();
      void aMessageSentWhileTheWorkerIsStartingIsDelivered();
      void aWorkerThatListensLateCanReachThePageThatAlreadyAsked();
@@ -117,7 +117,7 @@ index 2ab235bfee..04cac13c4e 100644
      void enableAfterStoragePathChange();
      void tabsWindowsAndScripting();
      void nativeMessaging();
-@@ -557,6 +558,48 @@ void tst_QWebEngineExtension::aWorkerThatListensLateCanReachThePageThatAlreadyAs
+@@ -573,6 +574,48 @@ void tst_QWebEngineExtension::aWorkerThatListensLateCanReachThePageThatAlreadyAs
              "reached by the worker"_L1, 10000);
  }
  

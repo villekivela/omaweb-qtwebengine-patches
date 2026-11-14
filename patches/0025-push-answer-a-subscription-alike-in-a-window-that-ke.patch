@@ -1,7 +1,7 @@
-From 30a496396fcf3bd0b41c8b9af784a67a4e6b0af3 Mon Sep 17 00:00:00 2001
+From 8434a966539f1e37918d593b26b8894017962fa6 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivel=C3=A4?= <vkivela@hotmail.com>
 Date: Mon, 12 Oct 2026 06:15:46 +0000
-Subject: [PATCH 27/31] push: answer a subscription alike in a window that
+Subject: [PATCH 25/30] push: answer a subscription alike in a window that
  keeps nothing
 
 PushManager.subscribe() asked the application for the notifications
@@ -145,10 +145,10 @@ index e3ef20010c..2bebdc6cd6 100644
    void DidCheckForExistingRegistration(
        RegisterData data,
 diff --git a/tests/auto/widgets/qwebenginepage/tst_qwebenginepage.cpp b/tests/auto/widgets/qwebenginepage/tst_qwebenginepage.cpp
-index 6012bc186c..77a3b2ddfe 100644
+index bbc4539d65..940b8e7298 100644
 --- a/tests/auto/widgets/qwebenginepage/tst_qwebenginepage.cpp
 +++ b/tests/auto/widgets/qwebenginepage/tst_qwebenginepage.cpp
-@@ -192,6 +192,9 @@ private Q_SLOTS:
+@@ -200,6 +200,9 @@ private Q_SLOTS:
      void setHtmlWithStylesheetResource();
      void setHtmlWithBaseURL();
      void clientCapabilitiesAnswerWithoutBluetooth();
@@ -158,7 +158,7 @@ index 6012bc186c..77a3b2ddfe 100644
      void setHtmlWithJSAlert();
      void setHtmlWithModuleImport();
      void baseUrl_data();
-@@ -2428,6 +2431,94 @@ void tst_QWebEnginePage::clientCapabilitiesAnswerWithoutBluetooth()
+@@ -2443,6 +2446,94 @@ void tst_QWebEnginePage::clientCapabilitiesAnswerWithoutBluetooth()
      QCOMPARE(capabilities.value("conditionalGet"), QVariant(true));
  }
  

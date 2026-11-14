@@ -1,7 +1,7 @@
-From a41343cb1d5c902dfa93763bd53a17567b5384ca Mon Sep 17 00:00:00 2001
+From 93636b24ad9244e87ec1b031d19940e4defe86e3 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivela=CC=88?= <vkivela@hotmail.com>
 Date: Mon, 21 Sep 2026 09:37:46 +0300
-Subject: [PATCH 07/31] extensions: test the order a reader actually takes
+Subject: [PATCH 07/30] extensions: test the order a reader actually takes
 
 Every existing case loads an extension into a profile that is not yet
 running anything. A reader does the opposite: the browser is open, a
@@ -20,20 +20,20 @@ these run where it happens.
  1 file changed, 79 insertions(+)
 
 diff --git a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
-index 65537ba634..668629aaa0 100644
+index b06c2d0174..4af72a1d3e 100644
 --- a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
 +++ b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
-@@ -47,6 +47,9 @@ private Q_SLOTS:
-     void loadInstalledExtensions();
+@@ -48,6 +48,9 @@ private Q_SLOTS:
      void serviceWorkerMessaging();
      void serviceWorkerLocalization();
+     void anOffscreenDocumentCanBeCreated();
 +    void extensionLoadedIntoARunningProfile();
 +    void aPopupOpenedAfterARuntimeLoadHasItsApis();
 +    void aPopupOnAProfileWithItsOwnStorageHasItsApis();
      void enableAfterStoragePathChange();
      void tabsWindowsAndScripting();
      void nativeMessaging();
-@@ -431,6 +434,82 @@ void tst_QWebEngineExtension::serviceWorkerLocalization()
+@@ -447,6 +450,82 @@ void tst_QWebEngineExtension::serviceWorkerLocalization()
                   "hello from the worker"_L1);
  }
  

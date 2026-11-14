@@ -123,16 +123,16 @@ Re-copy each from the new Chromium and redo two include rewrites per file: the f
 the generated schema header both move from `chrome/` to `qtwebengine/`. Rebuild and let the compiler
 find whatever else moved.
 
-Patch 0020 changes the copied `scripting_api.{cc,h}` after 0004: an update that leaves
+Patch 0018 changes the copied `scripting_api.{cc,h}` after 0004: an update that leaves
 `persistAcrossSessions` out keeps what the script had. Reapply that change to the new copy until
 Chromium has it, or `whatIsKeptFollowsUnregisterAndUpdate` goes red.
 
-0020 also adds `src/core/extensions/user_script_listener_qt.{cpp,h}`, Chrome's
+0018 also adds `src/core/extensions/user_script_listener_qt.{cpp,h}`, Chrome's
 `chrome/browser/extensions/user_script_listener.cc` rewritten for one profile, because that file is
 not in Qt's tree. Compare it with the new Chromium's, which is where a change to when a navigation
 waits for an extension's scripts would show.
 
-Patch 0031 copies a tenth schema, `app.json`, with no change but its header, and copies Chrome's
+Patch 0029 copies a tenth schema, `app.json`, with no change but its header, and copies Chrome's
 `app` feature into `extensions/common/api/_webengine_api_features.json`. Re-copy both from the new
 Chromium. It compiles `chrome/renderer/extensions/api/app_hooks_delegate.cc` and
 `chrome/renderer/loadtimes_extension_bindings.cc` where they are, so a change there shows as a build

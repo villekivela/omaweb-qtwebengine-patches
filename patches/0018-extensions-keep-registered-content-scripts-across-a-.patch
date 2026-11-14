@@ -1,8 +1,8 @@
-From 09ea124a55f3472fbfb1230fbb245b0cc856c37c Mon Sep 17 00:00:00 2001
+From 603b89e4276747881a6504482d19c1e0cd6a1456 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivel=C3=A4?=
  <5814559+villekivela@users.noreply.github.com>
 Date: Sat, 10 Oct 2026 12:09:25 +0300
-Subject: [PATCH 20/31] extensions: keep registered content scripts across a
+Subject: [PATCH 18/30] extensions: keep registered content scripts across a
  restart
 
 chrome.scripting.registerContentScripts keeps a script across sessions
@@ -161,7 +161,7 @@ index faa3caecd6..c45c451393 100644
        api::scripting::RegisteredContentScript& new_script,
        api::scripting::RegisteredContentScript& original_script,
 diff --git a/src/core/CMakeLists.txt b/src/core/CMakeLists.txt
-index 5dc30297c8..4c91675df6 100644
+index 37e1cd4bdc..cda78a7d9b 100644
 --- a/src/core/CMakeLists.txt
 +++ b/src/core/CMakeLists.txt
 @@ -296,6 +296,7 @@ foreach(arch ${archs})
@@ -173,7 +173,7 @@ index 5dc30297c8..4c91675df6 100644
                  renderer/extensions/extensions_renderer_api_provider_qt.cpp renderer/extensions/extensions_renderer_api_provider_qt.h
                  renderer/extensions/extensions_renderer_client_qt.cpp renderer/extensions/extensions_renderer_client_qt.h
 diff --git a/src/core/content_browser_client_qt.cpp b/src/core/content_browser_client_qt.cpp
-index ed29e37461..ce35f4eebd 100644
+index c207a79e36..bdd3b0a241 100644
 --- a/src/core/content_browser_client_qt.cpp
 +++ b/src/core/content_browser_client_qt.cpp
 @@ -134,8 +134,10 @@
@@ -187,7 +187,7 @@ index ed29e37461..ce35f4eebd 100644
  #include "net/plugin_response_interceptor_url_loader_throttle.h"
  #if QT_CONFIG(webengine_extensions)
  #include "extensions/webui/extensions_ui_page_handler_qt.h"
-@@ -964,6 +966,18 @@ void ContentBrowserClientQt::CreateThrottlesForNavigation(
+@@ -971,6 +973,18 @@ void ContentBrowserClientQt::CreateThrottlesForNavigation(
                              navigation_interception::SynchronyMode::kSync,
                              std::nullopt /* async callback */));
  
@@ -794,7 +794,7 @@ index 0000000000..3ef78a315d
 @@ -0,0 +1 @@
 +document.documentElement.dataset.kept = "yes";
 diff --git a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
-index 1290b685fb..c3e28363e9 100644
+index 9182574908..270a872e99 100644
 --- a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
 +++ b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
 @@ -19,6 +19,8 @@
@@ -821,7 +821,7 @@ index 1290b685fb..c3e28363e9 100644
 +    void anOffTheRecordProfileKeepsNoScriptStore();
      void serviceWorkerMessaging();
      void serviceWorkerLocalization();
-     void extensionLoadedIntoARunningProfile();
+     void anOffscreenDocumentCanBeCreated();
 @@ -79,6 +90,25 @@ private:
      void uninstallExtensionSync(const QWebEngineExtensionInfo &extension);
      QString resourcesPath();

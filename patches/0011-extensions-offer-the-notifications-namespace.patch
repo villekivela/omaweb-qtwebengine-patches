@@ -1,7 +1,7 @@
-From 46318daa062bea7a94f3b33b60ad0d0078041a15 Mon Sep 17 00:00:00 2001
+From ff5dea630b0ce7e555e6b5d9c3b635784795d723 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivela=CC=88?= <vkivela@hotmail.com>
 Date: Mon, 21 Sep 2026 13:39:54 +0300
-Subject: [PATCH 11/31] extensions: offer the notifications namespace
+Subject: [PATCH 11/30] extensions: offer the notifications namespace
 
 1Password registers notifications.onClicked and onButtonClicked at the
 top level of its worker. The namespace was absent, so the worker threw
@@ -970,7 +970,7 @@ index 0000000000..4343325e20
 +    return false
 +})
 diff --git a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
-index 27a65d420c..f0d60b31be 100644
+index 2d2ea2ec8e..5aef1f0b0d 100644
 --- a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
 +++ b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
 @@ -9,6 +9,7 @@
@@ -981,7 +981,7 @@ index 27a65d420c..f0d60b31be 100644
  #include <httpserver.h>
  #include <QtCore/qscopeguard.h>
  #include <memory>
-@@ -54,6 +55,9 @@ private Q_SLOTS:
+@@ -55,6 +56,9 @@ private Q_SLOTS:
      void aWorkerThatListensLateCanReachThePageThatAlreadyAsked();
      void loadingTheSamePathTwiceLeavesOneWorkingExtension();
      void aPopupMayCloseItselfAfterRoutingByHash();
@@ -991,7 +991,7 @@ index 27a65d420c..f0d60b31be 100644
      void enableAfterStoragePathChange();
      void tabsWindowsAndScripting();
      void nativeMessaging();
-@@ -627,6 +631,131 @@ void tst_QWebEngineExtension::aPopupMayCloseItselfAfterRoutingByHash()
+@@ -643,6 +647,131 @@ void tst_QWebEngineExtension::aPopupMayCloseItselfAfterRoutingByHash()
      QTRY_COMPARE(closeSpy.size(), 1);
  }
  

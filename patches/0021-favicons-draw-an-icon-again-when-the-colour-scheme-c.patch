@@ -1,7 +1,7 @@
-From b87a97b0dfff5520cd6d2ddde7d8fad7c54513d9 Mon Sep 17 00:00:00 2001
+From a571718d6ff92065a7bdde4213667e269199167e Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivel=C3=A4?= <vkivela@hotmail.com>
 Date: Sun, 11 Oct 2026 09:31:04 +0000
-Subject: [PATCH 23/31] favicons: draw an icon again when the colour scheme
+Subject: [PATCH 21/30] favicons: draw an icon again when the colour scheme
  changes
 
 An SVG favicon can follow prefers-color-scheme, as chatgpt.com's does:
@@ -297,7 +297,7 @@ index 6a5577856f..900c1283dc 100644
  
  } // namespace QtWebEngineCore
 diff --git a/src/core/web_contents_adapter.cpp b/src/core/web_contents_adapter.cpp
-index 05c3632dc7..5925050797 100644
+index 5ea0939e35..bcc24fb0fa 100644
 --- a/src/core/web_contents_adapter.cpp
 +++ b/src/core/web_contents_adapter.cpp
 @@ -459,6 +459,26 @@ ui::NativeTheme::PreferredColorScheme toWeb(Qt::ColorScheme colorScheme) {
