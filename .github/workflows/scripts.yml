@@ -9,7 +9,8 @@ name: Scripts
 #
 # The release finder's test serves stand-ins for download.qt.io, because the
 # layout it has to read next does not exist there until the engine's first
-# release of its own.
+# release of its own. refresh.sh's fetch is tested the same way, against each
+# layout a tarball has sat in.
 #
 # The write-barrier check reads a build tree, which takes hours to make, so its
 # test hands it stand-in trees holding the setting each way and none at all.
@@ -66,6 +67,18 @@ jobs:
 
       - name: Test the release finder
         run: scripts/test-newest-engine.sh
+
+  refresh-fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Shellcheck
+        run: shellcheck scripts/test-refresh-fetch.sh
+
+      - name: Test the tarball fetch
+        run: scripts/test-refresh-fetch.sh
 
   pkgbuild-sums:
     runs-on: ubuntu-latest
