@@ -501,6 +501,7 @@ an offscreen document and removes the text area; a stock engine dies with SIGSEG
 | 6.11.2-13, series grown to 25 | 21 already applied, 4 more, no conflicts | incremental | 81 of 81 | none |
 | 6.11.2-14, series grown to 26 | x86_64 25 already applied, 1 more; aarch64 24 already applied, 2 more; no conflicts | incremental | 84 of 84 on each | none |
 | 6.11.2-15, series grown to 29 | 26 already applied, 3 more, no conflicts | incremental | 93 of 93 on each | none |
+| 6.140.0, series 30 | 28 rebased, 2 dropped as upstream, 1 added; then 30 of 30 on a fresh tarball, no conflicts | incremental | 111 of 111 on x86_64 | an afternoon: test-file conflicts in 0001 and beside upstream's offscreen test |
 
 The rows after the first are the series growing, and the last is the same series rebuilt with each
 architecture's toolchain and published as 6.11.2-5 (omaweb#576), rather than Qt moving. They
@@ -524,6 +525,12 @@ The expensive case is a Chromium bump, measured across 140 to 146, six major ver
 - all five embedder hooks the design rests on survived, with the same names
 
 Call it an hour. Qt's `dev` is still on the 140-based fork, so the real bump lands in 6.12 or 6.13.
+
+6.140.0 is the first engine Qt released on its own (omaweb#484). It is Chromium 140.0.7339.264, as
+6.11.3 is, with security fixes up to 157.0.8103.50, so nothing under the copied Chrome files moved.
+The work was in the tests: Qt's own `anOffscreenDocumentCanBeCreated` landed in the file the series
+adds its tests to. 0017 and 0018 went upstream and were dropped, and 0030 is Qt's fix that lets
+the engine link without X11. The x86_64 row is the kept tree in engine-686, built incrementally.
 
 ## Licence
 
