@@ -69,6 +69,7 @@ export QTWEBENGINE_CHROMIUM_FLAGS
 # test never reaches one. Their Totals lines go to the gate with the tests'.
 sh "$(dirname "$0")/check-write-barriers.sh" "$tree" || true
 sh "$(dirname "$0")/check-lto-level.sh" "$tree" || true
+sh "$(dirname "$0")/check-fp-contract.sh" "$tree" || true
 # The fonts too, so a machine with none says so before the cases it takes down.
 sh "$(dirname "$0")/check-fonts.sh" || true
 

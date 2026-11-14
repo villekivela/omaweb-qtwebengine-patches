@@ -35,6 +35,13 @@ the series: it changes how the engine is compiled, not what its code does. It do
 - It links `QtWebEngineCore` with Chrome's `thinlto_optimize_max`, `--lto-O2`, where Chromium links
   every target but Chrome's own at `--lto-O0`.
 
+`gcc.patch` is applied by `refresh.sh` to a GCC build instead, for the same reason. It compiles
+the engine with `-ffp-contract=off`, which Chromium passes in a clang block Qt skips. GCC otherwise
+fuses a multiply and an add into one FMA instruction, which every aarch64 has, and rounds
+otherwise than clang: dark mode's colour filter drew a white page `#1b1b1b` where x86_64 draws
+`#121212` ([#34](https://github.com/villekivela/omaweb-qtwebengine-patches/issues/34)).
+`scripts/check-fp-contract.sh` reads the flag back from the built tree, and the gate runs it.
+
 ## The link level
 
 At `--lto-O0` ThinLTO imports functions across files and then neither inlines nor optimizes what it

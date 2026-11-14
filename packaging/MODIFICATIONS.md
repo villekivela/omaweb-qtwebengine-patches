@@ -54,8 +54,9 @@ and `src/core/CMakeLists.txt`, and edits Chromium's `v8/BUILD.gn`: where V8's bu
 longer fits a builtin, V8's snapshot step builds that builtin without it instead of stopping. It
 also links `QtWebEngineCore` with ThinLTO's optimizations, `--lto-O2`, as Chrome's own targets are
 linked, in `src/core/configure/BUILD.root.gn.in`. It changes how the engine is compiled, not what
-its code does. `scripts/engine-toolchain.sh` names the
-toolchain each architecture is built with.
+its code does. `toolchain/gcc.patch` edits Chromium's `build/config/compiler/BUILD.gn` so that a
+GCC build compiles without fused multiply-adds, `-ffp-contract=off`, as Chromium's clang build
+does. `scripts/engine-toolchain.sh` names the toolchain each architecture is built with.
 
 QtWebEngine 6.140.0 versions its modules after the engine rather than after the Qt it is built
 against, so its libraries, headers and CMake package say 6.140.0 on any Qt.

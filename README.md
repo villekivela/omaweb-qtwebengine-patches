@@ -445,6 +445,10 @@ The link level has no test case either. `scripts/check-lto-level.sh` fails a tre
 library links with ThinLTO below `--lto-O2`, or names no level, and names the response file it read.
 `clang.patch` gives the library Chrome's level; see `toolchain/README.md`.
 
+Nor does the rounding of the GCC engine. `scripts/check-fp-contract.sh` fails a tree whose C++
+compiler is GCC and whose Blink platform library, which holds dark mode's colour filter, is compiled
+without `-ffp-contract=off`, and names the ninja file it read. `gcc.patch` adds the flag (#34).
+
 Patch 0024's case, `clientCapabilitiesAnswerWithoutBluetooth`, is in `tst_qwebenginepage`. It
 loads a page at an `https` address, a secure context, asks `getClientCapabilities()`, and checks
 that the answer comes within ten seconds with no hybrid transport, no platform authenticator, no

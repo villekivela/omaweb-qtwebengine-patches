@@ -199,6 +199,11 @@ if [ "$toolchain" = "clang" ]; then
         exit 1
     fi
     cat "$work/pgo.log"
+elif [ "$system" = "Linux" ]; then
+    # GCC fuses multiply-adds where Chrome's clang does not, so the GCC engine drew dark mode's
+    # white #1b1b1b where clang's draws #121212 (#34). toolchain/gcc.patch turns that off.
+    git apply "$series/../toolchain/gcc.patch"
+    echo "TOOLCHAIN: GCC, without fused multiply-adds"
 fi
 
 set -- -S . -B build -G Ninja \
