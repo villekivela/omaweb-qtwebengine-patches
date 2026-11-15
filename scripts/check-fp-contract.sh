@@ -31,16 +31,15 @@ for ninja in "$tree"/$layout; do
     found=$((found + 1))
     toolchain="${ninja%/obj/*}/toolchain.ninja"
     [ -f "$toolchain" ] || fail "no toolchain.ninja beside $ninja"
-    # The compiler is the word of the cxx rule's command that names one, after any launcher.
+    # The compiler is the last word of the cxx rule's command before its first flag, after any
+    # launcher. Only clang is clang: Qt names GCC by CMake's compiler, which can be g++ or c++.
     compiler="$(sed -n '/^rule cxx$/,/^rule /s/^  command = //p' "$toolchain" | tr ' ' '\n' \
-        | sed 's|.*/||' | grep -E -m 1 '^(.*g|clang)\+\+(-[0-9.]+)?$' || true)"
+        | sed -n '/^-/q; /./p' | tail -n 1 | sed 's|.*/||')"
     [ -n "$compiler" ] || fail "$toolchain names no C++ compiler in its cxx rule"
-    case "$compiler" in
-        clang++*)
-            echo "PASS   : $ninja is compiled by clang"
-            continue
-            ;;
-    esac
+    if echo "$compiler" | grep -Eq '^clang(\+\+)?(-[0-9.]+)?$'; then
+        echo "PASS   : $ninja is compiled by clang"
+        continue
+    fi
     flags="$(sed -n 's/^cflags = //p' "$ninja")"
     contract="$(echo " $flags " | tr ' ' '\n' | sed -n 's/^-ffp-contract=//p' | tail -1)"
     [ "$contract" = "off" ] \

@@ -5,7 +5,7 @@
 #
 # A real tree takes hours to build and with one compiler only, so the stand-ins hold the compiler
 # toolchain.ninja names and the flags Blink's platform library is compiled with: GCC with and
-# without the flag, GCC behind ccache, clang, and no build at all.
+# without the flag, GCC named c++ and behind ccache, clang, and no build at all.
 set -eu
 
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -54,6 +54,13 @@ check gccoff 0 "1 passed, 0 failed" "gccoff/$ninja"
 # GCC takes the last -ffp-contract it is given.
 stand_in gcclast /usr/bin/g++ "-ffp-contract=off -O2 -ffp-contract=fast"
 check gcclast 1 "0 passed, 1 failed" "gcclast/$ninja"
+
+# Qt names GCC by CMake's compiler, which is c++ on Arch Linux ARM, and it is GCC all the same.
+stand_in cxx /usr/sbin/c++ "-fPIC -O2"
+check cxx 1 "0 passed, 1 failed" "cxx/$ninja"
+
+stand_in cxxoff /usr/sbin/c++ "-fPIC -O2 -ffp-contract=off"
+check cxxoff 0 "1 passed, 0 failed" "cxxoff/$ninja"
 
 # Behind a compiler launcher it is still GCC.
 stand_in ccache "ccache /usr/bin/g++" "-fPIC -O2"
