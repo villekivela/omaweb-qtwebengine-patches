@@ -25,14 +25,15 @@ if [ ! -f "$tarball" ]; then
     echo "fetching $tarball"
     # Up to 6.11 the engine was a module of Qt's release and carried its version. From Qt 6.12 it
     # is released on its own, versioned after its Chromium (6.140 is Chromium 140), and Qt 6.12.0
-    # has no engine at all. Its prereleases sit in one flat directory; where its releases will sit
-    # is not known before the first one, so both likely layouts are tried.
+    # has no engine at all. Its releases sit in a directory per series with the source under src/,
+    # as 6.140.0 does, and its prereleases in one flat directory. QT_DOWNLOADS stands in for the
+    # server in scripts/test-refresh-fetch.sh.
+    downloads="${QT_DOWNLOADS:-https://download.qt.io}"
     for base in \
-        "https://download.qt.io/official_releases/qt/$minor/$version/submodules" \
-        "https://download.qt.io/development_releases/qt/$minor/$version/submodules" \
-        "https://download.qt.io/official_releases/qtwebengine/$minor/$version" \
-        "https://download.qt.io/official_releases/qtwebengine/$version" \
-        "https://download.qt.io/development_releases/qtwebengine/$version"
+        "$downloads/official_releases/qt/$minor/$version/submodules" \
+        "$downloads/development_releases/qt/$minor/$version/submodules" \
+        "$downloads/official_releases/qtwebengine/$minor/$version/src" \
+        "$downloads/development_releases/qtwebengine/$version"
     do
         if curl -fsSL -o "$tarball.part" "$base/$tarball"; then
             mv "$tarball.part" "$tarball"
@@ -198,6 +199,11 @@ if [ "$toolchain" = "clang" ]; then
         exit 1
     fi
     cat "$work/pgo.log"
+elif [ "$system" = "Linux" ]; then
+    # GCC fuses multiply-adds where Chrome's clang does not, so the GCC engine drew dark mode's
+    # white #1b1b1b where clang's draws #121212 (#34). toolchain/gcc.patch turns that off.
+    git apply "$series/../toolchain/gcc.patch"
+    echo "TOOLCHAIN: GCC, without fused multiply-adds"
 fi
 
 set -- -S . -B build -G Ninja \

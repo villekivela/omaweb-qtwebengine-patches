@@ -69,6 +69,7 @@ export QTWEBENGINE_CHROMIUM_FLAGS
 # test never reaches one. Their Totals lines go to the gate with the tests'.
 sh "$(dirname "$0")/check-write-barriers.sh" "$tree" || true
 sh "$(dirname "$0")/check-lto-level.sh" "$tree" || true
+sh "$(dirname "$0")/check-fp-contract.sh" "$tree" || true
 # The fonts too, so a machine with none says so before the cases it takes down.
 sh "$(dirname "$0")/check-fonts.sh" || true
 
@@ -172,15 +173,15 @@ else
     echo "  the test did not finish cleanly, exit $?"
 fi
 
-# Three patches change what a page hears: what its passkeys can reach (0026), how a push
-# subscription is answered (0027) and what window.chrome holds (0031). Their cases live in Qt's
+# Three patches change what a page hears: what its passkeys can reach (0024), how a push
+# subscription is answered (0025) and what window.chrome holds (0029). Their cases live in Qt's
 # page test, and only they run.
 page="$tree/build/tests/auto/widgets/qwebenginepage/tst_qwebenginepage"
 page_cases="clientCapabilitiesAnswerWithoutBluetooth pushSubscribeAnswersAlikeOffTheRecord \
 windowChromeAnswersAsChromeDoes"
-# The stock run below reads the first result line of each case, so 0027's case lists its
+# The stock run below reads the first result line of each case, so 0025's case lists its
 # off-the-record row first, the one a stock engine fails.
-# Patch 0027 has a control beside its case: a notifications request still reaches the
+# Patch 0025 has a control beside its case: a notifications request still reaches the
 # application off the record, which a stock engine does too, so it runs on the patched
 # engine only.
 patched_page_cases="$page_cases notificationRequestStillReachesTheApplicationOffTheRecord"
@@ -199,11 +200,11 @@ else
     echo "  the test did not finish cleanly, exit $?"
 fi
 
-# Patch 0028 grants a sanitized clipboard write during a gesture, so its cases live in Qt's
+# Patch 0026 grants a sanitized clipboard write during a gesture, so its cases live in Qt's
 # permission test. The stock run reads the first result line of each case, so
 # clipboardReadWritePermissionInitialState lists first the row without either setting, the one a
 # stock engine fails. clipboardReadWritePermission's clipboard-write query changes with it too.
-# Patches 0029 and 0030 are about an extension's documents, so their cases are in the extension
+# Patches 0027 and 0028 are about an extension's documents, so their cases are in the extension
 # test above.
 permission="$tree/build/tests/auto/widgets/qwebenginepermission/tst_qwebenginepermission"
 permission_cases="clipboardReadWritePermissionInitialState clickedWriteIsNotAsked"

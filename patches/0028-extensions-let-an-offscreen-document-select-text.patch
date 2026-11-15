@@ -1,8 +1,8 @@
-From 476fcb45e01258925aba14d118433f13b21ecf20 Mon Sep 17 00:00:00 2001
+From ed734e35273ada5736e0d41b3c18d3535373d689 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivel=C3=A4?=
  <5814559+villekivela@users.noreply.github.com>
 Date: Thu, 22 Oct 2026 09:59:44 +0000
-Subject: [PATCH 30/31] extensions: let an offscreen document select text
+Subject: [PATCH 28/30] extensions: let an offscreen document select text
 
 Selecting text in an offscreen document took the browser down. A
 password manager copies a password from its offscreen document by
@@ -155,19 +155,19 @@ index 0000000000..9241881ff1
 +    justification: "test"
 +}).catch((error) => document.title = "failed: " + error.message);
 diff --git a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
-index 9c9bfe2c59..0869039af4 100644
+index 36007ce80d..db94534136 100644
 --- a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
 +++ b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
 @@ -75,6 +75,7 @@ private Q_SLOTS:
+     void everyFunctionTheNamespaceDeclaresCanBeCalled();
      void aPageCanLoadAWebAccessibleResource();
      void aResourceWithADynamicUrlIsReachableOnlyUnderIt();
-     void anOffscreenDocumentCanBeCreated();
 +    void anOffscreenDocumentCanSelectText();
      void anExtensionUsesTheClipboardItsPermissionsAllow();
      void enableAfterStoragePathChange();
      void tabsWindowsAndScripting();
-@@ -1434,6 +1435,25 @@ void tst_QWebEngineExtension::anOffscreenDocumentCanBeCreated()
-     QTRY_COMPARE(m_page->title(), "offscreen ready"_L1);
+@@ -1434,6 +1435,25 @@ void tst_QWebEngineExtension::aResourceWithADynamicUrlIsReachableOnlyUnderIt()
+     QCOMPARE(evaluateJavaScriptSync(m_page, "window.underFixed"), "threw"_L1);
  }
  
 +void tst_QWebEngineExtension::anOffscreenDocumentCanSelectText()

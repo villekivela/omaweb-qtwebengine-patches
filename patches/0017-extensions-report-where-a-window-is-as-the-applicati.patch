@@ -1,7 +1,7 @@
-From 1c7a12d9cdc8e8cfb607f9af3669ca82f18ed09c Mon Sep 17 00:00:00 2001
+From a8e97d58add17b31f7113b537a9b4baf81487c8d Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivel=C3=A4?= <vkivela@hotmail.com>
 Date: Sat, 10 Oct 2026 10:55:47 +0300
-Subject: [PATCH 19/31] extensions: report where a window is, as the
+Subject: [PATCH 17/30] extensions: report where a window is, as the
  application says
 
 chrome.windows answered with one window carrying an id, focus, incognito,
@@ -190,10 +190,10 @@ index 46803949ad..4dbcb5b531 100644
    // The script executor of |web_contents|, created on first use and owned by it. Injecting a
    // script into a tab goes through this, so a WebContents the delegate does not list as a tab
 diff --git a/src/core/api/qwebengineextensionmanager.cpp b/src/core/api/qwebengineextensionmanager.cpp
-index f2f0914899..70b18f3e53 100644
+index 610a0a0e40..8fad40c1fe 100644
 --- a/src/core/api/qwebengineextensionmanager.cpp
 +++ b/src/core/api/qwebengineextensionmanager.cpp
-@@ -183,5 +183,30 @@ bool QWebEngineExtensionManager::event(QEvent *e)
+@@ -180,5 +180,30 @@ bool QWebEngineExtensionManager::event(QEvent *e)
      return QObject::event(e);
  }
  
@@ -450,7 +450,7 @@ index 0000000000..8447b884ae
 +    return true;
 +})
 diff --git a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
-index 52c2a26be3..1290b685fb 100644
+index ceec7cbf76..9182574908 100644
 --- a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
 +++ b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
 @@ -66,6 +66,9 @@ private Q_SLOTS:

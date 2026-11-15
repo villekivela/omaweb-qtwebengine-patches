@@ -1,7 +1,7 @@
-From 7cfef1fc46390c69acc5f5d489c4d8ec7e7fcc45 Mon Sep 17 00:00:00 2001
+From 3002de25f724b9e310a824bd6fd5a4681d4ab7c0 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivela=CC=88?= <vkivela@hotmail.com>
 Date: Fri, 25 Sep 2026 09:11:04 +0300
-Subject: [PATCH 15/31] interceptor: let a request interceptor ask for the
+Subject: [PATCH 15/30] interceptor: let a request interceptor ask for the
  host's DNS aliases
 
 A content blocker judges a request by its host, and a tracker served
@@ -151,7 +151,7 @@ index ef98c91d9f..3f99ae5a4b 100644
 +
  #endif // QWEBENGINEURLREQUESTINFO_P_H
 diff --git a/src/core/net/proxying_url_loader_factory_qt.cpp b/src/core/net/proxying_url_loader_factory_qt.cpp
-index 0c38fcadf4..3db4797935 100644
+index 3b4b253fa7..27af110215 100644
 --- a/src/core/net/proxying_url_loader_factory_qt.cpp
 +++ b/src/core/net/proxying_url_loader_factory_qt.cpp
 @@ -4,23 +4,40 @@
@@ -374,7 +374,7 @@ index 0c38fcadf4..3db4797935 100644
  
      mojo::Receiver<network::mojom::URLLoader> proxied_loader_receiver_;
      mojo::Remote<network::mojom::URLLoaderClient> target_client_;
-@@ -345,6 +520,68 @@ void InterceptedRequest::Restart()
+@@ -346,6 +521,68 @@ void InterceptedRequest::Restart()
      request_info_.reset(new QWebEngineUrlRequestInfo(info));
  
      InterceptOnUIThread();
