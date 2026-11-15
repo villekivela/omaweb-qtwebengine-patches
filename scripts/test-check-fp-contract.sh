@@ -18,6 +18,7 @@ failed=0
 stand_in() {
     dir="$work/$1/build/src/core/Release/aarch64"
     mkdir -p "$dir/obj/third_party/blink/renderer/platform"
+    # shellcheck disable=SC2016 # ninja's ${out} and the rest, written as ninja writes them
     printf 'rule cxx\n  command = %s -MD -MF ${out}.d ${defines} ${cflags} -c ${in} -o ${out}\n' \
         "$2" > "$dir/toolchain.ninja"
     printf 'defines = -DNDEBUG\ncflags = %s\ncflags_cc = -std=c++20\n' "$3" \
