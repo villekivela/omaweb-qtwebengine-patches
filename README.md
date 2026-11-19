@@ -1,24 +1,25 @@
 # QtWebEngine extension patches
 
-Thirty patches to QtWebEngine. Seventeen let it host a password manager's Chromium extension, two
-add API that Omaweb's content blocking and certificate view ask for, one restores a trace macro that
-slowed every page, one keeps an offscreen document from crashing the engine as it selects text, one
-keeps the content scripts any extension registers across a restart, one keeps a profile from
+Thirty-one patches to QtWebEngine. Seventeen let it host a password manager's Chromium extension,
+two add API that Omaweb's content blocking and certificate view ask for, one restores a trace macro
+that slowed every page, one keeps an offscreen document from crashing the engine as it selects text,
+one keeps the content scripts any extension registers across a restart, one keeps a profile from
 crashing as it is deleted with an extension's message still waiting, one draws a favicon again when
 the colour scheme changes, one shows a page's SVG icon rather than a raster one beside it, one lets
 a page hear what its passkeys can reach in a build without Bluetooth, one answers a push
 subscription the same in a window that keeps nothing, one lets a page write to the clipboard during
 a click without a question, one gives every page Chrome's `chrome.app`, `chrome.csi` and
-`chrome.loadTimes`, and one lets the engine link without X11. Base is the released
+`chrome.loadTimes`, one lets the engine link without X11, and one gives the application a debugging
+session of one page that cannot reach any other. Base is the released
 `qtwebengine-everywhere-src-6.140.0` tarball.
 
 Built for [omaweb#344](https://github.com/villekivela/omaweb/issues/344), which asks whether Omaweb
 can host Bitwarden and 1Password. The findings live in `docs/research/password-manager-extensions.md`
 in that repository.
 
-Ten of the thirty are ordinary bug fixes headed for Gerrit, and 0030 is Qt's own change. The rest
-wait on one question to Qt, in `upstream/QTBUG-draft.md`. If Qt takes the work, this repository is
-deleted rather than maintained.
+Ten of the thirty-one are ordinary bug fixes headed for Gerrit, and 0030 is Qt's own change. The
+rest wait on one question to Qt, in `upstream/QTBUG-draft.md`. If Qt takes the work, this repository
+is deleted rather than maintained.
 
 ## Running it
 
@@ -316,6 +317,22 @@ Change-Id. It was found building 6.140.0-rc for aarch64, and x86_64 links the sa
 ([omaweb#484](https://github.com/villekivela/omaweb/issues/484)). _Qt's change. It drops when the
 series moves to an engine that carries it._
 
+**0031, give a page an untrusted debugging session.** The remote debugging server is the one way an
+application speaks the DevTools protocol, and it serves every page of every profile, Private ones
+included, to anything that connects to its port. `QWebEngineDevToolsSession` attaches to one page
+by the `devToolsId` that `QWebEnginePage` and `WebEngineView` already report, and carries protocol
+JSON both ways. Its `DevToolsAgentHostClient` says it is not trusted, so Chromium refuses it
+`Target.getTargets`, `setDiscoverTargets`, `createTarget`, `attachToTarget` and
+`attachToBrowserTarget`: it cannot list, open or reach another page or the browser. Its only other
+targets are the children `Target.setAutoAttach` brings, which are a cross-site frame, a dedicated
+worker, and a service worker whose scope holds one of the page's frames. That worker serves the
+profile's other pages of its scope too. An untrusted session cannot detach a child, so an
+application that wants fewer passes `setAutoAttach` a filter, as Omaweb does to take frames alone.
+It may not read or write local files. An id that is not a page's own is refused at attach, and a
+slot on `detached` may delete the session. Omaweb reads an Agent tab's network through it
+([omaweb#373](https://github.com/villekivela/omaweb/issues/373)). _New API, general rather than
+Omaweb's. Propose it as is._
+
 ## The open question
 
 `TabsDelegateQt` is internal, and `ExtensionsBrowserClientQt` fills it by treating every page of the
@@ -356,6 +373,16 @@ Patch 0022's cases, `aWindowTheApplicationShowsAsATabJoinsTheBrowsersWindow` and
 `aPageTakenAsATabWhileItOpensIsNeverAWindow`, do not compile without the patch, which adds the call
 they make. With the call doing nothing they fail: `tabs.query` finds the page in its own window, and
 `windows.create` answers with that window.
+
+Patch 0031's eleven cases are in Qt's `tst_devtools`, and the gate runs only those. They do not
+compile against a stock build, which has no session to open. Answering `IsTrusted()` with true fails
+`sessionCannotListTargets`, `sessionCannotAttachToAnotherPage` and
+`sessionCannotDiscoverOrCreateTargets`, and not saying the session ended when the page's host closes
+fails `sessionEndsWhenThePageCloses`. Attaching again without ending the session it had fails
+`sessionEndsBeforeAttachingAgain`. Touching the session after `detached`, when the page closes or on
+`detach()`, crashes `sessionMayBeDeletedWhenItEnds` with `MALLOC_PERTURB_` set, as the gate sets it.
+`sessionAutoAttachesWhatItsFilterAdmits` shows what Chromium brings, a service worker and a
+dedicated worker, and that a filter of frames brings neither.
 
 Patch 0018's nine cases restart a profile on the same storage path, disable and enable the
 extension, or load it again changed. They compile on the series without 0018. Five of the first six,
