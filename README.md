@@ -1,6 +1,6 @@
 # QtWebEngine extension patches
 
-Thirty-one patches to QtWebEngine. Seventeen let it host a password manager's Chromium extension,
+Thirty-two patches to QtWebEngine. Eighteen let it host a password manager's Chromium extension,
 two add API that Omaweb's content blocking and certificate view ask for, one restores a trace macro
 that slowed every page, one keeps an offscreen document from crashing the engine as it selects text,
 one keeps the content scripts any extension registers across a restart, one keeps a profile from
@@ -17,7 +17,7 @@ Built for [omaweb#344](https://github.com/villekivela/omaweb/issues/344), which 
 can host Bitwarden and 1Password. The findings live in `docs/research/password-manager-extensions.md`
 in that repository.
 
-Ten of the thirty-one are ordinary bug fixes headed for Gerrit, and 0030 is Qt's own change. The
+Ten of the thirty-two are ordinary bug fixes headed for Gerrit, and 0030 is Qt's own change. The
 rest wait on one question to Qt, in `upstream/QTBUG-draft.md`. If Qt takes the work, this repository
 is deleted rather than maintained.
 
@@ -333,6 +333,20 @@ slot on `detached` may delete the session. Omaweb reads an Agent tab's network t
 ([omaweb#373](https://github.com/villekivela/omaweb/issues/373)). _New API, general rather than
 Omaweb's. Propose it as is._
 
+**0032, let the application say which tab the reader selected.** `tabs.query({ active: true })`
+answered the last page on show in the profile, the one guess the engine could make. A split shows
+two pages at once, and so do two windows, and the reader is using one of them: Bitwarden asked for
+the active tab after the reader moved to the other page, and suggested a login for the page they
+had left. `QWebEngineExtensionManager::setSelectedPage` takes the `QWebEnginePage` or
+`WebEngineView`, and is invokable from QML. That page is the browser window's active tab, to
+`tabs.query` and in every tab an extension is told about, until the application selects another,
+passes `nullptr`, or deletes the page. The manager holds the page by a `QPointer` and finds its
+`WebContents` on each question, so a page selected before it first loads is found once it has. A
+page that is not one of the browser window's tabs is never answered, and without a selected page
+the page on show answers as before. See [omaweb#961](https://github.com/villekivela/omaweb/issues/961).
+_Part of the tab model the open question below is about: the application says which page is
+active. Propose it with 0003._
+
 ## The open question
 
 `TabsDelegateQt` is internal, and `ExtensionsBrowserClientQt` fills it by treating every page of the
@@ -340,7 +354,9 @@ profile as a tab. That guess is fine for a prototype and wrong for Qt: the exten
 turns up in `tabs.query()`.
 
 Before 0003 can be proposed, an application needs a way to say which of its pages are tabs and which
-one is active. That is what the QTBUG draft asks for. Ask before writing the API.
+one is active. That is what the QTBUG draft asks for. Ask before writing the API. 0022 and 0032 are
+the two answers Omaweb needed first, a page shown as a tab and the tab selected, as calls on the
+extension manager rather than the delegate the draft proposes.
 
 ## Tests
 
@@ -373,6 +389,13 @@ Patch 0022's cases, `aWindowTheApplicationShowsAsATabJoinsTheBrowsersWindow` and
 `aPageTakenAsATabWhileItOpensIsNeverAWindow`, do not compile without the patch, which adds the call
 they make. With the call doing nothing they fail: `tabs.query` finds the page in its own window, and
 `windows.create` answers with that window.
+
+Patch 0032's cases, `theTabTheApplicationSelectedIsActive`,
+`withNoTabSelectedThePageOnShowIsActive` and `aSelectedTabThatClosesLeavesThePageOnShowActive`, do
+not compile without the patch, which adds the call they make. With the call doing nothing, each
+fails at its first selection: `tabs.query` answers the last page on show. Answering the selected
+page before asking whether it is a tab fails the second at the extension page it selects, and a
+`nullptr` that does not clear the selection fails it at the page on show.
 
 Patch 0031's eleven cases are in Qt's `tst_devtools`, and the gate runs only those. They do not
 compile against a stock build, which has no session to open. Answering `IsTrusted()` with true fails

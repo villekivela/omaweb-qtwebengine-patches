@@ -1,0 +1,286 @@
+From 17c082a36c4ed4ef631a23e3659b6125d6fd463f Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Ville=20Kivel=C3=A4?= <vkivela@hotmail.com>
+Date: Thu, 19 Nov 2026 20:25:36 +0000
+Subject: [PATCH] extensions: let the application say which tab the reader
+ selected
+
+tabs.query({ active: true }) answered the last page on show in the
+profile, the only guess the engine could make. Two pages are on show at
+once in a split, or in two windows, and the reader is using one of
+them: Bitwarden asked for the active tab after the reader moved to the
+other and suggested a login for the page they had left.
+
+QWebEngineExtensionManager::setSelectedPage takes the QWebEnginePage,
+or the WebEngineView in Qt Quick, and is invokable from QML. From then
+on that page is the browser window's active tab, to tabs.query and in
+every tab an extension is told about, until the application selects
+another, passes nullptr, or deletes the page. The manager holds the
+page by a QPointer and finds its WebContents on each question, so a
+deleted page is never answered and a page selected before it first
+loads is found once it has. A page that is not one of the browser
+window's tabs, an extension's popup or a window an extension opened,
+is not answered. Without a selected page, the page on show answers as
+before.
+---
+ src/core/api/qwebengineextensionmanager.cpp   |  22 +++
+ src/core/api/qwebengineextensionmanager.h     |   1 +
+ src/core/extensions/extension_manager.h       |   5 +
+ .../extensions_browser_client_qt.cpp          |   9 +-
+ .../extensions/tst_qwebengineextension.cpp    | 130 ++++++++++++++++++
+ 5 files changed, 166 insertions(+), 1 deletion(-)
+
+diff --git a/src/core/api/qwebengineextensionmanager.cpp b/src/core/api/qwebengineextensionmanager.cpp
+index 12c7ef42ce..e64e5da9be 100644
+--- a/src/core/api/qwebengineextensionmanager.cpp
++++ b/src/core/api/qwebengineextensionmanager.cpp
+@@ -229,5 +229,27 @@ void QWebEngineExtensionManager::setPageIsTab(QObject *page)
+     d_ptr->setPageIsTab(page);
+ }
+ 
++/*!
++    Tells the extensions that \a page is the tab the reader has selected.
++
++    \a page is a QWebEnginePage, or a WebEngineView in Qt Quick, of this
++    manager's profile. \c chrome.tabs.query reports it as the browser window's
++    active tab, and \c chrome.tabs.get reports it as active, until the
++    application selects another page or the page is deleted.
++
++    Without a selected page, the active tab is the page on show, and the last
++    of them when more than one is, as two pages side by side or in two windows
++    are. An application that shows more than one page at once says which one
++    the reader is using, every time that changes.
++
++    A page that is not one of the browser window's tabs, such as an extension's
++    popup or a window an extension opened, is not reported as active. Pass
++    \nullptr to leave the choice to the pages on show again.
++*/
++void QWebEngineExtensionManager::setSelectedPage(QObject *page)
++{
++    d_ptr->setSelectedPage(page);
++}
++
+ QT_END_NAMESPACE
+ #endif // QT_CONFIG(webengine_extensions)
+diff --git a/src/core/api/qwebengineextensionmanager.h b/src/core/api/qwebengineextensionmanager.h
+index 405bdf0ab4..303ccae509 100644
+--- a/src/core/api/qwebengineextensionmanager.h
++++ b/src/core/api/qwebengineextensionmanager.h
+@@ -42,6 +42,7 @@ public:
+ 
+     void setWindowGeometryProvider(std::function<QRect(const QObject *page)> provider);
+     Q_INVOKABLE void setPageIsTab(QObject *page);
++    Q_INVOKABLE void setSelectedPage(QObject *page);
+ 
+ Q_SIGNALS:
+     void loadFinished(const QWebEngineExtensionInfo &extension);
+diff --git a/src/core/extensions/extension_manager.h b/src/core/extensions/extension_manager.h
+index 8518b08cdc..935df76b5c 100644
+--- a/src/core/extensions/extension_manager.h
++++ b/src/core/extensions/extension_manager.h
+@@ -14,6 +14,7 @@
+ #include <QList>
+ #include <QString>
+ #include <QObject>
++#include <QPointer>
+ #include <QtWebEngineCore/private/qtwebenginecoreglobal_p.h>
+ 
+ #include <QRect>
+@@ -71,6 +72,9 @@ public:
+ 
+     // The application shows |page| as one of the browser window's tabs.
+     void setPageIsTab(QObject *page);
++    // The page the application says the reader has selected, while it lives.
++    QObject *selectedPage() const { return m_selectedPage.data(); }
++    void setSelectedPage(QObject *page) { m_selectedPage = page; }
+ 
+     void onExtensionLoaded(const extensions::Extension *);
+     void onExtensionInstalled(const extensions::Extension *);
+@@ -84,6 +88,7 @@ private:
+     std::unique_ptr<ExtensionInstaller> m_installer;
+     content::BrowserContext *m_context;
+     WindowGeometryProvider m_windowGeometryProvider;
++    QPointer<QObject> m_selectedPage;
+ };
+ } // namespace QtWebEngineCore
+ 
+diff --git a/src/core/extensions/extensions_browser_client_qt.cpp b/src/core/extensions/extensions_browser_client_qt.cpp
+index 8d1a15f287..74f4f317b1 100644
+--- a/src/core/extensions/extensions_browser_client_qt.cpp
++++ b/src/core/extensions/extensions_browser_client_qt.cpp
+@@ -387,11 +387,16 @@ std::vector<content::WebContents *> ExtensionsBrowserClientQt::GetTabs(content::
+     return tabs;
+ }
+ 
++// The tab the application says the reader selected. Without one, the last page on show, which is
++// a guess whenever two are on show at once, side by side or in two windows.
+ content::WebContents *ExtensionsBrowserClientQt::GetActiveTab(content::BrowserContext *context)
+ {
+-    QtWebEngineCore::ProfileAdapter *adapter = static_cast<QtWebEngineCore::ProfileQt *>(context)->profileAdapter();
++    auto *profile = static_cast<QtWebEngineCore::ProfileQt *>(context);
++    QtWebEngineCore::ProfileAdapter *adapter = profile->profileAdapter();
+     if (!adapter)
+         return nullptr;
++    QtWebEngineCore::ExtensionManager *manager = profile->extensionManager();
++    const QObject *selected = manager ? manager->selectedPage() : nullptr;
+     content::WebContents *active = nullptr;
+     for (QtWebEngineCore::WebContentsAdapterClient *client : adapter->webContentsAdapterClients()) {
+         QtWebEngineCore::WebContentsAdapter *contents = client->webContentsAdapter();
+@@ -400,6 +405,8 @@ content::WebContents *ExtensionsBrowserClientQt::GetActiveTab(content::BrowserCo
+             || isExtensionPage(contents->webContents())
+             || TabRegistryQt::Get()->IsWindowOfItsOwn(contents->webContents()))
+             continue;
++        if (selected && client->holdingQObject() == selected)
++            return contents->webContents();
+         if (!active || contents->isVisible())
+             active = contents->webContents();
+     }
+diff --git a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
+index db94534136..8176d94f6a 100644
+--- a/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
++++ b/tests/auto/widgets/extensions/tst_qwebengineextension.cpp
+@@ -94,6 +94,9 @@ private Q_SLOTS:
+     void aWindowTheApplicationShowsAsATabJoinsTheBrowsersWindow_data();
+     void aWindowTheApplicationShowsAsATabJoinsTheBrowsersWindow();
+     void aPageTakenAsATabWhileItOpensIsNeverAWindow();
++    void theTabTheApplicationSelectedIsActive();
++    void withNoTabSelectedThePageOnShowIsActive();
++    void aSelectedTabThatClosesLeavesThePageOnShowActive();
+ 
+ private:
+     int installedFiles();
+@@ -2433,5 +2436,132 @@ void tst_QWebEngineExtension::aPageTakenAsATabWhileItOpensIsNeverAWindow()
+     QTRY_COMPARE(heardByWorker(&control), removalOf(nextTabId, nextWindowId));
+ }
+ 
++// A page loaded into |view| and titled |title|, which is how an extension tells it apart.
++static void showTitledPage(QWebEngineView *view, QWebEngineProfile *profile, const QUrl &url,
++                           const QString &title)
++{
++    view->setPage(new QWebEnginePage(profile, view));
++    QSignalSpy loadSpy(view, SIGNAL(loadFinished(bool)));
++    view->load(url);
++    view->resize(320, 240);
++    view->show();
++    QTRY_COMPARE(loadSpy.size(), 1);
++    evaluateJavaScriptSync(view->page(), QStringLiteral("document.title = '%1'").arg(title));
++    QTRY_COMPARE(view->page()->title(), title);
++}
++
++// The titles of the tabs |control|'s extension is told are active, asked as a password manager
++// asks for the page its suggestions are for.
++static QStringList activeTitles(QWebEnginePage *control)
++{
++    const QVariantMap answer =
++            askExtension(control, "active"_L1,
++                         "chrome.tabs.query({ active: true, currentWindow: true })"_L1);
++    QStringList titles;
++    for (const QVariant &tab : answer.value("value"_L1).toList())
++        titles.append(tab.toMap()["title"_L1].toString());
++    return titles;
++}
++
++void tst_QWebEngineExtension::theTabTheApplicationSelectedIsActive()
++{
++    // Two pages on show in one profile, as a split or a second window shows them, leave the
++    // engine no way to tell which one the reader is using: Bitwarden asked for the active tab
++    // and suggested a login for the other page. The application says which one it is.
++    HttpServer server;
++    server.setResourceDirs({ resourcesPath() });
++    QVERIFY(server.start());
++    QWebEngineExtensionInfo extension =
++            loadExtensionSync(resourcesPath() + "window_closing_ext"_L1);
++    QVERIFY(extension.isLoaded());
++    m_manager->setExtensionEnabled(extension, true);
++    QWebEnginePage control(m_profile);
++    QSignalSpy controlSpy(&control, SIGNAL(loadFinished(bool)));
++    control.load(QUrl("chrome-extension://"_L1 + extension.id() + "/control.html"_L1));
++    QTRY_COMPARE(controlSpy.size(), 1);
++
++    QWebEngineView first;
++    QWebEngineView second;
++    showTitledPage(&first, m_profile, server.url("/index.html"_L1), "first"_L1);
++    showTitledPage(&second, m_profile, server.url("/index.html"_L1), "second"_L1);
++    QVERIFY(first.page()->isVisible());
++    QVERIFY(second.page()->isVisible());
++
++    m_manager->setSelectedPage(first.page());
++    QCOMPARE(activeTitles(&control), QStringList{ "first"_L1 });
++    m_manager->setSelectedPage(second.page());
++    QCOMPARE(activeTitles(&control), QStringList{ "second"_L1 });
++    m_manager->setSelectedPage(first.page());
++    QCOMPARE(activeTitles(&control), QStringList{ "first"_L1 });
++
++    // Every other tab is reported as not active.
++    const QVariantMap all = askExtension(&control, "all"_L1, "chrome.tabs.query({})"_L1);
++    QMap<QString, bool> active;
++    for (const QVariant &tab : all.value("value"_L1).toList())
++        active.insert(tab.toMap()["title"_L1].toString(), tab.toMap()["active"_L1].toBool());
++    QCOMPARE(active.value("first"_L1), true);
++    QCOMPARE(active.value("second"_L1), false);
++    QCOMPARE(active.values().count(true), 1);
++}
++
++void tst_QWebEngineExtension::withNoTabSelectedThePageOnShowIsActive()
++{
++    // An application that never says, or takes its word back, leaves the answer to the pages on
++    // show. A page the application selects is active even while it is hidden, and an extension
++    // page is never a tab to select.
++    HttpServer server;
++    server.setResourceDirs({ resourcesPath() });
++    QVERIFY(server.start());
++    QWebEngineExtensionInfo extension =
++            loadExtensionSync(resourcesPath() + "window_closing_ext"_L1);
++    QVERIFY(extension.isLoaded());
++    m_manager->setExtensionEnabled(extension, true);
++    QWebEnginePage control(m_profile);
++    QSignalSpy controlSpy(&control, SIGNAL(loadFinished(bool)));
++    control.load(QUrl("chrome-extension://"_L1 + extension.id() + "/control.html"_L1));
++    QTRY_COMPARE(controlSpy.size(), 1);
++
++    QWebEngineView onShow;
++    QWebEngineView hidden;
++    showTitledPage(&hidden, m_profile, server.url("/index.html"_L1), "hidden"_L1);
++    showTitledPage(&onShow, m_profile, server.url("/index.html"_L1), "on show"_L1);
++    hidden.hide();
++    QTRY_VERIFY(!hidden.page()->isVisible());
++
++    QCOMPARE(activeTitles(&control), QStringList{ "on show"_L1 });
++    m_manager->setSelectedPage(hidden.page());
++    QCOMPARE(activeTitles(&control), QStringList{ "hidden"_L1 });
++    m_manager->setSelectedPage(nullptr);
++    QCOMPARE(activeTitles(&control), QStringList{ "on show"_L1 });
++    m_manager->setSelectedPage(&control);
++    QCOMPARE(activeTitles(&control), QStringList{ "on show"_L1 });
++}
++
++void tst_QWebEngineExtension::aSelectedTabThatClosesLeavesThePageOnShowActive()
++{
++    // The application deletes the page the reader selected before it says which one comes next.
++    HttpServer server;
++    server.setResourceDirs({ resourcesPath() });
++    QVERIFY(server.start());
++    QWebEngineExtensionInfo extension =
++            loadExtensionSync(resourcesPath() + "window_closing_ext"_L1);
++    QVERIFY(extension.isLoaded());
++    m_manager->setExtensionEnabled(extension, true);
++    QWebEnginePage control(m_profile);
++    QSignalSpy controlSpy(&control, SIGNAL(loadFinished(bool)));
++    control.load(QUrl("chrome-extension://"_L1 + extension.id() + "/control.html"_L1));
++    QTRY_COMPARE(controlSpy.size(), 1);
++
++    QWebEngineView remaining;
++    auto closing = std::make_unique<QWebEngineView>();
++    showTitledPage(closing.get(), m_profile, server.url("/index.html"_L1), "closing"_L1);
++    showTitledPage(&remaining, m_profile, server.url("/index.html"_L1), "remaining"_L1);
++    m_manager->setSelectedPage(closing->page());
++    QCOMPARE(activeTitles(&control), QStringList{ "closing"_L1 });
++
++    closing.reset();
++    QCOMPARE(activeTitles(&control), QStringList{ "remaining"_L1 });
++}
++
+ QTEST_MAIN(tst_QWebEngineExtension)
+ #include "tst_qwebengineextension.moc"
+-- 
+2.56.0
+
