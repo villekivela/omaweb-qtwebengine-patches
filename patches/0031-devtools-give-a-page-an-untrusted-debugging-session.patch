@@ -1,4 +1,4 @@
-From 0a1f1278ef3f20472f8b79aff7cccd4408f15e6f Mon Sep 17 00:00:00 2001
+From 250c8470448f2428048f3bcd68324af6238e633a Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivel=C3=A4?=
  <5814559+villekivela@users.noreply.github.com>
 Date: Thu, 19 Nov 2026 08:35:00 +0000
@@ -13,15 +13,20 @@ QWebEngineDevToolsSession attaches to a page by its devToolsId, which
 QWebEnginePage and WebEngineView already report, and carries protocol
 JSON both ways through sendMessage and messageReceived. Its
 DevToolsAgentHostClient is not trusted, so Chromium answers
-Target.getTargets, Target.attachToTarget and attachToBrowserTarget with
-an error: the session reaches the page and the children
-Target.setAutoAttach brings, such as a cross-site frame, and no other
-page, worker or the browser. It may not read or write local files and
-is refused the operations kept for privileged automation clients. An id
-that is not a page's own, such as a worker's, is refused at attach.
+Target.getTargets, setDiscoverTargets, createTarget, attachToTarget and
+attachToBrowserTarget with an error: the session cannot list, open or
+reach another page or the browser. Its only other targets are the
+children Target.setAutoAttach brings, which are a cross-site frame, a
+dedicated worker, and a service worker whose scope holds one of the
+page's frames. An untrusted session cannot detach a child, so an
+application that wants fewer passes setAutoAttach a filter. It may not
+read or write local files and is refused the operations kept for
+privileged automation clients. An id that is not a page's own, such as
+a worker's, is refused at attach.
 
 The session ends on detach, when the page closes and when it is
-destroyed, and says so with detached and attachedChanged.
+destroyed, and says so with detached and attachedChanged. A slot on
+detached may delete the session.
 
 omaweb#373
 
@@ -29,13 +34,13 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
  src/core/CMakeLists.txt                    |   1 +
  src/core/api/CMakeLists.txt                |   1 +
- src/core/api/qwebenginedevtoolssession.cpp | 110 +++++++++++
- src/core/api/qwebenginedevtoolssession.h   |  50 +++++
- src/core/devtools_session_qt.cpp           | 111 +++++++++++
- src/core/devtools_session_qt.h             |  39 ++++
+ src/core/api/qwebenginedevtoolssession.cpp | 126 +++++++++
+ src/core/api/qwebenginedevtoolssession.h   |  50 ++++
+ src/core/devtools_session_qt.cpp           | 117 ++++++++
+ src/core/devtools_session_qt.h             |  39 +++
  tests/auto/core/devtools/CMakeLists.txt    |   1 +
- tests/auto/core/devtools/tst_devtools.cpp  | 205 +++++++++++++++++++++
- 8 files changed, 518 insertions(+)
+ tests/auto/core/devtools/tst_devtools.cpp  | 308 +++++++++++++++++++++
+ 8 files changed, 643 insertions(+)
  create mode 100644 src/core/api/qwebenginedevtoolssession.cpp
  create mode 100644 src/core/api/qwebenginedevtoolssession.h
  create mode 100644 src/core/devtools_session_qt.cpp
@@ -67,10 +72,10 @@ index ed57aa1c8e..4a07f521f7 100644
          qwebengineextensioninfo.cpp qwebengineextensioninfo.h qwebengineextensioninfo_p.h
 diff --git a/src/core/api/qwebenginedevtoolssession.cpp b/src/core/api/qwebenginedevtoolssession.cpp
 new file mode 100644
-index 0000000000..9ca0598f4d
+index 0000000000..c15c006c46
 --- /dev/null
 +++ b/src/core/api/qwebenginedevtoolssession.cpp
-@@ -0,0 +1,110 @@
+@@ -0,0 +1,126 @@
 +// Copyright (C) 2026 The Qt Company Ltd.
 +// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 +// Qt-Security score:critical reason:data-parser
@@ -78,6 +83,8 @@ index 0000000000..9ca0598f4d
 +#include "qwebenginedevtoolssession.h"
 +
 +#include "devtools_session_qt.h"
++
++#include <QtCore/qpointer.h>
 +
 +QT_BEGIN_NAMESPACE
 +
@@ -92,19 +99,27 @@ index 0000000000..9ca0598f4d
 +    commands as JSON with sendMessage() and hears answers and events through
 +    messageReceived().
 +
-+    The session is not trusted. It reaches the page and the frames the page
-+    holds, and nothing else: \c Target.getTargets, \c Target.attachToTarget and
-+    \c Target.attachToBrowserTarget are refused, so it can neither list nor reach
-+    the browser, other pages, or the page's service workers. Its child targets
-+    are those \c Target.setAutoAttach brings, such as a cross-site frame. It may
-+    not read or write local files through the protocol, and is refused the
-+    operations Chromium keeps for privileged automation clients.
++    The session is not trusted. \c Target.getTargets, \c Target.setDiscoverTargets,
++    \c Target.createTarget, \c Target.attachToTarget and
++    \c Target.attachToBrowserTarget are refused, so it can neither list, open nor
++    reach the browser or another page. Its only other targets are the children
++    \c Target.setAutoAttach brings: a cross-site frame, a dedicated worker, and a
++    service worker whose scope holds one of the page's frames, which also serves
++    the profile's other pages of that scope. Pass \c Target.setAutoAttach a
++    \c filter, such as \c{[{"type": "iframe"}]}, to bring fewer; an untrusted
++    session cannot detach a child once it is attached. It may not read or write
++    local files through the protocol, and is refused the operations Chromium
++    keeps for privileged automation clients.
 +
 +    Unlike the remote debugging server, a session needs no port and serves
 +    nobody but the application that opened it.
 +
 +    The session ends when detach() is called, when the page closes, and when the
-+    session is destroyed. detached() is emitted in the first two cases.
++    session is destroyed. detached() is emitted in the first two cases, and a slot
++    connected to it may delete the session.
++
++    A session belongs to the thread the pages run on, the application's main
++    thread, and is used from that thread alone.
 +*/
 +
 +/*!
@@ -142,7 +157,10 @@ index 0000000000..9ca0598f4d
 +*/
 +bool QWebEngineDevToolsSession::attach(const QString &devToolsId)
 +{
++    QPointer<QWebEngineDevToolsSession> self = this;
 +    detach();
++    if (!self)
++        return false;
 +    const bool attached = d_ptr->attach(devToolsId.toStdString());
 +    if (attached)
 +        Q_EMIT attachedChanged();
@@ -155,8 +173,11 @@ index 0000000000..9ca0598f4d
 +void QWebEngineDevToolsSession::detach()
 +{
 +    if (d_ptr->detach()) {
++        // A slot may delete the session, so nothing of it is touched after.
++        QPointer<QWebEngineDevToolsSession> self = this;
 +        Q_EMIT detached();
-+        Q_EMIT attachedChanged();
++        if (self)
++            Q_EMIT attachedChanged();
 +    }
 +}
 +
@@ -239,16 +260,18 @@ index 0000000000..2fc09cd5bd
 +#endif // QWEBENGINEDEVTOOLSSESSION_H
 diff --git a/src/core/devtools_session_qt.cpp b/src/core/devtools_session_qt.cpp
 new file mode 100644
-index 0000000000..707bf85721
+index 0000000000..e706ba0fa3
 --- /dev/null
 +++ b/src/core/devtools_session_qt.cpp
-@@ -0,0 +1,111 @@
+@@ -0,0 +1,117 @@
 +// Copyright (C) 2026 The Qt Company Ltd.
 +// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 +
 +#include "devtools_session_qt.h"
 +
 +#include "api/qwebenginedevtoolssession.h"
++
++#include <QtCore/qpointer.h>
 +
 +#include "base/containers/span.h"
 +#include "base/memory/scoped_refptr.h"
@@ -303,8 +326,12 @@ index 0000000000..707bf85721
 +        if (host != m_host.get())
 +            return;
 +        m_host = nullptr;
-+        Q_EMIT m_session->detached();
-+        Q_EMIT m_session->attachedChanged();
++        // A slot may delete the session, and this client with it, so nothing
++        // of either is touched after the first signal.
++        QPointer<QWebEngineDevToolsSession> session = m_session;
++        Q_EMIT session->detached();
++        if (session)
++            Q_EMIT session->attachedChanged();
 +    }
 +
 +    // What makes the session a page's and nothing more.
@@ -411,10 +438,10 @@ index efde75240f..2d558f8112 100644
  )
  
 diff --git a/tests/auto/core/devtools/tst_devtools.cpp b/tests/auto/core/devtools/tst_devtools.cpp
-index 7284f0d51e..be343a1d32 100644
+index 7284f0d51e..9138463426 100644
 --- a/tests/auto/core/devtools/tst_devtools.cpp
 +++ b/tests/auto/core/devtools/tst_devtools.cpp
-@@ -3,16 +3,62 @@
+@@ -3,16 +3,66 @@
  
  #include <QtTest/QtTest>
  
@@ -424,6 +451,7 @@ index 7284f0d51e..be343a1d32 100644
 +#include <QtCore/qjsonarray.h>
 +#include <QtCore/qjsondocument.h>
 +#include <QtCore/qjsonobject.h>
++#include <QtCore/qpointer.h>
 +
 +#include <httpserver.h>
 +#include <httpreqrep.h>
@@ -438,10 +466,13 @@ index 7284f0d51e..be343a1d32 100644
 +    void sessionRefusesAnUnknownPage();
 +    void sessionCannotListTargets();
 +    void sessionCannotAttachToAnotherPage();
++    void sessionCannotDiscoverOrCreateTargets();
++    void sessionAutoAttachesWhatItsFilterAdmits();
 +    void sessionSeesThePagesRequests();
 +    void sessionEndsWhenThePageCloses();
 +    void sessionEndsWhenDetached();
 +    void sessionEndsBeforeAttachingAgain();
++    void sessionMayBeDeletedWhenItEnds();
  };
  
 +// Sends one protocol command on the session and waits for the answer with its id.
@@ -477,7 +508,7 @@ index 7284f0d51e..be343a1d32 100644
  void tst_DevTools::attachAndDestroyPageFirst()
  {
      // External inspector + manual destruction of page first
-@@ -63,6 +109,165 @@ void tst_DevTools::attachAndDestroyInspectorFirst()
+@@ -63,6 +113,264 @@ void tst_DevTools::attachAndDestroyInspectorFirst()
      delete page;
  }
  
@@ -543,6 +574,83 @@ index 7284f0d51e..be343a1d32 100644
 +    }
 +    const QJsonObject browser = command(session, QStringLiteral("Target.attachToBrowserTarget"));
 +    QVERIFY2(browser.contains(QStringLiteral("error")), QJsonDocument(browser).toJson());
++}
++
++void tst_DevTools::sessionCannotDiscoverOrCreateTargets()
++{
++    QWebEnginePage page;
++    loadAndWait(page, QUrl("data:text/plain,one"));
++    QWebEngineDevToolsSession session;
++    QVERIFY(session.attach(page.devToolsId()));
++
++    const QJsonObject discover = command(session, QStringLiteral("Target.setDiscoverTargets"),
++                                         { { QStringLiteral("discover"), true } });
++    QVERIFY2(discover.contains(QStringLiteral("error")), QJsonDocument(discover).toJson());
++    const QJsonObject create = command(session, QStringLiteral("Target.createTarget"),
++                                       { { QStringLiteral("url"), QStringLiteral("about:blank") } });
++    QVERIFY2(create.contains(QStringLiteral("error")), QJsonDocument(create).toJson());
++    QVERIFY(!create.contains(QStringLiteral("result")));
++}
++
++// Auto-attach brings the page's children, a service worker whose scope holds the page among them,
++// and a filter keeps out what the application does not want.
++void tst_DevTools::sessionAutoAttachesWhatItsFilterAdmits()
++{
++    HttpServer server;
++    connect(&server, &HttpServer::newRequest, [](HttpReqRep *rr) {
++        if (rr->requestPath() == "/sw.js" || rr->requestPath() == "/worker.js") {
++            rr->setResponseHeader(QByteArrayLiteral("content-type"),
++                                  QByteArrayLiteral("text/javascript"));
++            rr->setResponseBody(QByteArrayLiteral("self.onfetch = () => {};"));
++        } else {
++            rr->setResponseHeader(QByteArrayLiteral("content-type"), QByteArrayLiteral("text/html"));
++            rr->setResponseBody(QByteArrayLiteral(
++                    "<script>window.worker = new Worker('/worker.js');"
++                    "navigator.serviceWorker.register('/sw.js')"
++                    ".then(() => navigator.serviceWorker.ready)"
++                    ".then(() => { document.title = 'ready'; });</script>"));
++        }
++        rr->sendResponse(200);
++    });
++    QVERIFY(server.start());
++    QWebEnginePage page;
++    loadAndWait(page, server.url(QStringLiteral("/")));
++    QTRY_COMPARE_WITH_TIMEOUT(page.title(), QStringLiteral("ready"), 12000);
++
++    const auto attachedTypes = [](QWebEngineDevToolsSession &session, QStringList &types) {
++        connect(&session, &QWebEngineDevToolsSession::messageReceived,
++                [&types](const QByteArray &message) {
++            const QJsonObject object = QJsonDocument::fromJson(message).object();
++            if (object[QStringLiteral("method")] == QStringLiteral("Target.attachedToTarget"))
++                types.append(object[QStringLiteral("params")][QStringLiteral("targetInfo")]
++                                     [QStringLiteral("type")].toString());
++        });
++    };
++    const QJsonObject autoAttach{ { QStringLiteral("autoAttach"), true },
++                                  { QStringLiteral("waitForDebuggerOnStart"), false },
++                                  { QStringLiteral("flatten"), true } };
++
++    QWebEngineDevToolsSession filtered;
++    QStringList filteredTypes;
++    attachedTypes(filtered, filteredTypes);
++    QVERIFY(filtered.attach(page.devToolsId()));
++    QJsonObject frames = autoAttach;
++    frames.insert(QStringLiteral("filter"),
++                  QJsonArray{ QJsonObject{ { QStringLiteral("type"), QStringLiteral("iframe") } } });
++    const QJsonObject answer = command(filtered, QStringLiteral("Target.setAutoAttach"), frames);
++    QVERIFY2(answer.contains(QStringLiteral("result")), QJsonDocument(answer).toJson());
++
++    QWebEngineDevToolsSession unfiltered;
++    QStringList unfilteredTypes;
++    attachedTypes(unfiltered, unfilteredTypes);
++    QVERIFY(unfiltered.attach(page.devToolsId()));
++    command(unfiltered, QStringLiteral("Target.setAutoAttach"), autoAttach);
++    QTRY_VERIFY2_WITH_TIMEOUT(unfilteredTypes.contains(QStringLiteral("service_worker")),
++                              qPrintable(unfilteredTypes.join(u',')), 12000);
++    QTRY_VERIFY2_WITH_TIMEOUT(unfilteredTypes.contains(QStringLiteral("worker")),
++                              qPrintable(unfilteredTypes.join(u',')), 12000);
++    QVERIFY2(filteredTypes.isEmpty(), qPrintable(filteredTypes.join(u',')));
++    QVERIFY(server.stop());
 +}
 +
 +void tst_DevTools::sessionSeesThePagesRequests()
@@ -639,6 +747,28 @@ index 7284f0d51e..be343a1d32 100644
 +    QCOMPARE(answer[QStringLiteral("result")][QStringLiteral("result")][QStringLiteral("value")]
 +                     .toString(),
 +             QStringLiteral("two"));
++}
++
++// A slot on detached() may delete the session, whether the page closed or detach() was called.
++void tst_DevTools::sessionMayBeDeletedWhenItEnds()
++{
++    for (const bool pageCloses : { true, false }) {
++        auto page = std::make_unique<QWebEnginePage>();
++        loadAndWait(*page, QUrl("data:text/plain,deleting"));
++        QPointer<QWebEngineDevToolsSession> session = new QWebEngineDevToolsSession;
++        QVERIFY(session->attach(page->devToolsId()));
++        int ended = 0;
++        connect(session.data(), &QWebEngineDevToolsSession::detached, [&session, &ended] {
++            ++ended;
++            delete session.data();
++        });
++        if (pageCloses)
++            page.reset();
++        else
++            session->detach();
++        QTRY_VERIFY_WITH_TIMEOUT(!session, 12000);
++        QCOMPARE(ended, 1);
++    }
 +}
  
  QTEST_MAIN(tst_DevTools)

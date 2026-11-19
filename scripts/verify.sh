@@ -228,13 +228,15 @@ fi
 # run on the patched engine only.
 devtools="$tree/build/tests/auto/core/devtools/tst_devtools"
 devtools_cases="sessionAnswersOnItsPage sessionRefusesAnUnknownPage sessionCannotListTargets \
-sessionCannotAttachToAnotherPage sessionSeesThePagesRequests sessionEndsWhenThePageCloses \
-sessionEndsWhenDetached sessionEndsBeforeAttachingAgain"
+sessionCannotAttachToAnotherPage sessionCannotDiscoverOrCreateTargets \
+sessionAutoAttachesWhatItsFilterAdmits sessionSeesThePagesRequests sessionEndsWhenThePageCloses \
+sessionEndsWhenDetached sessionEndsBeforeAttachingAgain sessionMayBeDeletedWhenItEnds"
 [ -x "$devtools" ] || "$tree/build.sh" tst_devtools
 
 echo "=== patched engine, a page's own debugging session"
+# Freed memory is overwritten, so a session touched after a slot deleted it crashes.
 # shellcheck disable=SC2086 # one argument per case
-if env "$path_var=$tree/build/lib" \
+if env "$path_var=$tree/build/lib" MALLOC_PERTURB_=165 \
     ${helper:+QTWEBENGINEPROCESS_PATH="$helper"} \
     ${resources:+QTWEBENGINE_RESOURCES_PATH="$resources"} \
     ${locales:+QTWEBENGINE_LOCALES_PATH="$locales"} \

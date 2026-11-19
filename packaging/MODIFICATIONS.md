@@ -46,8 +46,9 @@ crashes the engine. The twenty-ninth gives every page Chrome's `chrome.app`, `ch
 `chrome.loadTimes`, defined as Chrome's renderer defines them, which Google's sign-in reads. The
 thirtieth is Qt's own fix to the engine's build, so that it links where Qt has GLX and the engine is
 built without X11, as this one is. The last adds `QWebEngineDevToolsSession`, a DevTools protocol
-session of one page whose client is not trusted, so it cannot list or reach any other page, worker
-or the browser.
+session of one page whose client is not trusted, so it cannot list, open or reach any other page
+or the browser. It reaches only the children its page's auto-attach brings: frames, dedicated
+workers and the service worker whose scope holds the page.
 
 On x86_64 the engine is built with clang and LLD, with ThinLTO and Chrome's own PGO profile for its
 Chromium, where Qt's build would use GCC. On aarch64 it is built with GCC, as Qt's is.

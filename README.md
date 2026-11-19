@@ -322,10 +322,14 @@ application speaks the DevTools protocol, and it serves every page of every prof
 included, to anything that connects to its port. `QWebEngineDevToolsSession` attaches to one page
 by the `devToolsId` that `QWebEnginePage` and `WebEngineView` already report, and carries protocol
 JSON both ways. Its `DevToolsAgentHostClient` says it is not trusted, so Chromium refuses it
-`Target.getTargets`, `attachToTarget` and `attachToBrowserTarget`: it reaches the page and the
-children `Target.setAutoAttach` brings, such as a cross-site frame, and not another page, a service
-worker or the browser. It may not read or write local files. An id that is not a page's own is
-refused at attach. Omaweb reads an Agent tab's network through it
+`Target.getTargets`, `setDiscoverTargets`, `createTarget`, `attachToTarget` and
+`attachToBrowserTarget`: it cannot list, open or reach another page or the browser. Its only other
+targets are the children `Target.setAutoAttach` brings, which are a cross-site frame, a dedicated
+worker, and a service worker whose scope holds one of the page's frames. That worker serves the
+profile's other pages of its scope too. An untrusted session cannot detach a child, so an
+application that wants fewer passes `setAutoAttach` a filter, as Omaweb does to take frames alone.
+It may not read or write local files. An id that is not a page's own is refused at attach, and a
+slot on `detached` may delete the session. Omaweb reads an Agent tab's network through it
 ([omaweb#373](https://github.com/villekivela/omaweb/issues/373)). _New API, general rather than
 Omaweb's. Propose it as is._
 
@@ -370,11 +374,15 @@ Patch 0022's cases, `aWindowTheApplicationShowsAsATabJoinsTheBrowsersWindow` and
 they make. With the call doing nothing they fail: `tabs.query` finds the page in its own window, and
 `windows.create` answers with that window.
 
-Patch 0031's eight cases are in Qt's `tst_devtools`, and the gate runs only those. They do not
+Patch 0031's eleven cases are in Qt's `tst_devtools`, and the gate runs only those. They do not
 compile against a stock build, which has no session to open. Answering `IsTrusted()` with true fails
-`sessionCannotListTargets` and `sessionCannotAttachToAnotherPage`, and not saying the session ended
-when the page's host closes fails `sessionEndsWhenThePageCloses`. Attaching again without ending
-the session it had fails `sessionEndsBeforeAttachingAgain`.
+`sessionCannotListTargets`, `sessionCannotAttachToAnotherPage` and
+`sessionCannotDiscoverOrCreateTargets`, and not saying the session ended when the page's host closes
+fails `sessionEndsWhenThePageCloses`. Attaching again without ending the session it had fails
+`sessionEndsBeforeAttachingAgain`. Touching the session after `detached`, when the page closes or on
+`detach()`, crashes `sessionMayBeDeletedWhenItEnds` with `MALLOC_PERTURB_` set, as the gate sets it.
+`sessionAutoAttachesWhatItsFilterAdmits` shows what Chromium brings, a service worker and a
+dedicated worker, and that a filter of frames brings neither.
 
 Patch 0018's nine cases restart a profile on the same storage path, disable and enable the
 extension, or load it again changed. They compile on the series without 0018. Five of the first six,
