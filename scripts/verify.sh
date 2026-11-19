@@ -223,6 +223,28 @@ else
     echo "  the test did not finish cleanly, exit $?"
 fi
 
+# Patch 0031 gives a page a debugging session that is not trusted, so its cases live in Qt's
+# devtools test. They do not compile against a stock engine, which has no session to open, so they
+# run on the patched engine only.
+devtools="$tree/build/tests/auto/core/devtools/tst_devtools"
+devtools_cases="sessionAnswersOnItsPage sessionRefusesAnUnknownPage sessionCannotListTargets \
+sessionCannotAttachToAnotherPage sessionSeesThePagesRequests sessionEndsWhenThePageCloses \
+sessionEndsWhenDetached"
+[ -x "$devtools" ] || "$tree/build.sh" tst_devtools
+
+echo "=== patched engine, a page's own debugging session"
+# shellcheck disable=SC2086 # one argument per case
+if env "$path_var=$tree/build/lib" \
+    ${helper:+QTWEBENGINEPROCESS_PATH="$helper"} \
+    ${resources:+QTWEBENGINE_RESOURCES_PATH="$resources"} \
+    ${locales:+QTWEBENGINE_LOCALES_PATH="$locales"} \
+    "$devtools" $devtools_cases -nocrashhandler -o -,txt 2>&1
+then
+    :
+else
+    echo "  the test did not finish cleanly, exit $?"
+fi
+
 echo "=== stock engine, where each of these must fail or crash"
 if [ ! -e "$stock/qt6/QtWebEngineProcess" ] && [ ! -e "$stock/QtWebEngineProcess" ] \
     && [ ! -d "$stock/QtWebEngineCore.framework" ]
