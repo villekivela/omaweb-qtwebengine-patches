@@ -1,9 +1,9 @@
 # QtWebEngine extension patches
 
-Thirty-one patches to QtWebEngine. Seventeen let it host a password manager's Chromium extension, two
-add API that Omaweb's content blocking and certificate view ask for, one restores a trace macro that
-slowed every page, one keeps an offscreen document from crashing the engine as it selects text, one
-keeps the content scripts any extension registers across a restart, one keeps a profile from
+Thirty-one patches to QtWebEngine. Seventeen let it host a password manager's Chromium extension,
+two add API that Omaweb's content blocking and certificate view ask for, one restores a trace macro
+that slowed every page, one keeps an offscreen document from crashing the engine as it selects text,
+one keeps the content scripts any extension registers across a restart, one keeps a profile from
 crashing as it is deleted with an extension's message still waiting, one draws a favicon again when
 the colour scheme changes, one shows a page's SVG icon rather than a raster one beside it, one lets
 a page hear what its passkeys can reach in a build without Bluetooth, one answers a push
@@ -17,9 +17,9 @@ Built for [omaweb#344](https://github.com/villekivela/omaweb/issues/344), which 
 can host Bitwarden and 1Password. The findings live in `docs/research/password-manager-extensions.md`
 in that repository.
 
-Ten of the thirty-one are ordinary bug fixes headed for Gerrit, and 0030 is Qt's own change. The rest
-wait on one question to Qt, in `upstream/QTBUG-draft.md`. If Qt takes the work, this repository is
-deleted rather than maintained.
+Ten of the thirty-one are ordinary bug fixes headed for Gerrit, and 0030 is Qt's own change. The
+rest wait on one question to Qt, in `upstream/QTBUG-draft.md`. If Qt takes the work, this repository
+is deleted rather than maintained.
 
 ## Running it
 
@@ -369,10 +369,12 @@ Patch 0022's cases, `aWindowTheApplicationShowsAsATabJoinsTheBrowsersWindow` and
 `aPageTakenAsATabWhileItOpensIsNeverAWindow`, do not compile without the patch, which adds the call
 they make. With the call doing nothing they fail: `tabs.query` finds the page in its own window, and
 `windows.create` answers with that window.
-Patch 0031's seven cases are in Qt's `tst_devtools`, and the gate runs only those. They do not
+
+Patch 0031's eight cases are in Qt's `tst_devtools`, and the gate runs only those. They do not
 compile against a stock build, which has no session to open. Answering `IsTrusted()` with true fails
 `sessionCannotListTargets` and `sessionCannotAttachToAnotherPage`, and not saying the session ended
-when the page's host closes fails `sessionEndsWhenThePageCloses`.
+when the page's host closes fails `sessionEndsWhenThePageCloses`. Attaching again without ending
+the session it had fails `sessionEndsBeforeAttachingAgain`.
 
 Patch 0018's nine cases restart a profile on the same storage path, disable and enable the
 extension, or load it again changed. They compile on the series without 0018. Five of the first six,

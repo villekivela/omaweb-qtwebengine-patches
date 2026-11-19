@@ -229,7 +229,7 @@ fi
 devtools="$tree/build/tests/auto/core/devtools/tst_devtools"
 devtools_cases="sessionAnswersOnItsPage sessionRefusesAnUnknownPage sessionCannotListTargets \
 sessionCannotAttachToAnotherPage sessionSeesThePagesRequests sessionEndsWhenThePageCloses \
-sessionEndsWhenDetached"
+sessionEndsWhenDetached sessionEndsBeforeAttachingAgain"
 [ -x "$devtools" ] || "$tree/build.sh" tst_devtools
 
 echo "=== patched engine, a page's own debugging session"

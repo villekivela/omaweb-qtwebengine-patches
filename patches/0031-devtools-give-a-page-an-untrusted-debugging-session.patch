@@ -1,4 +1,4 @@
-From e1f65c0992c3a787baffab6b01ae28dc8c8a51d0 Mon Sep 17 00:00:00 2001
+From 0a1f1278ef3f20472f8b79aff7cccd4408f15e6f Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Ville=20Kivel=C3=A4?=
  <5814559+villekivela@users.noreply.github.com>
 Date: Thu, 19 Nov 2026 08:35:00 +0000
@@ -29,13 +29,13 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
  src/core/CMakeLists.txt                    |   1 +
  src/core/api/CMakeLists.txt                |   1 +
- src/core/api/qwebenginedevtoolssession.cpp | 110 +++++++++++++
- src/core/api/qwebenginedevtoolssession.h   |  50 ++++++
- src/core/devtools_session_qt.cpp           | 112 +++++++++++++
- src/core/devtools_session_qt.h             |  39 +++++
+ src/core/api/qwebenginedevtoolssession.cpp | 110 +++++++++++
+ src/core/api/qwebenginedevtoolssession.h   |  50 +++++
+ src/core/devtools_session_qt.cpp           | 111 +++++++++++
+ src/core/devtools_session_qt.h             |  39 ++++
  tests/auto/core/devtools/CMakeLists.txt    |   1 +
- tests/auto/core/devtools/tst_devtools.cpp  | 178 +++++++++++++++++++++
- 8 files changed, 492 insertions(+)
+ tests/auto/core/devtools/tst_devtools.cpp  | 205 +++++++++++++++++++++
+ 8 files changed, 518 insertions(+)
  create mode 100644 src/core/api/qwebenginedevtoolssession.cpp
  create mode 100644 src/core/api/qwebenginedevtoolssession.h
  create mode 100644 src/core/devtools_session_qt.cpp
@@ -67,7 +67,7 @@ index ed57aa1c8e..4a07f521f7 100644
          qwebengineextensioninfo.cpp qwebengineextensioninfo.h qwebengineextensioninfo_p.h
 diff --git a/src/core/api/qwebenginedevtoolssession.cpp b/src/core/api/qwebenginedevtoolssession.cpp
 new file mode 100644
-index 0000000000..4a8653708d
+index 0000000000..9ca0598f4d
 --- /dev/null
 +++ b/src/core/api/qwebenginedevtoolssession.cpp
 @@ -0,0 +1,110 @@
@@ -136,15 +136,15 @@ index 0000000000..4a8653708d
 +QWebEngineDevToolsSession::~QWebEngineDevToolsSession() = default;
 +
 +/*!
-+    Attaches the session to the page whose DevTools id is \a devToolsId, ending
-+    any session it had. Returns \c false, and stays detached, when no page has
-+    that id.
++    Attaches the session to the page whose DevTools id is \a devToolsId. A
++    session it had ends first, with detached(), whether or not the new one
++    opens. Returns \c false, and stays detached, when no page has that id.
 +*/
 +bool QWebEngineDevToolsSession::attach(const QString &devToolsId)
 +{
-+    const bool wasAttached = d_ptr->isAttached();
++    detach();
 +    const bool attached = d_ptr->attach(devToolsId.toStdString());
-+    if (attached != wasAttached)
++    if (attached)
 +        Q_EMIT attachedChanged();
 +    return attached;
 +}
@@ -239,10 +239,10 @@ index 0000000000..2fc09cd5bd
 +#endif // QWEBENGINEDEVTOOLSSESSION_H
 diff --git a/src/core/devtools_session_qt.cpp b/src/core/devtools_session_qt.cpp
 new file mode 100644
-index 0000000000..e95f0e89e0
+index 0000000000..707bf85721
 --- /dev/null
 +++ b/src/core/devtools_session_qt.cpp
-@@ -0,0 +1,112 @@
+@@ -0,0 +1,111 @@
 +// Copyright (C) 2026 The Qt Company Ltd.
 +// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 +
@@ -266,7 +266,6 @@ index 0000000000..e95f0e89e0
 +
 +    bool attach(scoped_refptr<content::DevToolsAgentHost> host)
 +    {
-+        detach();
 +        if (!host->AttachClient(this))
 +            return false;
 +        m_host = std::move(host);
@@ -412,10 +411,10 @@ index efde75240f..2d558f8112 100644
  )
  
 diff --git a/tests/auto/core/devtools/tst_devtools.cpp b/tests/auto/core/devtools/tst_devtools.cpp
-index 7284f0d51e..6d263dd3b2 100644
+index 7284f0d51e..be343a1d32 100644
 --- a/tests/auto/core/devtools/tst_devtools.cpp
 +++ b/tests/auto/core/devtools/tst_devtools.cpp
-@@ -3,16 +3,61 @@
+@@ -3,16 +3,62 @@
  
  #include <QtTest/QtTest>
  
@@ -442,6 +441,7 @@ index 7284f0d51e..6d263dd3b2 100644
 +    void sessionSeesThePagesRequests();
 +    void sessionEndsWhenThePageCloses();
 +    void sessionEndsWhenDetached();
++    void sessionEndsBeforeAttachingAgain();
  };
  
 +// Sends one protocol command on the session and waits for the answer with its id.
@@ -477,7 +477,7 @@ index 7284f0d51e..6d263dd3b2 100644
  void tst_DevTools::attachAndDestroyPageFirst()
  {
      // External inspector + manual destruction of page first
-@@ -63,6 +108,139 @@ void tst_DevTools::attachAndDestroyInspectorFirst()
+@@ -63,6 +109,165 @@ void tst_DevTools::attachAndDestroyInspectorFirst()
      delete page;
  }
  
@@ -613,6 +613,32 @@ index 7284f0d51e..6d263dd3b2 100644
 +    session.sendMessage(R"({"id":1,"method":"Runtime.evaluate","params":{"expression":"1"}})");
 +    QTest::qWait(200);
 +    QCOMPARE(messages.size(), 0);
++}
++// Attaching again ends the session it had first, whether or not the new one
++// opens, so a session never answers for a page it was moved away from.
++void tst_DevTools::sessionEndsBeforeAttachingAgain()
++{
++    QWebEnginePage page;
++    QWebEnginePage other;
++    loadAndWait(page, QUrl("data:text/plain,one"));
++    loadAndWait(other, QUrl("data:text/plain,two"));
++    QWebEngineDevToolsSession session;
++    QVERIFY(session.attach(page.devToolsId()));
++    QSignalSpy detached(&session, &QWebEngineDevToolsSession::detached);
++
++    QVERIFY(!session.attach(QStringLiteral("no-such-page")));
++    QVERIFY(!session.isAttached());
++    QCOMPARE(detached.size(), 1);
++
++    QVERIFY(session.attach(page.devToolsId()));
++    QVERIFY(session.attach(other.devToolsId()));
++    QCOMPARE(detached.size(), 2);
++    QVERIFY(session.isAttached());
++    const QJsonObject answer = command(session, QStringLiteral("Runtime.evaluate"),
++                                       { { QStringLiteral("expression"), QStringLiteral("document.body.innerText") } });
++    QCOMPARE(answer[QStringLiteral("result")][QStringLiteral("result")][QStringLiteral("value")]
++                     .toString(),
++             QStringLiteral("two"));
 +}
  
  QTEST_MAIN(tst_DevTools)
