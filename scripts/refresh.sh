@@ -189,7 +189,9 @@ if [ "$toolchain" = "clang" ]; then
         command -v "$tool" > /dev/null 2>&1 \
             || { echo "the clang toolchain needs $tool, which is not installed"; exit 1; }
     done
-    git apply "$series/../toolchain/clang.patch"
+    # An extended tree has it already, from the build that made it.
+    git apply --check -R "$series/../toolchain/clang.patch" 2> /dev/null \
+        || git apply "$series/../toolchain/clang.patch"
     echo "TOOLCHAIN: clang, LLD and ThinLTO"
     # Its PGO line goes to the output build-inside.sh keeps as apply.txt, so a release records
     # which profiles it was built with.
@@ -202,7 +204,9 @@ if [ "$toolchain" = "clang" ]; then
 elif [ "$system" = "Linux" ]; then
     # GCC fuses multiply-adds where Chrome's clang does not, so the GCC engine drew dark mode's
     # white #1b1b1b where clang's draws #121212 (#34). toolchain/gcc.patch turns that off.
-    git apply "$series/../toolchain/gcc.patch"
+    # An extended tree has it already, from the build that made it.
+    git apply --check -R "$series/../toolchain/gcc.patch" 2> /dev/null \
+        || git apply "$series/../toolchain/gcc.patch"
     echo "TOOLCHAIN: GCC, without fused multiply-adds"
 fi
 
