@@ -556,6 +556,7 @@ an offscreen document and removes the text area; a stock engine dies with SIGSEG
 | 6.11.2-14, series grown to 26 | x86_64 25 already applied, 1 more; aarch64 24 already applied, 2 more; no conflicts | incremental | 84 of 84 on each | none |
 | 6.11.2-15, series grown to 29 | 26 already applied, 3 more, no conflicts | incremental | 93 of 93 on each | none |
 | 6.140.0, series 30 | 28 rebased, 2 dropped as upstream, 1 added; then 30 of 30 on a fresh tarball, no conflicts | incremental | 112 of 112 on each | an afternoon: test-file conflicts in 0001 and beside upstream's offscreen test |
+| 6.140.0-2, series grown to 32 | 32 applied by `git am` to the 6.140.0 tarball, no conflicts | incremental | 128 of 128 on x86_64 | none |
 
 The rows after the first are the series growing, and the last is the same series rebuilt with each
 architecture's toolchain and published as 6.11.2-5 (omaweb#576), rather than Qt moving. They
@@ -588,6 +589,10 @@ the engine link without X11. Both architectures built their kept trees increment
 engine-686 and aarch64 on the Mac. The aarch64 build added `gcc.patch` (#34), whose check failed
 its first gate because GCC was named `c++`; the check was fixed and the gate run again without a
 recompile.
+
+6.140.0-2 adds 0031, the untrusted debugging session (omaweb#373), and 0032, the selected page
+(omaweb#961). x86_64 was built in engine-686 from the series at `73d25ec`, and its stock-engine pass was
+skipped for want of an installed stock engine, as for 6.140.0-1.
 
 ## Licence
 
