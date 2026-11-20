@@ -9,7 +9,7 @@ this file is for.
 
 ## What changed
 
-Thirty-one patches, applied in order to the released source. Thirteen add the part of Chromium's
+Thirty-two patches, applied in order to the released source. Thirteen add the part of Chromium's
 extension runtime that QtWebEngine compiles out: renderer bindings, the `tabs`, `windows`,
 `permissions`, `scripting`, `notifications` and `webNavigation` namespaces behind an embedder
 delegate, native messaging, and web accessible resources. Five of those are bug fixes in Qt's own
@@ -45,10 +45,13 @@ The twenty-eighth is a bug fix in Qt's own code: an offscreen document that sele
 crashes the engine. The twenty-ninth gives every page Chrome's `chrome.app`, `chrome.csi` and
 `chrome.loadTimes`, defined as Chrome's renderer defines them, which Google's sign-in reads. The
 thirtieth is Qt's own fix to the engine's build, so that it links where Qt has GLX and the engine is
-built without X11, as this one is. The last adds `QWebEngineDevToolsSession`, a DevTools protocol
-session of one page whose client is not trusted, so it cannot list, open or reach any other page
-or the browser. It reaches only the children its page's auto-attach brings: frames, dedicated
-workers and the service worker whose scope holds the page.
+built without X11, as this one is. The thirty-first adds `QWebEngineDevToolsSession`, a DevTools
+protocol session of one page whose client is not trusted, so it cannot list, open or reach any other
+page or the browser. It reaches only the children its page's auto-attach brings: frames, dedicated
+workers and the service worker whose scope holds the page. The last adds
+`QWebEngineExtensionManager::setSelectedPage`, through which the application says which of its tabs
+the reader is using, so an extension asking for the active tab is answered with that page rather
+than with the last page on show.
 
 On x86_64 the engine is built with clang and LLD, with ThinLTO and Chrome's own PGO profile for its
 Chromium, where Qt's build would use GCC. On aarch64 it is built with GCC, as Qt's is.
