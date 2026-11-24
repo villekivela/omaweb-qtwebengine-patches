@@ -9,7 +9,7 @@ this file is for.
 
 ## What changed
 
-Thirty-two patches, applied in order to the released source. Thirteen add the part of Chromium's
+Thirty-three patches, applied in order to the released source. Thirteen add the part of Chromium's
 extension runtime that QtWebEngine compiles out: renderer bindings, the `tabs`, `windows`,
 `permissions`, `scripting`, `notifications` and `webNavigation` namespaces behind an embedder
 delegate, native messaging, and web accessible resources. Five of those are bug fixes in Qt's own
@@ -48,10 +48,14 @@ thirtieth is Qt's own fix to the engine's build, so that it links where Qt has G
 built without X11, as this one is. The thirty-first adds `QWebEngineDevToolsSession`, a DevTools
 protocol session of one page whose client is not trusted, so it cannot list, open or reach any other
 page or the browser. It reaches only the children its page's auto-attach brings: frames, dedicated
-workers and the service worker whose scope holds the page. The last adds
+workers and the service worker whose scope holds the page. The thirty-second adds
 `QWebEngineExtensionManager::setSelectedPage`, through which the application says which of its tabs
 the reader is using, so an extension asking for the active tab is answered with that page rather
-than with the last page on show.
+than with the last page on show. The last adds a fifth algorithm to Chromium's forced dark mode,
+chosen with `--dark-mode-settings=InversionAlgorithm=4`, which maps each colour by the role it is
+drawn in, toward a ground colour and a text colour, after Dark Reader's colour functions (MIT
+licensed), and `QWebEngineSettings::setForceDarkModeGroundColor` and `setForceDarkModeTextColor`
+with their Qt Quick properties, through which the application gives each page those two colours.
 
 On x86_64 the engine is built with clang and LLD, with ThinLTO and Chrome's own PGO profile for its
 Chromium, where Qt's build would use GCC. On aarch64 it is built with GCC, as Qt's is.
@@ -97,6 +101,9 @@ what LGPL-3.0 section 4 asks for.
 `chromium-LICENSE.txt` is Chromium's own notice, taken verbatim from the tree this engine is built
 from. `LGPL-3.0-only.txt` is the licence QtWebEngine's own code is under. Both are fetched from
 Qt's repositories by `scripts/fetch-licenses.sh` rather than written by hand.
+
+Patch 0033's colour mappings are adapted from Dark Reader, which is under the MIT licence. Its
+notice is carried beside them, in `dark_mode_color_filter.cc`.
 
 Chromium's own third party components carry their notices in the source tarball, under
 `src/3rdparty/chromium/third_party/*/LICENSE`. This package does not restate them, and generating a

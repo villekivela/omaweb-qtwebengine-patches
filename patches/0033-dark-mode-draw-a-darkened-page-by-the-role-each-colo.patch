@@ -1,0 +1,1280 @@
+From cf4d70055c6ae34c550cf38be4e8a71e61235262 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Ville=20Kivel=C3=A4?= <vkivela@hotmail.com>
+Date: Tue, 24 Nov 2026 22:08:47 +0000
+Subject: [PATCH] dark mode: draw a darkened page by the role each colour plays
+
+Forced dark mode inverted the lightness of every colour it chose to
+change, so a darkened page looked inverted rather than drawn dark. A
+background was inverted above a brightness of 205 and kept at or below
+it, so #d0d0d0 turned dark beside a #cccccc that stayed light, and
+white became #121212 whatever the application around the page looked
+like.
+
+Blink already hands the filter each colour's role. A fifth inversion
+algorithm, InversionAlgorithm=4 in --dark-mode-settings, maps each
+colour by that role with Dark Reader's colour functions (MIT licensed,
+notice carried in dark_mode_color_filter.cc): backgrounds, selection
+and gradient stops toward a ground colour, text and list markers
+toward a text colour, borders onto a mid to dark range. SVG fills,
+strokes and text share one role, so a light SVG colour takes the
+background mapping and a dark one the text mapping: measured on
+Wikipedia, its dark wordmark went dark on the dark ground under the
+background mapping alone. A near grey takes the hue of the colour it
+is drawn toward. Every background is mapped, with no threshold, and a
+dark one stays dark. Text is held at 4.5:1 against its own background,
+or the ground where it has none, measured on the colour as drawn in 8
+bits. A colour is read in 8 bits a channel, as Dark Reader reads it,
+so oklch(1 0 0), which arrives with float noise, is white and not a
+saturated cyan. The inverted colour cache is keyed on colour and role.
+Images keep the classifier and the inversion they had.
+
+The two colours are each page's, not the process's.
+QWebEngineSettings::setForceDarkModeGroundColor and
+setForceDarkModeTextColor, and forceDarkModeGroundColor and
+forceDarkModeTextColor on WebEngineSettings in Qt Quick, reach Blink's
+settings through WebPreferences. A GraphicsContext painting a frame
+takes them from its page's settings, and a change repaints a page
+already showing, with no reload. An invalid colour is the parent
+settings', and unset they are Dark Reader's #181a1b and #e8e6e3. The
+other algorithms ignore them.
+---
+ .../web_preferences_mojom_traits.cc           |   4 +-
+ .../common/web_preferences/web_preferences.h  |   5 +
+ .../web_preferences_mojom_traits.h            |  10 +
+ .../webpreferences/web_preferences.mojom      |   5 +
+ .../blink/public/web/web_settings.h           |   2 +
+ .../core/exported/web_settings_impl.cc        |   9 +
+ .../core/exported/web_settings_impl.h         |   2 +
+ .../renderer/core/exported/web_view_impl.cc   |   2 +
+ .../renderer/core/frame/local_frame_view.cc   |  10 +
+ .../blink/renderer/core/frame/settings.json5  |  15 ++
+ .../graphics/dark_mode_color_filter.cc        | 251 +++++++++++++++++-
+ .../graphics/dark_mode_color_filter.h         |   6 +-
+ .../platform/graphics/dark_mode_filter.cc     |  37 ++-
+ .../platform/graphics/dark_mode_settings.h    |  12 +-
+ .../platform/graphics/graphics_context.cc     |  19 +-
+ .../platform/graphics/graphics_context.h      |   8 +
+ src/core/api/qwebenginesettings.cpp           |  64 +++++
+ src/core/api/qwebenginesettings.h             |   6 +
+ src/core/web_engine_settings.cpp              |  36 +++
+ src/core/web_engine_settings.h                |   7 +
+ .../api/qquickwebenginesettings.cpp           |  52 ++++
+ .../api/qquickwebenginesettings_p.h           |  10 +
+ .../tst_qwebenginesettings.cpp                | 194 ++++++++++++++
+ tests/auto/quick/publicapi/tst_publicapi.cpp  |   4 +
+ 24 files changed, 757 insertions(+), 13 deletions(-)
+
+diff --git a/src/3rdparty/chromium/third_party/blink/common/web_preferences/web_preferences_mojom_traits.cc b/src/3rdparty/chromium/third_party/blink/common/web_preferences/web_preferences_mojom_traits.cc
+index c24ed54b60..b08e8e2887 100644
+--- a/src/3rdparty/chromium/third_party/blink/common/web_preferences/web_preferences_mojom_traits.cc
++++ b/src/3rdparty/chromium/third_party/blink/common/web_preferences/web_preferences_mojom_traits.cc
+@@ -44,7 +44,9 @@ bool StructTraits<blink::mojom::WebPreferencesDataView,
+       !data.ReadNetworkQualityEstimatorWebHoldback(
+           &out->network_quality_estimator_web_holdback) ||
+       !data.ReadWebAppScope(&out->web_app_scope) ||
+-      !data.ReadRootScrollbarThemeColor(&out->root_scrollbar_theme_color)
++      !data.ReadRootScrollbarThemeColor(&out->root_scrollbar_theme_color) ||
++      !data.ReadForceDarkModeGroundColor(&out->force_dark_mode_ground_color) ||
++      !data.ReadForceDarkModeTextColor(&out->force_dark_mode_text_color)
+ #if BUILDFLAG(IS_ANDROID)
+       || !data.ReadDefaultVideoPosterUrl(&out->default_video_poster_url)
+ #endif
+diff --git a/src/3rdparty/chromium/third_party/blink/public/common/web_preferences/web_preferences.h b/src/3rdparty/chromium/third_party/blink/public/common/web_preferences/web_preferences.h
+index cd4bc0a6d5..a068da74ed 100644
+--- a/src/3rdparty/chromium/third_party/blink/public/common/web_preferences/web_preferences.h
++++ b/src/3rdparty/chromium/third_party/blink/public/common/web_preferences/web_preferences.h
+@@ -303,6 +303,11 @@ struct BLINK_COMMON_EXPORT WebPreferences {
+   // color scheme.
+   bool force_dark_mode_enabled = false;
+ 
++  // The ground and text colors forced dark mode draws a page toward under the
++  // role-aware inversion algorithm. Unset leaves the algorithm's own default.
++  std::optional<SkColor> force_dark_mode_ground_color;
++  std::optional<SkColor> force_dark_mode_text_color;
++
+   // Default (used if the page or UA doesn't override these) values for page
+   // scale limits. These are set directly on the WebView so there's no analogue
+   // in WebSettings.
+diff --git a/src/3rdparty/chromium/third_party/blink/public/common/web_preferences/web_preferences_mojom_traits.h b/src/3rdparty/chromium/third_party/blink/public/common/web_preferences/web_preferences_mojom_traits.h
+index ebf4ec133d..35937ca848 100644
+--- a/src/3rdparty/chromium/third_party/blink/public/common/web_preferences/web_preferences_mojom_traits.h
++++ b/src/3rdparty/chromium/third_party/blink/public/common/web_preferences/web_preferences_mojom_traits.h
+@@ -723,6 +723,16 @@ struct BLINK_COMMON_EXPORT StructTraits<blink::mojom::WebPreferencesDataView,
+     return r.is_forced_colors_disabled;
+   }
+ 
++  static std::optional<SkColor> force_dark_mode_ground_color(
++      const blink::web_pref::WebPreferences& r) {
++    return r.force_dark_mode_ground_color;
++  }
++
++  static std::optional<SkColor> force_dark_mode_text_color(
++      const blink::web_pref::WebPreferences& r) {
++    return r.force_dark_mode_text_color;
++  }
++
+   static std::optional<SkColor> root_scrollbar_theme_color(
+       const blink::web_pref::WebPreferences& r) {
+     return r.root_scrollbar_theme_color;
+diff --git a/src/3rdparty/chromium/third_party/blink/public/mojom/webpreferences/web_preferences.mojom b/src/3rdparty/chromium/third_party/blink/public/mojom/webpreferences/web_preferences.mojom
+index 0fe849ed33..89ec769f99 100644
+--- a/src/3rdparty/chromium/third_party/blink/public/mojom/webpreferences/web_preferences.mojom
++++ b/src/3rdparty/chromium/third_party/blink/public/mojom/webpreferences/web_preferences.mojom
+@@ -377,6 +377,11 @@ struct WebPreferences {
+   // color scheme.
+   bool force_dark_mode_enabled;
+ 
++  // The ground and text colors forced dark mode draws a page toward under the
++  // role-aware inversion algorithm. Null leaves the algorithm's own default.
++  skia.mojom.SkColor? force_dark_mode_ground_color;
++  skia.mojom.SkColor? force_dark_mode_text_color;
++
+   // Default (used if the page or UA doesn't override these) values for page
+   // scale limits. These are set directly on the WebView so there's no analogue
+   // in WebSettings.
+diff --git a/src/3rdparty/chromium/third_party/blink/public/web/web_settings.h b/src/3rdparty/chromium/third_party/blink/public/web/web_settings.h
+index 7fdc9866c9..629bf5a259 100644
+--- a/src/3rdparty/chromium/third_party/blink/public/web/web_settings.h
++++ b/src/3rdparty/chromium/third_party/blink/public/web/web_settings.h
+@@ -270,6 +270,8 @@ class WebSettings {
+   virtual void SetLazyLoadingImageMarginPx3G(int) = 0;
+   virtual void SetLazyLoadingImageMarginPx4G(int) = 0;
+   virtual void SetForceDarkModeEnabled(bool) = 0;
++  virtual void SetForceDarkModeGroundColor(std::optional<SkColor>) = 0;
++  virtual void SetForceDarkModeTextColor(std::optional<SkColor>) = 0;
+   virtual void SetInForcedColors(bool) = 0;
+   virtual void SetIsForcedColorsDisabled(bool) = 0;
+   virtual void SetPreferredRootScrollbarColorScheme(
+diff --git a/src/3rdparty/chromium/third_party/blink/renderer/core/exported/web_settings_impl.cc b/src/3rdparty/chromium/third_party/blink/renderer/core/exported/web_settings_impl.cc
+index 5a291913e0..ed74f984e4 100644
+--- a/src/3rdparty/chromium/third_party/blink/renderer/core/exported/web_settings_impl.cc
++++ b/src/3rdparty/chromium/third_party/blink/renderer/core/exported/web_settings_impl.cc
+@@ -755,6 +755,15 @@ void WebSettingsImpl::SetForceDarkModeEnabled(bool enabled) {
+   settings_->SetForceDarkModeEnabled(enabled);
+ }
+ 
++void WebSettingsImpl::SetForceDarkModeGroundColor(
++    std::optional<SkColor> color) {
++  settings_->SetForceDarkModeGroundColor(color);
++}
++
++void WebSettingsImpl::SetForceDarkModeTextColor(std::optional<SkColor> color) {
++  settings_->SetForceDarkModeTextColor(color);
++}
++
+ void WebSettingsImpl::SetInForcedColors(bool in_forced_colors) {
+   settings_->SetInForcedColors(in_forced_colors);
+ }
+diff --git a/src/3rdparty/chromium/third_party/blink/renderer/core/exported/web_settings_impl.h b/src/3rdparty/chromium/third_party/blink/renderer/core/exported/web_settings_impl.h
+index a9fa6e9471..01df97e2de 100644
+--- a/src/3rdparty/chromium/third_party/blink/renderer/core/exported/web_settings_impl.h
++++ b/src/3rdparty/chromium/third_party/blink/renderer/core/exported/web_settings_impl.h
+@@ -221,6 +221,8 @@ class CORE_EXPORT WebSettingsImpl final : public WebSettings {
+   void SetLazyLoadingImageMarginPx4G(int) override;
+ 
+   void SetForceDarkModeEnabled(bool) override;
++  void SetForceDarkModeGroundColor(std::optional<SkColor>) override;
++  void SetForceDarkModeTextColor(std::optional<SkColor>) override;
+   void SetInForcedColors(bool) override;
+   void SetIsForcedColorsDisabled(bool) override;
+   void SetPreferredRootScrollbarColorScheme(
+diff --git a/src/3rdparty/chromium/third_party/blink/renderer/core/exported/web_view_impl.cc b/src/3rdparty/chromium/third_party/blink/renderer/core/exported/web_view_impl.cc
+index 8bb96c354b..8efb042587 100644
+--- a/src/3rdparty/chromium/third_party/blink/renderer/core/exported/web_view_impl.cc
++++ b/src/3rdparty/chromium/third_party/blink/renderer/core/exported/web_view_impl.cc
+@@ -1851,6 +1851,8 @@ void WebView::ApplyWebPreferences(const web_pref::WebPreferences& prefs,
+ #endif  // BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_FUCHSIA)
+ 
+   settings->SetForceDarkModeEnabled(prefs.force_dark_mode_enabled);
++  settings->SetForceDarkModeGroundColor(prefs.force_dark_mode_ground_color);
++  settings->SetForceDarkModeTextColor(prefs.force_dark_mode_text_color);
+ 
+   settings->SetAccessibilityAlwaysShowFocus(prefs.always_show_focus);
+   settings->SetAutoplayPolicy(prefs.autoplay_policy);
+diff --git a/src/3rdparty/chromium/third_party/blink/renderer/core/frame/local_frame_view.cc b/src/3rdparty/chromium/third_party/blink/renderer/core/frame/local_frame_view.cc
+index 3b7b49713b..974cce6d79 100644
+--- a/src/3rdparty/chromium/third_party/blink/renderer/core/frame/local_frame_view.cc
++++ b/src/3rdparty/chromium/third_party/blink/renderer/core/frame/local_frame_view.cc
+@@ -2921,6 +2921,11 @@ void LocalFrameView::PaintTree(
+                              paint_controller_persistent_data_.Get(),
+                              benchmark_mode);
+     GraphicsContext graphics_context(*paint_controller);
++    if (const Settings* settings = frame_->GetSettings()) {
++      graphics_context.SetDarkModeColors(
++          settings->GetForceDarkModeGroundColor(),
++          settings->GetForceDarkModeTextColor());
++    }
+ 
+     // Draw the WebXR DOM overlay if present.
+     if (PaintLayer* full_screen_layer = GetXROverlayLayer()) {
+@@ -4069,6 +4074,11 @@ void LocalFrameView::PaintForTest(const CullRect& cull_rect) {
+     PaintController paint_controller(PaintDebugInfoEnabled(),
+                                      &EnsurePaintControllerPersistentData());
+     GraphicsContext graphics_context(paint_controller);
++    if (const Settings* settings = frame_->GetSettings()) {
++      graphics_context.SetDarkModeColors(
++          settings->GetForceDarkModeGroundColor(),
++          settings->GetForceDarkModeTextColor());
++    }
+     PaintFrame(graphics_context);
+     paint_controller.CommitNewDisplayItems();
+   }
+diff --git a/src/3rdparty/chromium/third_party/blink/renderer/core/frame/settings.json5 b/src/3rdparty/chromium/third_party/blink/renderer/core/frame/settings.json5
+index 9f68384d71..45da90a233 100644
+--- a/src/3rdparty/chromium/third_party/blink/renderer/core/frame/settings.json5
++++ b/src/3rdparty/chromium/third_party/blink/renderer/core/frame/settings.json5
+@@ -983,6 +983,21 @@
+       initial: false,
+       invalidate: ["ColorScheme", "Style", "Paint"],
+     },
++    // The ground and text colors the role-aware inversion algorithm draws a
++    // page toward. Unset leaves the algorithm's own default. A change repaints
++    // the page, so a darkened page follows it with no reload.
++    {
++      name: "forceDarkModeGroundColor",
++      initial: "std::nullopt",
++      invalidate: ["Paint"],
++      type: "std::optional<SkColor>",
++    },
++    {
++      name: "forceDarkModeTextColor",
++      initial: "std::nullopt",
++      invalidate: ["Paint"],
++      type: "std::optional<SkColor>",
++    },
+ 
+     {
+       name: "navigatorPlatformOverride",
+diff --git a/src/3rdparty/chromium/third_party/blink/renderer/platform/graphics/dark_mode_color_filter.cc b/src/3rdparty/chromium/third_party/blink/renderer/platform/graphics/dark_mode_color_filter.cc
+index 397ac2b57f..b34541ed9f 100644
+--- a/src/3rdparty/chromium/third_party/blink/renderer/platform/graphics/dark_mode_color_filter.cc
++++ b/src/3rdparty/chromium/third_party/blink/renderer/platform/graphics/dark_mode_color_filter.cc
+@@ -4,7 +4,9 @@
+ 
+ #include "third_party/blink/renderer/platform/graphics/dark_mode_color_filter.h"
+ 
++#include <algorithm>
+ #include <array>
++#include <cmath>
+ 
+ #include "base/check.h"
+ #include "base/notreached.h"
+@@ -41,7 +43,8 @@ class ColorFilterWrapper : public DarkModeColorFilter {
+         new ColorFilterWrapper(cc::ColorFilter::MakeHighContrast(config)));
+   }
+ 
+-  SkColor4f InvertColor(const SkColor4f& color) const override {
++  SkColor4f InvertColor(const SkColor4f& color,
++                        DarkModeFilter::ElementRole) const override {
+     return filter_->FilterColor(color);
+   }
+ 
+@@ -64,7 +67,8 @@ class LABColorFilter : public DarkModeColorFilter {
+     filter_ = cc::ColorFilter::MakeHighContrast(config);
+   }
+ 
+-  SkColor4f InvertColor(const SkColor4f& color) const override {
++  SkColor4f InvertColor(const SkColor4f& color,
++                        DarkModeFilter::ElementRole) const override {
+     SkV3 rgb = {color.fR, color.fG, color.fB};
+     SkV3 lab = transformer_.SRGBToLAB(rgb);
+     lab.x = std::min(110.0f - lab.x, 100.0f);
+@@ -157,6 +161,246 @@ class LABColorFilter : public DarkModeColorFilter {
+   sk_sp<cc::ColorFilter> filter_;
+ };
+ 
++// Maps a color by the role it is drawn in, toward a ground color and a text
++// color, so a page is drawn dark as a designed dark theme would draw it rather
++// than with its lightness inverted. The mappings are Dark Reader's
++// (src/inject/dynamic-theme/modify-colors.ts, MIT licensed): each moves a
++// color's HSL lightness into a range of its own, and a near-grey color takes
++// the hue and saturation of the color it is drawn toward.
++//
++// The mappings carry this notice from Dark Reader's LICENSE:
++//
++// Copyright (c) 2026 Dark Reader Ltd.
++//
++// Permission is hereby granted, free of charge, to any person obtaining a copy
++// of this software and associated documentation files (the "Software"), to
++// deal in the Software without restriction, including without limitation the
++// rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
++// sell copies of the Software, and to permit persons to whom the Software is
++// furnished to do so, subject to the following conditions:
++//
++// The above copyright notice and this permission notice shall be included in
++// all copies or substantial portions of the Software.
++//
++// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++// FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
++// IN THE SOFTWARE.
++class RoleAwareColorFilter : public DarkModeColorFilter {
++ public:
++  explicit RoleAwareColorFilter(const DarkModeSettings& settings)
++      : ground_(ToHSL(settings.ground_color)),
++        text_(ToHSL(settings.text_color)) {
++    // Images are classified and inverted as before.
++    SkHighContrastConfig config;
++    config.fInvertStyle = SkHighContrastConfig::InvertStyle::kInvertLightness;
++    config.fGrayscale = false;
++    config.fContrast = 0.0;
++    filter_ = cc::ColorFilter::MakeHighContrast(config);
++  }
++
++  SkColor4f InvertColor(const SkColor4f& color,
++                        DarkModeFilter::ElementRole role) const override {
++    // A color from another space, such as oklch(1 0 0), arrives with float
++    // noise around its channels, and near white that noise reads as a strong
++    // saturation. The mappings take 8 bits a channel, as Dark Reader does.
++    const HSL hsl = ToHSL(Drawn(color));
++    switch (role) {
++      case DarkModeFilter::ElementRole::kForeground:
++      case DarkModeFilter::ElementRole::kListSymbol:
++        return FromHSL(Foreground(hsl), color.fA);
++      case DarkModeFilter::ElementRole::kBorder:
++        return FromHSL(Border(hsl), color.fA);
++      case DarkModeFilter::ElementRole::kSVG:
++        // Fills, strokes and SVG text share one role. A light one is a shape
++        // the page is drawn on, and goes dark as a background does; a dark one
++        // is a logo, an icon or a stroke drawn on the page, which a background
++        // mapping would leave dark on the dark ground, so it goes light as
++        // text does.
++        return FromHSL(hsl.l < 0.5f ? Foreground(hsl) : Background(hsl),
++                       color.fA);
++      case DarkModeFilter::ElementRole::kBackground:
++      case DarkModeFilter::ElementRole::kSelection:
++        return FromHSL(Background(hsl), color.fA);
++    }
++    NOTREACHED();
++  }
++
++  // Moves the color's lightness away from the background's, by as little as
++  // reaches the ratio: lighter on a dark background, darker on a light one.
++  // The ratio is measured on the color as it is drawn, in 8 bits a channel,
++  // so rounding cannot take it back under.
++  SkColor4f AdjustColorForHigherConstrast(
++      const SkColor4f& adjusted_color,
++      const SkColor4f& background,
++      float reference_contrast_ratio) override {
++    if (color_utils::GetContrastRatio(adjusted_color, background) >=
++        reference_contrast_ratio) {
++      return adjusted_color;
++    }
++    // White and black reach the same contrast against a luminance of 0.179.
++    const bool lighten = color_utils::GetRelativeLuminance4f(background) < 0.179f;
++    HSL hsl = ToHSL(adjusted_color);
++    float low = hsl.l;
++    float high = lighten ? 1.0f : 0.0f;
++    hsl.l = high;
++    SkColor4f best_color = Drawn(FromHSL(hsl, adjusted_color.fA));
++    for (int step = 0; step < 16; ++step) {
++      hsl.l = (low + high) / 2;
++      const SkColor4f color = Drawn(FromHSL(hsl, adjusted_color.fA));
++      if (color_utils::GetContrastRatio(color, background) >=
++          reference_contrast_ratio) {
++        high = hsl.l;
++        best_color = color;
++      } else {
++        low = hsl.l;
++      }
++    }
++    return best_color;
++  }
++
++  sk_sp<cc::ColorFilter> ToColorFilter() const override { return filter_; }
++
++ private:
++  // Hue in degrees, saturation and lightness from 0 to 1.
++  struct HSL {
++    float h;
++    float s;
++    float l;
++  };
++
++  static HSL ToHSL(const SkColor4f& color) {
++    const float r = color.fR, g = color.fG, b = color.fB;
++    const float max = std::max({r, g, b});
++    const float min = std::min({r, g, b});
++    const float l = (max + min) / 2;
++    if (max == min)
++      return {0, 0, l};
++    const float d = max - min;
++    const float s = l > 0.5f ? d / (2 - max - min) : d / (max + min);
++    float h;
++    if (max == r)
++      h = std::fmod((g - b) / d + 6, 6.0f);
++    else if (max == g)
++      h = (b - r) / d + 2;
++    else
++      h = (r - g) / d + 4;
++    return {h * 60, s, l};
++  }
++
++  static SkColor4f FromHSL(const HSL& hsl, float alpha) {
++    const float c = (1 - std::abs(2 * hsl.l - 1)) * hsl.s;
++    const float x = c * (1 - std::abs(std::fmod(hsl.h / 60, 2.0f) - 1));
++    const float m = hsl.l - c / 2;
++    float r = 0, g = 0, b = 0;
++    if (hsl.h < 60) {
++      r = c;
++      g = x;
++    } else if (hsl.h < 120) {
++      r = x;
++      g = c;
++    } else if (hsl.h < 180) {
++      g = c;
++      b = x;
++    } else if (hsl.h < 240) {
++      g = x;
++      b = c;
++    } else if (hsl.h < 300) {
++      r = x;
++      b = c;
++    } else {
++      r = c;
++      b = x;
++    }
++    return {r + m, g + m, b + m, alpha};
++  }
++
++  // |color| rounded to 8 bits a channel, as the page is drawn.
++  static SkColor4f Drawn(const SkColor4f& color) {
++    SkColor4f drawn = SkColor4f::FromColor(color.toSkColor());
++    drawn.fA = color.fA;
++    return drawn;
++  }
++
++  // Maps |value| from the range |from_low| to |from_high| onto |to_low| to
++  // |to_high|.
++  static float Scale(float value,
++                     float from_low,
++                     float from_high,
++                     float to_low,
++                     float to_high) {
++    return (value - from_low) * (to_high - to_low) / (from_high - from_low) +
++           to_low;
++  }
++
++  // Dark Reader's modifyBgHSL: lightness 0 to 0.5 onto 0 to 0.4, and 0.5 to 1
++  // onto 0.4 down to the ground's, so white lands on the ground and a dark
++  // color stays dark.
++  HSL Background(const HSL& hsl) const {
++    constexpr float kMaxBackgroundLightness = 0.4f;
++    const bool blue = hsl.h > 200 && hsl.h < 280;
++    const bool neutral = hsl.s < 0.12f || (hsl.l > 0.8f && blue);
++    if (hsl.l < 0.5f) {
++      const float l = Scale(hsl.l, 0, 0.5f, 0, kMaxBackgroundLightness);
++      return neutral ? HSL{ground_.h, ground_.s, l} : HSL{hsl.h, hsl.s, l};
++    }
++    float l = Scale(hsl.l, 0.5f, 1, kMaxBackgroundLightness, ground_.l);
++    if (neutral)
++      return {ground_.h, ground_.s, l};
++    float h = hsl.h;
++    // A dark yellow reads as brown, and a dark yellow-green as olive.
++    if (h > 60 && h < 180) {
++      h = h > 120 ? Scale(h, 120, 180, 135, 180) : Scale(h, 60, 120, 60, 105);
++    }
++    if (h > 40 && h < 80)
++      l *= 0.75f;
++    return {h, hsl.s, l};
++  }
++
++  // Dark Reader's modifyFgHSL: every text color ends at lightness 0.55 or
++  // above, dark text toward the text color's lightness, and blues are moved
++  // toward hue 205 to 220 so links stay readable.
++  HSL Foreground(const HSL& hsl) const {
++    constexpr float kMinForegroundLightness = 0.55f;
++    const bool neutral = hsl.l < 0.2f || hsl.s < 0.24f;
++    const bool blue = !neutral && hsl.h > 205 && hsl.h < 245;
++    const float h = blue ? Scale(hsl.h, 205, 245, 205, 220) : hsl.h;
++    if (hsl.l > 0.5f) {
++      const float l = Scale(hsl.l, 0.5f, 1, kMinForegroundLightness, text_.l);
++      return neutral ? HSL{text_.h, text_.s, l} : HSL{h, hsl.s, l};
++    }
++    if (neutral) {
++      return {text_.h, text_.s,
++              Scale(hsl.l, 0, 0.5f, text_.l, kMinForegroundLightness)};
++    }
++    const float lightest =
++        blue ? std::min(1.0f, kMinForegroundLightness + 0.05f)
++             : kMinForegroundLightness;
++    return {h, hsl.s, Scale(hsl.l, 0, 0.5f, text_.l, lightest)};
++  }
++
++  // Dark Reader's modifyBorderHSL: any lightness onto 0.5 down to 0.2, so a
++  // border is a mid to dark line on the ground.
++  HSL Border(const HSL& hsl) const {
++    const bool neutral = hsl.l < 0.2f || hsl.s < 0.24f;
++    float h = hsl.h;
++    float s = hsl.s;
++    if (neutral) {
++      const HSL& pole = hsl.l < 0.5f ? text_ : ground_;
++      h = pole.h;
++      s = pole.s;
++    }
++    return {h, s, Scale(hsl.l, 0, 1, 0.5f, 0.2f)};
++  }
++
++  const HSL ground_;
++  const HSL text_;
++  sk_sp<cc::ColorFilter> filter_;
++};
++
+ }  // namespace
+ 
+ std::unique_ptr<DarkModeColorFilter> DarkModeColorFilter::FromSettings(
+@@ -181,6 +425,9 @@ std::unique_ptr<DarkModeColorFilter> DarkModeColorFilter::FromSettings(
+ 
+     case DarkModeInversionAlgorithm::kInvertLightnessLAB:
+       return std::make_unique<LABColorFilter>();
++
++    case DarkModeInversionAlgorithm::kRoleAware:
++      return std::make_unique<RoleAwareColorFilter>(settings);
+   }
+   NOTREACHED();
+ }
+diff --git a/src/3rdparty/chromium/third_party/blink/renderer/platform/graphics/dark_mode_color_filter.h b/src/3rdparty/chromium/third_party/blink/renderer/platform/graphics/dark_mode_color_filter.h
+index 1130d513f7..346122f04a 100644
+--- a/src/3rdparty/chromium/third_party/blink/renderer/platform/graphics/dark_mode_color_filter.h
++++ b/src/3rdparty/chromium/third_party/blink/renderer/platform/graphics/dark_mode_color_filter.h
+@@ -7,6 +7,7 @@
+ 
+ #include <memory>
+ 
++#include "third_party/blink/renderer/platform/graphics/dark_mode_filter.h"
+ #include "third_party/blink/renderer/platform/graphics/dark_mode_settings.h"
+ #include "third_party/blink/renderer/platform/platform_export.h"
+ #include "third_party/skia/include/core/SkColor.h"
+@@ -25,7 +26,10 @@ class PLATFORM_EXPORT DarkModeColorFilter {
+       const DarkModeSettings& settings);
+ 
+   virtual ~DarkModeColorFilter();
+-  virtual SkColor4f InvertColor(const SkColor4f& color) const = 0;
++  // The color drawn in place of |color| where it is drawn in |role|. Only
++  // the role-aware filter tells the roles apart.
++  virtual SkColor4f InvertColor(const SkColor4f& color,
++                                DarkModeFilter::ElementRole role) const = 0;
+   virtual sk_sp<cc::ColorFilter> ToColorFilter() const = 0;
+   virtual SkColor4f AdjustColorForHigherConstrast(
+       const SkColor4f& adjusted_color,
+diff --git a/src/3rdparty/chromium/third_party/blink/renderer/platform/graphics/dark_mode_filter.cc b/src/3rdparty/chromium/third_party/blink/renderer/platform/graphics/dark_mode_filter.cc
+index 1929af787b..27ab26a47d 100644
+--- a/src/3rdparty/chromium/third_party/blink/renderer/platform/graphics/dark_mode_filter.cc
++++ b/src/3rdparty/chromium/third_party/blink/renderer/platform/graphics/dark_mode_filter.cc
+@@ -91,13 +91,15 @@ class DarkModeInvertedColorCache {
+   DarkModeInvertedColorCache() : cache_(kMaxCacheSize) {}
+   ~DarkModeInvertedColorCache() = default;
+ 
+-  SkColor4f GetInvertedColor(DarkModeColorFilter* filter, SkColor4f color) {
+-    SkColor key = color.toSkColor();
++  SkColor4f GetInvertedColor(DarkModeColorFilter* filter,
++                             SkColor4f color,
++                             DarkModeFilter::ElementRole role) {
++    uint64_t key = (static_cast<uint64_t>(role) << 32) | color.toSkColor();
+     auto it = cache_.Get(key);
+     if (it != cache_.end())
+       return it->second;
+ 
+-    SkColor4f inverted_color = filter->InvertColor(color);
++    SkColor4f inverted_color = filter->InvertColor(color, role);
+     cache_.Put(key, inverted_color);
+     return inverted_color;
+   }
+@@ -107,7 +109,7 @@ class DarkModeInvertedColorCache {
+   size_t size() { return cache_.size(); }
+ 
+  private:
+-  base::HashingLRUCache<SkColor, SkColor4f> cache_;
++  base::HashingLRUCache<uint64_t, SkColor4f> cache_;
+ };
+ 
+ DarkModeFilter::DarkModeFilter(const DarkModeSettings& settings)
+@@ -147,6 +149,25 @@ SkColor4f DarkModeFilter::AdjustDarkenColor(
+     const SkColor4f& color,
+     DarkModeFilter::ElementRole role,
+     const SkColor4f& contrast_background) {
++  if (immutable_.settings.mode == DarkModeInversionAlgorithm::kRoleAware) {
++    // Text is held against its own background, or the ground where it has
++    // none. Borders and SVG keep the color their mapping gives them.
++    const SkColor4f& background = contrast_background.fA == 0
++                                      ? immutable_.settings.ground_color
++                                      : contrast_background;
++    switch (role) {
++      case ElementRole::kForeground:
++      case ElementRole::kListSymbol:
++        return immutable_.color_filter->AdjustColorForHigherConstrast(
++            color, background, color_utils::kMinimumReadableContrastRatio);
++      case ElementRole::kSelection:
++        return immutable_.color_filter->AdjustColorForHigherConstrast(
++            color, background, color_utils::kMinimumVisibleContrastRatio);
++      default:
++        return color;
++    }
++  }
++
+   const SkColor4f& background = [&contrast_background]() {
+     if (contrast_background == SkColors::kTransparent)
+       return SkColor4f::FromColor(SK_ColorDark);
+@@ -194,7 +215,7 @@ SkColor4f DarkModeFilter::InvertColorIfNeeded(const SkColor4f& color,
+ 
+   if (ShouldApplyToColor(color, role)) {
+     return inverted_color_cache_->GetInvertedColor(
+-        immutable_.color_filter.get(), color);
++        immutable_.color_filter.get(), color, role);
+   }
+ 
+   return color;
+@@ -266,7 +287,7 @@ std::optional<cc::PaintFlags> DarkModeFilter::ApplyToFlagsIfNeeded(
+   SkColor4f flags_color = flags.getColor4f();
+   if (ShouldApplyToColor(flags_color, role)) {
+     flags_color = inverted_color_cache_->GetInvertedColor(
+-        immutable_.color_filter.get(), flags_color);
++        immutable_.color_filter.get(), flags_color, role);
+   }
+   dark_mode_flags.setColor(AdjustDarkenColor(
+       flags_color, role,
+@@ -277,6 +298,10 @@ std::optional<cc::PaintFlags> DarkModeFilter::ApplyToFlagsIfNeeded(
+ 
+ bool DarkModeFilter::ShouldApplyToColor(const SkColor4f& color,
+                                         ElementRole role) {
++  // Every color has a mapping of its own, and a dark one stays dark, so no
++  // threshold decides which are drawn.
++  if (immutable_.settings.mode == DarkModeInversionAlgorithm::kRoleAware)
++    return true;
+   switch (role) {
+     case ElementRole::kBorder:
+     case ElementRole::kSVG:
+diff --git a/src/3rdparty/chromium/third_party/blink/renderer/platform/graphics/dark_mode_settings.h b/src/3rdparty/chromium/third_party/blink/renderer/platform/graphics/dark_mode_settings.h
+index 19b3796f45..0c01cf4d18 100644
+--- a/src/3rdparty/chromium/third_party/blink/renderer/platform/graphics/dark_mode_settings.h
++++ b/src/3rdparty/chromium/third_party/blink/renderer/platform/graphics/dark_mode_settings.h
+@@ -5,6 +5,8 @@
+ #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_DARK_MODE_SETTINGS_H_
+ #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_DARK_MODE_SETTINGS_H_
+ 
++#include "third_party/skia/include/core/SkColor.h"
++
+ namespace blink {
+ 
+ enum class DarkModeInversionAlgorithm {
+@@ -13,9 +15,12 @@ enum class DarkModeInversionAlgorithm {
+   kInvertBrightness,
+   kInvertLightness,
+   kInvertLightnessLAB,
++  // Maps each color by the role it is drawn in, toward ground_color and
++  // text_color, after Dark Reader's color functions.
++  kRoleAware,
+ 
+   kFirst = kSimpleInvertForTesting,  // First enum value.
+-  kLast = kInvertLightnessLAB,       // Last enum value.
++  kLast = kRoleAware,                // Last enum value.
+ };
+ 
+ // This enum will be removed soon to make dark mode simpler.
+@@ -60,6 +65,11 @@ struct DarkModeSettings {
+   //
+   // Warning: This behavior is the opposite of foreground_brightness_threshold!
+   int background_brightness_threshold = 0;
++
++  // The colors kRoleAware draws a white ground and black text as. Dark
++  // Reader's defaults.
++  SkColor4f ground_color = SkColor4f::FromColor(SkColorSetRGB(0x18, 0x1a, 0x1b));
++  SkColor4f text_color = SkColor4f::FromColor(SkColorSetRGB(0xe8, 0xe6, 0xe3));
+ };
+ 
+ }  // namespace blink
+diff --git a/src/3rdparty/chromium/third_party/blink/renderer/platform/graphics/graphics_context.cc b/src/3rdparty/chromium/third_party/blink/renderer/platform/graphics/graphics_context.cc
+index 03c866d4b3..a0e43b3862 100644
+--- a/src/3rdparty/chromium/third_party/blink/renderer/platform/graphics/graphics_context.cc
++++ b/src/3rdparty/chromium/third_party/blink/renderer/platform/graphics/graphics_context.cc
+@@ -144,12 +144,27 @@ void GraphicsContext::CopyConfigFrom(GraphicsContext& other) {
+   SetPrinting(other.printing_);
+   SetPrintingInternalHeadersAndFooters(
+       other.printing_internal_headers_and_footers_);
++  SetDarkModeColors(other.dark_mode_ground_color_,
++                    other.dark_mode_text_color_);
++}
++
++void GraphicsContext::SetDarkModeColors(std::optional<SkColor> ground,
++                                        std::optional<SkColor> text) {
++  if (ground == dark_mode_ground_color_ && text == dark_mode_text_color_)
++    return;
++  dark_mode_ground_color_ = ground;
++  dark_mode_text_color_ = text;
++  dark_mode_filter_.reset();
+ }
+ 
+ DarkModeFilter* GraphicsContext::GetDarkModeFilter() {
+   if (!dark_mode_filter_) {
+-    dark_mode_filter_ =
+-        std::make_unique<DarkModeFilter>(GetCurrentDarkModeSettings());
++    DarkModeSettings settings = GetCurrentDarkModeSettings();
++    if (dark_mode_ground_color_)
++      settings.ground_color = SkColor4f::FromColor(*dark_mode_ground_color_);
++    if (dark_mode_text_color_)
++      settings.text_color = SkColor4f::FromColor(*dark_mode_text_color_);
++    dark_mode_filter_ = std::make_unique<DarkModeFilter>(settings);
+   }
+   return dark_mode_filter_.get();
+ }
+diff --git a/src/3rdparty/chromium/third_party/blink/renderer/platform/graphics/graphics_context.h b/src/3rdparty/chromium/third_party/blink/renderer/platform/graphics/graphics_context.h
+index a338dfe252..583ea0510b 100644
+--- a/src/3rdparty/chromium/third_party/blink/renderer/platform/graphics/graphics_context.h
++++ b/src/3rdparty/chromium/third_party/blink/renderer/platform/graphics/graphics_context.h
+@@ -29,6 +29,7 @@
+ #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_GRAPHICS_CONTEXT_H_
+ 
+ #include <memory>
++#include <optional>
+ 
+ #include "base/dcheck_is_on.h"
+ #include "cc/paint/paint_flags.h"
+@@ -210,6 +211,11 @@ class PLATFORM_EXPORT GraphicsContext {
+ 
+   void UpdateDarkModeSettingsForTest(const DarkModeSettings&);
+ 
++  // The ground and text colors of the page being painted, which the
++  // role-aware dark mode draws toward. Unset keeps the settings' own.
++  void SetDarkModeColors(std::optional<SkColor> ground,
++                         std::optional<SkColor> text);
++
+   // ---------- State management methods -----------------
+   void Save();
+   void Restore();
+@@ -562,6 +568,8 @@ class PLATFORM_EXPORT GraphicsContext {
+ #endif
+ 
+   std::unique_ptr<DarkModeFilter> dark_mode_filter_;
++  std::optional<SkColor> dark_mode_ground_color_;
++  std::optional<SkColor> dark_mode_text_color_;
+ 
+   bool printing_ = false;
+   bool printing_internal_headers_and_footers_ = false;
+diff --git a/src/core/api/qwebenginesettings.cpp b/src/core/api/qwebenginesettings.cpp
+index 98d3790698..eac7cb80ff 100644
+--- a/src/core/api/qwebenginesettings.cpp
++++ b/src/core/api/qwebenginesettings.cpp
+@@ -119,4 +119,68 @@ void QWebEngineSettings::resetImageAnimationPolicy()
+     d_ptr->setImageAnimationPolicy(QWebEngineSettings::ImageAnimationPolicy::Inherited);
+ }
+ 
++/*!
++    \since 6.140
++
++    Sets the ground color ForceDarkMode draws a page toward to \a color, where
++    the engine was started with the role-aware algorithm,
++    \c{--dark-mode-settings=InversionAlgorithm=4}. That algorithm maps each
++    color by the role it is drawn in: a white background is drawn as the ground
++    color, black text as the text color, and every other background, text and
++    border color between them, so a darkened page is drawn in the application's
++    own colors. Text is drawn at a contrast of at least 4.5:1 against what is
++    behind it.
++
++    An invalid color leaves the ground color to the parent settings, and where
++    no settings set it, to the engine's own, \c{#181a1b}. A change reaches a page
++    that is already showing, with no reload. The other algorithms ignore it.
++
++    \sa forceDarkModeGroundColor(), setForceDarkModeTextColor(),
++    QWebEngineSettings::ForceDarkMode
++*/
++void QWebEngineSettings::setForceDarkModeGroundColor(const QColor &color)
++{
++    d_ptr->setForceDarkModeGroundColor(color);
++}
++
++/*!
++    \since 6.140
++
++    Returns the ground color ForceDarkMode draws a page toward, or an invalid
++    color where no settings set one.
++
++    \sa setForceDarkModeGroundColor()
++*/
++QColor QWebEngineSettings::forceDarkModeGroundColor() const
++{
++    return d_ptr->forceDarkModeGroundColor();
++}
++
++/*!
++    \since 6.140
++
++    Sets the text color ForceDarkMode draws a page toward to \a color, under
++    the role-aware algorithm. An invalid color leaves it to the parent
++    settings, and where no settings set it, to the engine's own, \c{#e8e6e3}.
++
++    \sa forceDarkModeTextColor(), setForceDarkModeGroundColor()
++*/
++void QWebEngineSettings::setForceDarkModeTextColor(const QColor &color)
++{
++    d_ptr->setForceDarkModeTextColor(color);
++}
++
++/*!
++    \since 6.140
++
++    Returns the text color ForceDarkMode draws a page toward, or an invalid
++    color where no settings set one.
++
++    \sa setForceDarkModeTextColor()
++*/
++QColor QWebEngineSettings::forceDarkModeTextColor() const
++{
++    return d_ptr->forceDarkModeTextColor();
++}
++
+ QT_END_NAMESPACE
+diff --git a/src/core/api/qwebenginesettings.h b/src/core/api/qwebenginesettings.h
+index de85fbfbc8..6b472fa075 100644
+--- a/src/core/api/qwebenginesettings.h
++++ b/src/core/api/qwebenginesettings.h
+@@ -8,6 +8,7 @@
+ #include <QtWebEngineCore/qtwebenginecoreglobal.h>
+ #include <QtCore/qscopedpointer.h>
+ #include <QtCore/qstring.h>
++#include <QtGui/qcolor.h>
+ 
+ namespace QtWebEngineCore {
+ class WebEngineSettings;
+@@ -116,6 +117,11 @@ public:
+     ImageAnimationPolicy imageAnimationPolicy() const;
+     void resetImageAnimationPolicy();
+ 
++    void setForceDarkModeGroundColor(const QColor &color);
++    QColor forceDarkModeGroundColor() const;
++    void setForceDarkModeTextColor(const QColor &color);
++    QColor forceDarkModeTextColor() const;
++
+ private:
+     explicit QWebEngineSettings(QWebEngineSettings *parentSettings = nullptr);
+     void setParentSettings(QWebEngineSettings *parentSettings);
+diff --git a/src/core/web_engine_settings.cpp b/src/core/web_engine_settings.cpp
+index 95b74aef6b..345e1929d3 100644
+--- a/src/core/web_engine_settings.cpp
++++ b/src/core/web_engine_settings.cpp
+@@ -224,6 +224,32 @@ QWebEngineSettings::ImageAnimationPolicy WebEngineSettings::imageAnimationPolicy
+     return QWebEngineSettings::ImageAnimationPolicy::Allow;
+ }
+ 
++void WebEngineSettings::setForceDarkModeGroundColor(const QColor &color)
++{
++    m_forceDarkModeGroundColor = color;
++    scheduleApplyRecursively();
++}
++
++void WebEngineSettings::setForceDarkModeTextColor(const QColor &color)
++{
++    m_forceDarkModeTextColor = color;
++    scheduleApplyRecursively();
++}
++
++QColor WebEngineSettings::forceDarkModeGroundColor() const
++{
++    if (m_forceDarkModeGroundColor.isValid() || !parentSettings)
++        return m_forceDarkModeGroundColor;
++    return parentSettings->forceDarkModeGroundColor();
++}
++
++QColor WebEngineSettings::forceDarkModeTextColor() const
++{
++    if (m_forceDarkModeTextColor.isValid() || !parentSettings)
++        return m_forceDarkModeTextColor;
++    return parentSettings->forceDarkModeTextColor();
++}
++
+ QWebEngineSettings::UnknownUrlSchemePolicy WebEngineSettings::unknownUrlSchemePolicy() const
+ {
+     // value InheritedUnknownUrlSchemePolicy means it is taken from parent, if possible. If there
+@@ -338,6 +364,8 @@ void WebEngineSettings::initDefaults()
+     m_defaultEncoding = u"ISO-8859-1"_s;
+     m_unknownUrlSchemePolicy = QWebEngineSettings::InheritedUnknownUrlSchemePolicy;
+     m_imageAnimationPolicy = QWebEngineSettings::ImageAnimationPolicy::Inherited;
++    m_forceDarkModeGroundColor = QColor();
++    m_forceDarkModeTextColor = QColor();
+ }
+ 
+ void WebEngineSettings::scheduleApply()
+@@ -399,6 +427,14 @@ void WebEngineSettings::applySettingsToWebPreferences(blink::web_pref::WebPrefer
+     prefs->accelerated_2d_canvas_enabled =
+             testAttribute(QWebEngineSettings::Accelerated2dCanvasEnabled);
+     prefs->force_dark_mode_enabled = testAttribute(QWebEngineSettings::ForceDarkMode);
++    // An opaque color: the page's ground is drawn over nothing.
++    const auto skColor = [](const QColor &color) -> std::optional<SkColor> {
++        if (!color.isValid())
++            return std::nullopt;
++        return SkColorSetRGB(color.red(), color.green(), color.blue());
++    };
++    prefs->force_dark_mode_ground_color = skColor(forceDarkModeGroundColor());
++    prefs->force_dark_mode_text_color = skColor(forceDarkModeTextColor());
+     prefs->webgl1_enabled = prefs->webgl2_enabled = testAttribute(QWebEngineSettings::WebGLEnabled);
+     prefs->should_print_backgrounds = testAttribute(QWebEngineSettings::PrintElementBackgrounds);
+     prefs->allow_running_insecure_content =
+diff --git a/src/core/web_engine_settings.h b/src/core/web_engine_settings.h
+index 1f816e380f..8428a718bf 100644
+--- a/src/core/web_engine_settings.h
++++ b/src/core/web_engine_settings.h
+@@ -71,6 +71,11 @@ public:
+     void setImageAnimationPolicy(QWebEngineSettings::ImageAnimationPolicy policy);
+     QWebEngineSettings::ImageAnimationPolicy imageAnimationPolicy() const;
+ 
++    void setForceDarkModeGroundColor(const QColor &color);
++    void setForceDarkModeTextColor(const QColor &color);
++    QColor forceDarkModeGroundColor() const;
++    QColor forceDarkModeTextColor() const;
++
+     void scheduleApply();
+ 
+     void scheduleApplyRecursively();
+@@ -100,6 +105,8 @@ private:
+     static QHash<QWebEngineSettings::FontSize, int> s_defaultFontSizes;
+     QWebEngineSettings::UnknownUrlSchemePolicy m_unknownUrlSchemePolicy;
+     QWebEngineSettings::ImageAnimationPolicy m_imageAnimationPolicy;
++    QColor m_forceDarkModeGroundColor;
++    QColor m_forceDarkModeTextColor;
+ 
+     friend class WebContentsAdapter;
+ };
+diff --git a/src/webenginequick/api/qquickwebenginesettings.cpp b/src/webenginequick/api/qquickwebenginesettings.cpp
+index 5b7f5dea43..1bcbba4a88 100644
+--- a/src/webenginequick/api/qquickwebenginesettings.cpp
++++ b/src/webenginequick/api/qquickwebenginesettings.cpp
+@@ -578,6 +578,58 @@ bool QQuickWebEngineSettings::trimAccessibilityIdentifiers() const
+     return d_ptr->testAttribute(QWebEngineSettings::TrimAccessibilityIdentifiers);
+ }
+ 
++/*!
++    \qmlproperty color WebEngineSettings::forceDarkModeGroundColor
++    \qmlproperty color WebEngineSettings::forceDarkModeTextColor
++    \since QtWebEngine 6.140
++
++    The colors forceDarkMode draws a page toward, where the engine was started
++    with the role-aware algorithm, \c{--dark-mode-settings=InversionAlgorithm=4}:
++    a white background is drawn as the ground color, black text as the text
++    color, and every other background, text and border color between them.
++
++    Unset, or reset with \c undefined, a color is the profile's, and where no
++    settings set it, the engine's own: \c{#181a1b} and \c{#e8e6e3}. A change
++    reaches a page that is already showing, with no reload.
++
++    \sa QWebEngineSettings::setForceDarkModeGroundColor()
++*/
++QColor QQuickWebEngineSettings::forceDarkModeGroundColor() const
++{
++    return d_ptr->forceDarkModeGroundColor();
++}
++
++QColor QQuickWebEngineSettings::forceDarkModeTextColor() const
++{
++    return d_ptr->forceDarkModeTextColor();
++}
++
++void QQuickWebEngineSettings::setForceDarkModeGroundColor(const QColor &color)
++{
++    const QColor was = d_ptr->forceDarkModeGroundColor();
++    d_ptr->setForceDarkModeGroundColor(color);
++    if (was != d_ptr->forceDarkModeGroundColor())
++        Q_EMIT forceDarkModeGroundColorChanged();
++}
++
++void QQuickWebEngineSettings::setForceDarkModeTextColor(const QColor &color)
++{
++    const QColor was = d_ptr->forceDarkModeTextColor();
++    d_ptr->setForceDarkModeTextColor(color);
++    if (was != d_ptr->forceDarkModeTextColor())
++        Q_EMIT forceDarkModeTextColorChanged();
++}
++
++void QQuickWebEngineSettings::resetForceDarkModeGroundColor()
++{
++    setForceDarkModeGroundColor(QColor());
++}
++
++void QQuickWebEngineSettings::resetForceDarkModeTextColor()
++{
++    setForceDarkModeTextColor(QColor());
++}
++
+ /*!
+     \qmlproperty string WebEngineSettings::defaultTextEncoding
+     \since QtWebEngine 1.2
+diff --git a/src/webenginequick/api/qquickwebenginesettings_p.h b/src/webenginequick/api/qquickwebenginesettings_p.h
+index eed42f12ee..494c22930e 100644
+--- a/src/webenginequick/api/qquickwebenginesettings_p.h
++++ b/src/webenginequick/api/qquickwebenginesettings_p.h
+@@ -67,6 +67,8 @@ class Q_WEBENGINEQUICK_EXPORT QQuickWebEngineSettings : public QObject {
+     Q_PROPERTY(bool touchEventsApiEnabled READ touchEventsApiEnabled WRITE setTouchEventsApiEnabled NOTIFY touchEventsApiEnabledChanged REVISION(6,9) FINAL)
+     Q_PROPERTY(bool backForwardCacheEnabled READ backForwardCacheEnabled WRITE setBackForwardCacheEnabled NOTIFY backForwardCacheEnabledChanged REVISION(6,10) FINAL)
+     Q_PROPERTY(bool trimAccessibilityIdentifiers READ trimAccessibilityIdentifiers WRITE setTrimAccessibilityIdentifiers NOTIFY trimAccessibilityIdentifiersChanged REVISION(6,11) FINAL)
++    Q_PROPERTY(QColor forceDarkModeGroundColor READ forceDarkModeGroundColor WRITE setForceDarkModeGroundColor RESET resetForceDarkModeGroundColor NOTIFY forceDarkModeGroundColorChanged REVISION(6,140) FINAL)
++    Q_PROPERTY(QColor forceDarkModeTextColor READ forceDarkModeTextColor WRITE setForceDarkModeTextColor RESET resetForceDarkModeTextColor NOTIFY forceDarkModeTextColorChanged REVISION(6,140) FINAL)
+ 
+     QML_NAMED_ELEMENT(WebEngineSettings)
+     QML_ADDED_IN_VERSION(1, 1)
+@@ -132,6 +134,8 @@ public:
+     bool touchEventsApiEnabled() const;
+     bool backForwardCacheEnabled() const;
+     bool trimAccessibilityIdentifiers() const;
++    QColor forceDarkModeGroundColor() const;
++    QColor forceDarkModeTextColor() const;
+ 
+     void setAutoLoadImages(bool on);
+     void setJavascriptEnabled(bool on);
+@@ -174,6 +178,10 @@ public:
+     void setTouchEventsApiEnabled(bool on);
+     void setBackForwardCacheEnabled(bool on);
+     void setTrimAccessibilityIdentifiers(bool on);
++    void setForceDarkModeGroundColor(const QColor &color);
++    void setForceDarkModeTextColor(const QColor &color);
++    void resetForceDarkModeGroundColor();
++    void resetForceDarkModeTextColor();
+ 
+ signals:
+     void autoLoadImagesChanged();
+@@ -217,6 +225,8 @@ signals:
+     Q_REVISION(6,9) void touchEventsApiEnabledChanged();
+     Q_REVISION(6,10) void backForwardCacheEnabledChanged();
+     Q_REVISION(6,11) void trimAccessibilityIdentifiersChanged();
++    Q_REVISION(6,140) void forceDarkModeGroundColorChanged();
++    Q_REVISION(6,140) void forceDarkModeTextColorChanged();
+ 
+ private:
+     explicit QQuickWebEngineSettings(QQuickWebEngineSettings *parentSettings = nullptr);
+diff --git a/tests/auto/core/qwebenginesettings/tst_qwebenginesettings.cpp b/tests/auto/core/qwebenginesettings/tst_qwebenginesettings.cpp
+index 16a96f8e33..1414fa04a5 100644
+--- a/tests/auto/core/qwebenginesettings/tst_qwebenginesettings.cpp
++++ b/tests/auto/core/qwebenginesettings/tst_qwebenginesettings.cpp
+@@ -30,6 +30,18 @@
+ #include <QtGui/qpointingdevice.h>
+ #include <QtWebEngineWidgets/qwebengineview.h>
+ 
++// The role-aware algorithm is the process's, read once when the engine starts,
++// so it is chosen before anything here starts one. The other algorithms' tests
++// read computed styles, which no algorithm changes.
++static void useRoleAwareDarkMode()
++{
++    qputenv("QTWEBENGINE_CHROMIUM_FLAGS",
++            qgetenv("QTWEBENGINE_CHROMIUM_FLAGS") + " --dark-mode-settings=InversionAlgorithm=4");
++}
++Q_CONSTRUCTOR_FUNCTION(useRoleAwareDarkMode)
++
++using namespace Qt::StringLiterals;
++
+ class tst_QWebEngineSettings: public QObject {
+     Q_OBJECT
+ 
+@@ -44,6 +56,11 @@ private Q_SLOTS:
+     void disableReadingFromCanvas();
+     void forceDarkMode();
+     void forceDarkModeMultiView();
++    void forceDarkModeColors();
++    void roleAwareDarkMode_data();
++    void roleAwareDarkMode();
++    void roleAwareDarkModeRaisesTextContrast();
++    void roleAwareDarkModeFollowsAColorChange();
+     void javaScriptTouchEvents_data();
+     void javaScriptTouchEvents();
+ };
+@@ -308,6 +325,183 @@ void tst_QWebEngineSettings::forceDarkModeMultiView()
+     QTRY_COMPARE(evaluateJavaScriptSync(page2, isAutoDark).toBool(), false);
+ }
+ 
++void tst_QWebEngineSettings::forceDarkModeColors()
++{
++    QWebEngineProfile profile;
++    QWebEnginePage page(&profile);
++
++    // Unset, the engine's own colors apply.
++    QVERIFY(!page.settings()->forceDarkModeGroundColor().isValid());
++    QVERIFY(!page.settings()->forceDarkModeTextColor().isValid());
++
++    // A page takes its profile's until it sets its own.
++    profile.settings()->setForceDarkModeGroundColor(QColor(0x28, 0x2a, 0x36));
++    profile.settings()->setForceDarkModeTextColor(QColor(0xf8, 0xf8, 0xf2));
++    QCOMPARE(page.settings()->forceDarkModeGroundColor(), QColor(0x28, 0x2a, 0x36));
++    QCOMPARE(page.settings()->forceDarkModeTextColor(), QColor(0xf8, 0xf8, 0xf2));
++    page.settings()->setForceDarkModeGroundColor(QColor(0x10, 0x10, 0x10));
++    QCOMPARE(page.settings()->forceDarkModeGroundColor(), QColor(0x10, 0x10, 0x10));
++    QCOMPARE(page.settings()->forceDarkModeTextColor(), QColor(0xf8, 0xf8, 0xf2));
++
++    // An invalid color is the parent's again.
++    page.settings()->setForceDarkModeGroundColor(QColor());
++    QCOMPARE(page.settings()->forceDarkModeGroundColor(), QColor(0x28, 0x2a, 0x36));
++    profile.settings()->setForceDarkModeGroundColor(QColor());
++    QVERIFY(!page.settings()->forceDarkModeGroundColor().isValid());
++}
++
++// One color in one role fills the middle of the view: a ground, a border, a
++// glyph that is a solid block of text, an SVG shape, a gradient.
++static QString rolePage(const QString &role, const QString &color)
++{
++    const QString box = QStringLiteral("position:absolute;left:100px;top:50px;width:200px;height:200px;");
++    if (role == u"ground")
++        return QStringLiteral("<body style=\"margin:0;background:%1\"></body>").arg(color);
++    if (role == u"element")
++        return QStringLiteral("<div style=\"%1background:%2\"></div>").arg(box, color);
++    if (role == u"border")
++        return QStringLiteral("<div style=\"%1box-sizing:border-box;border:100px solid %2\"></div>")
++                .arg(box, color);
++    if (role == u"text")
++        return QStringLiteral("<div style=\"position:absolute;left:100px;top:50px;"
++                              "font:200px/1 FreeMono,monospace;color:%1\">&#x2588;</div>")
++                .arg(color);
++    if (role == u"svg")
++        return QStringLiteral("<svg style=\"%1\" width=200 height=200><rect width=200 height=200 "
++                              "fill=\"%2\"/></svg>").arg(box, color);
++    if (role == u"gradient")
++        return QStringLiteral("<div style=\"%1background:linear-gradient(%2,%2)\"></div>")
++                .arg(box, color);
++    Q_UNREACHABLE_RETURN({});
++}
++
++static QColor centerColor(QWebEngineView &view)
++{
++    return view.grab().toImage().pixelColor(QPoint(200, 150));
++}
++
++void tst_QWebEngineSettings::roleAwareDarkMode_data()
++{
++    QTest::addColumn<QString>("role");
++    QTest::addColumn<QString>("color");
++    QTest::addColumn<QColor>("ground");
++    QTest::addColumn<QColor>("text");
++    QTest::addColumn<QColor>("drawn");
++
++    // Worked from Dark Reader's color functions: a background's lightness goes
++    // from 0..0.5 onto 0..0.4 and from 0.5..1 onto 0.4 down to the ground's, a
++    // text's from 0..0.5 onto the text color's down to 0.55 and from 0.5..1
++    // onto 0.55 up to it, a border's onto 0.5 down to 0.2. A grey takes the
++    // hue and saturation of the color it is drawn toward.
++    const QColor none;
++    const QColor dracula(0x28, 0x2a, 0x36), draculaText(0xf8, 0xf8, 0xf2);
++    QTest::newRow("white ground") << "ground" << "#ffffff" << none << none << QColor(0x18, 0x1a, 0x1b);
++    // A color from another space reaches the filter with float noise around its channels.
++    QTest::newRow("white ground in oklch") << "ground" << "oklch(1 0 0)" << none << none
++                                           << QColor(0x18, 0x1a, 0x1b);
++    QTest::newRow("white ground, the application's") << "ground" << "#ffffff" << dracula << draculaText
++                                                     << dracula;
++    // Nothing is left light: no element is too dark to be mapped.
++    QTest::newRow("#cccccc element") << "element" << "#cccccc" << none << none << QColor(0x35, 0x39, 0x3b);
++    QTest::newRow("#d0d0d0 element") << "element" << "#d0d0d0" << none << none << QColor(0x33, 0x37, 0x39);
++    // A dark color stays dark, and a brand color keeps its hue.
++    QTest::newRow("#18181b element") << "element" << "#18181b" << none << none << QColor(0x13, 0x15, 0x16);
++    QTest::newRow("brand blue element") << "element" << "#0b63ce" << none << none << QColor(0x09, 0x4f, 0xa5);
++    QTest::newRow("light yellow element") << "element" << "#fff3cd" << none << none << QColor(0x3d, 0x2e, 0x00);
++    QTest::newRow("#222 text") << "text" << "#222222" << none << none << QColor(0xd3, 0xcf, 0xc9);
++    QTest::newRow("#222 text, the application's") << "text" << "#222222" << dracula << draculaText
++                                                  << QColor(0xe4, 0xe4, 0xce);
++    QTest::newRow("link blue text") << "text" << "#0b63ce" << none << none << QColor(0x53, 0xaa, 0xf6);
++    QTest::newRow("black border") << "border" << "#000000" << none << none << QColor(0x8c, 0x82, 0x73);
++    QTest::newRow("#ddd border") << "border" << "#dddddd" << none << none << QColor(0x3a, 0x3e, 0x41);
++    // A light SVG color is a shape the page is drawn on and goes dark; a dark one is a logo, an
++    // icon or a stroke drawn on the page, and goes light as text does.
++    QTest::newRow("white SVG shape") << "svg" << "#ffffff" << none << none << QColor(0x18, 0x1a, 0x1b);
++    QTest::newRow("black SVG shape") << "svg" << "#000000" << none << none << QColor(0xe8, 0xe6, 0xe3);
++    QTest::newRow("white gradient") << "gradient" << "#ffffff" << none << none << QColor(0x18, 0x1a, 0x1b);
++}
++
++void tst_QWebEngineSettings::roleAwareDarkMode()
++{
++    QFETCH(QString, role);
++    QFETCH(QString, color);
++    QFETCH(QColor, ground);
++    QFETCH(QColor, text);
++    QFETCH(QColor, drawn);
++
++    QWebEngineView view;
++    view.resize(400, 300);
++    view.show();
++    QVERIFY(QTest::qWaitForWindowExposed(&view));
++    view.settings()->setAttribute(QWebEngineSettings::ForceDarkMode, true);
++    view.settings()->setForceDarkModeGroundColor(ground);
++    view.settings()->setForceDarkModeTextColor(text);
++    QSignalSpy loadFinishedSpy(view.page(), SIGNAL(loadFinished(bool)));
++    view.setHtml(rolePage(role, color));
++    QVERIFY(loadFinishedSpy.wait());
++    QTRY_COMPARE(centerColor(view), drawn);
++}
++
++static double luminance(const QColor &color)
++{
++    const auto channel = [](double value) {
++        return value <= 0.03928 ? value / 12.92 : std::pow((value + 0.055) / 1.055, 2.4);
++    };
++    return 0.2126 * channel(color.redF()) + 0.7152 * channel(color.greenF())
++            + 0.0722 * channel(color.blueF());
++}
++
++static double contrast(const QColor &a, const QColor &b)
++{
++    const double la = luminance(a), lb = luminance(b);
++    return (std::max(la, lb) + 0.05) / (std::min(la, lb) + 0.05);
++}
++
++// A dim text color would leave black text at 2.6:1 on a black ground. It is
++// lightened until it reads at 4.5:1.
++void tst_QWebEngineSettings::roleAwareDarkModeRaisesTextContrast()
++{
++    QWebEngineView view;
++    view.resize(400, 300);
++    view.show();
++    QVERIFY(QTest::qWaitForWindowExposed(&view));
++    view.settings()->setAttribute(QWebEngineSettings::ForceDarkMode, true);
++    view.settings()->setForceDarkModeGroundColor(Qt::black);
++    view.settings()->setForceDarkModeTextColor(QColor(0x50, 0x50, 0x50));
++    QSignalSpy loadFinishedSpy(view.page(), SIGNAL(loadFinished(bool)));
++    view.setHtml(QStringLiteral("<body style=\"margin:0;background:#fff\">")
++                 + rolePage(u"text"_s, u"#000000"_s));
++    QVERIFY(loadFinishedSpy.wait());
++    QTRY_COMPARE(view.grab().toImage().pixelColor(QPoint(10, 10)), QColor(Qt::black));
++    QTRY_VERIFY(centerColor(view) != QColor(Qt::black));
++    const QColor drawn = centerColor(view);
++    QVERIFY2(contrast(drawn, Qt::black) >= 4.5, qPrintable(drawn.name()));
++    QVERIFY2(contrast(drawn, Qt::black) < 5.0, qPrintable(drawn.name()));
++}
++
++// The colors reach a page that is already showing, with no reload.
++void tst_QWebEngineSettings::roleAwareDarkModeFollowsAColorChange()
++{
++    QWebEngineView view;
++    view.resize(400, 300);
++    view.show();
++    QVERIFY(QTest::qWaitForWindowExposed(&view));
++    view.settings()->setAttribute(QWebEngineSettings::ForceDarkMode, true);
++    QSignalSpy loadFinishedSpy(view.page(), SIGNAL(loadFinished(bool)));
++    view.setHtml(rolePage(u"ground"_s, u"#ffffff"_s));
++    QVERIFY(loadFinishedSpy.wait());
++    QTRY_COMPARE(centerColor(view), QColor(0x18, 0x1a, 0x1b));
++
++    QSignalSpy loadStartedSpy(view.page(), SIGNAL(loadStarted()));
++    view.settings()->setForceDarkModeGroundColor(QColor(0x28, 0x2a, 0x36));
++    view.settings()->setForceDarkModeTextColor(QColor(0xf8, 0xf8, 0xf2));
++    QTRY_COMPARE(centerColor(view), QColor(0x28, 0x2a, 0x36));
++    view.settings()->setForceDarkModeGroundColor(QColor());
++    view.settings()->setForceDarkModeTextColor(QColor());
++    QTRY_COMPARE(centerColor(view), QColor(0x18, 0x1a, 0x1b));
++    QCOMPARE(loadStartedSpy.size(), 0);
++}
++
+ void tst_QWebEngineSettings::javaScriptTouchEvents_data()
+ {
+     QTest::addColumn<bool>("isExplicitlySet");
+diff --git a/tests/auto/quick/publicapi/tst_publicapi.cpp b/tests/auto/quick/publicapi/tst_publicapi.cpp
+index 5454b06547..9cebac83f0 100644
+--- a/tests/auto/quick/publicapi/tst_publicapi.cpp
++++ b/tests/auto/quick/publicapi/tst_publicapi.cpp
+@@ -509,6 +509,10 @@ static const QStringList expectedAPI = QStringList()
+     << "QQuickWebEngineSettings.errorPageEnabled --> bool"
+     << "QQuickWebEngineSettings.errorPageEnabledChanged() --> void"
+     << "QQuickWebEngineSettings.forceDarkMode --> bool"
++    << "QQuickWebEngineSettings.forceDarkModeGroundColor --> QColor"
++    << "QQuickWebEngineSettings.forceDarkModeGroundColorChanged() --> void"
++    << "QQuickWebEngineSettings.forceDarkModeTextColor --> QColor"
++    << "QQuickWebEngineSettings.forceDarkModeTextColorChanged() --> void"
+     << "QQuickWebEngineSettings.forceDarkModeChanged() --> void"
+     << "QQuickWebEngineSettings.scrollAnimatorEnabled --> bool"
+     << "QQuickWebEngineSettings.scrollAnimatorEnabledChanged() --> void"
+-- 
+2.56.0
+
