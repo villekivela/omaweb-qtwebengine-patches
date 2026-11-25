@@ -1,6 +1,6 @@
 # QtWebEngine extension patches
 
-Thirty-two patches to QtWebEngine. Eighteen let it host a password manager's Chromium extension,
+Thirty-three patches to QtWebEngine. Eighteen let it host a password manager's Chromium extension,
 two add API that Omaweb's content blocking and certificate view ask for, one restores a trace macro
 that slowed every page, one keeps an offscreen document from crashing the engine as it selects text,
 one keeps the content scripts any extension registers across a restart, one keeps a profile from
@@ -9,15 +9,16 @@ the colour scheme changes, one shows a page's SVG icon rather than a raster one 
 a page hear what its passkeys can reach in a build without Bluetooth, one answers a push
 subscription the same in a window that keeps nothing, one lets a page write to the clipboard during
 a click without a question, one gives every page Chrome's `chrome.app`, `chrome.csi` and
-`chrome.loadTimes`, one lets the engine link without X11, and one gives the application a debugging
-session of one page that cannot reach any other. Base is the released
+`chrome.loadTimes`, one lets the engine link without X11, one gives the application a debugging
+session of one page that cannot reach any other, one lets it say which tab the reader selected, and
+one draws a darkened page by the role each colour plays. Base is the released
 `qtwebengine-everywhere-src-6.140.0` tarball.
 
 Built for [omaweb#344](https://github.com/villekivela/omaweb/issues/344), which asks whether Omaweb
 can host Bitwarden and 1Password. The findings live in `docs/research/password-manager-extensions.md`
 in that repository.
 
-Ten of the thirty-two are ordinary bug fixes headed for Gerrit, and 0030 is Qt's own change. The
+Ten of the thirty-three are ordinary bug fixes headed for Gerrit, and 0030 is Qt's own change. The
 rest wait on one question to Qt, in `upstream/QTBUG-draft.md`. If Qt takes the work, this repository
 is deleted rather than maintained.
 
@@ -347,6 +348,27 @@ the page on show answers as before. See [omaweb#961](https://github.com/villekiv
 _Part of the tab model the open question below is about: the application says which page is
 active. Propose it with 0003._
 
+**0033, draw a darkened page by the role each colour plays.** Forced dark mode inverted the
+lightness of every colour it chose to change, so a darkened page looked inverted rather than drawn
+dark: a background above a brightness of 205 was inverted and one at or below it kept, so `#d0d0d0`
+turned dark beside a `#cccccc` that stayed light, and white became `#121212` whatever the
+application looked like. Blink already gives each colour's role to the filter. A fifth inversion
+algorithm, `InversionAlgorithm=4` in `--dark-mode-settings`, maps each colour by that role with Dark
+Reader's colour functions, which are MIT licensed: a background, selection or gradient stop toward a
+ground colour, text and list markers toward a text colour, a border onto a mid to dark range. SVG
+fills, strokes and text share one role, so a light SVG colour takes the background mapping and a
+dark one the text mapping; under the background mapping alone, Wikipedia's dark wordmark went dark
+on the dark ground. Every background is mapped, with no threshold, and a dark one stays dark. Text
+is held at 4.5:1 against its own background, or the ground where it has none. The filter's inverted
+colour cache is keyed on colour and role. Images keep the classifier and the inversion they had. The
+two colours are each page's: `QWebEngineSettings::setForceDarkModeGroundColor` and
+`setForceDarkModeTextColor`, and `forceDarkModeGroundColor` and `forceDarkModeTextColor` on
+`WebEngineSettings` in Qt Quick, reach Blink's settings through `WebPreferences`, and a change
+repaints a page already showing, with no reload. Unset, they are Dark Reader's `#181a1b` and
+`#e8e6e3`. The other algorithms ignore them. Omaweb draws darkened pages in its Browser theme's
+colours with it ([omaweb#975](https://github.com/villekivela/omaweb/issues/975)). _New API and a new
+algorithm, general rather than Omaweb's. Propose it as is._
+
 ## The open question
 
 `TabsDelegateQt` is internal, and `ExtensionsBrowserClientQt` fills it by treating every page of the
@@ -406,6 +428,19 @@ fails `sessionEndsWhenThePageCloses`. Attaching again without ending the session
 `detach()`, crashes `sessionMayBeDeletedWhenItEnds` with `MALLOC_PERTURB_` set, as the gate sets it.
 `sessionAutoAttachesWhatItsFilterAdmits` shows what Chromium brings, a service worker and a
 dedicated worker, and that a filter of frames brings neither.
+
+Patch 0033's cases are in Qt's `tst_qwebenginesettings`, which starts its engine with
+`InversionAlgorithm=4`, and the gate runs only those. They do not compile against a stock build,
+which has no colours to set. `roleAwareDarkMode` reads the pixel a colour is drawn as in each role,
+against values worked from Dark Reader's functions, and with the algorithm drawn by the CIELAB
+filter each of its first fourteen rows failed: white is `#121212`, `#cccccc` is left light and
+`#222` text is `#f6f6f6`. Its black SVG row came after Wikipedia's wordmark, and failed under the
+background mapping alone, drawn `#000000`, and its oklch row came after Omaweb's own oklch case: the
+filter read `oklch(1 0 0)` with its float noise and drew `#0085a3` until it read 8 bits a channel.
+Leaving text at the colour its mapping gives fails `roleAwareDarkModeRaisesTextContrast` at 2.6:1,
+and measuring the raised colour before it is rounded to 8 bits failed it at 4.49:1. A colour that is
+not sent to the page fails `roleAwareDarkModeFollowsAColorChange`, and a page's colour that does not
+fall back to its profile's fails `forceDarkModeColors`.
 
 Patch 0018's nine cases restart a profile on the same storage path, disable and enable the
 extension, or load it again changed. They compile on the series without 0018. Five of the first six,

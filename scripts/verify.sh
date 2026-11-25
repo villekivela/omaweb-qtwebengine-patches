@@ -247,6 +247,27 @@ else
     echo "  the test did not finish cleanly, exit $?"
 fi
 
+# Patch 0033 adds a forced dark algorithm and the two colours it draws toward, so its cases live in
+# Qt's settings test, which starts its engine with that algorithm. They do not compile against a
+# stock engine, which has no colours to set, so they run on the patched engine only.
+settings="$tree/build/tests/auto/core/qwebenginesettings/tst_qwebenginesettings"
+settings_cases="forceDarkModeColors roleAwareDarkMode roleAwareDarkModeRaisesTextContrast \
+roleAwareDarkModeFollowsAColorChange"
+[ -x "$settings" ] || "$tree/build.sh" tst_qwebenginesettings
+
+echo "=== patched engine, a darkened page drawn by colour role"
+# shellcheck disable=SC2086 # one argument per case
+if env "$path_var=$tree/build/lib" \
+    ${helper:+QTWEBENGINEPROCESS_PATH="$helper"} \
+    ${resources:+QTWEBENGINE_RESOURCES_PATH="$resources"} \
+    ${locales:+QTWEBENGINE_LOCALES_PATH="$locales"} \
+    "$settings" $settings_cases -nocrashhandler -o -,txt 2>&1
+then
+    :
+else
+    echo "  the test did not finish cleanly, exit $?"
+fi
+
 echo "=== stock engine, where each of these must fail or crash"
 if [ ! -e "$stock/qt6/QtWebEngineProcess" ] && [ ! -e "$stock/QtWebEngineProcess" ] \
     && [ ! -d "$stock/QtWebEngineCore.framework" ]
