@@ -592,6 +592,7 @@ an offscreen document and removes the text area; a stock engine dies with SIGSEG
 | 6.11.2-15, series grown to 29 | 26 already applied, 3 more, no conflicts | incremental | 93 of 93 on each | none |
 | 6.140.0, series 30 | 28 rebased, 2 dropped as upstream, 1 added; then 30 of 30 on a fresh tarball, no conflicts | incremental | 112 of 112 on each | an afternoon: test-file conflicts in 0001 and beside upstream's offscreen test |
 | 6.140.0-2, series grown to 32 | x86_64 32 applied by `git am` to the 6.140.0 tarball; aarch64 30 already applied, 2 more; no conflicts | incremental | 128 of 128 on each | none |
+| 6.140.0-3, series grown to 33 | 32 already applied, 1 more, no conflicts | incremental | 149 of 149 on each | none |
 
 The rows after the first are the series growing, and the last is the same series rebuilt with each
 architecture's toolchain and published as 6.11.2-5 (omaweb#576), rather than Qt moving. They
@@ -629,6 +630,11 @@ recompile.
 (omaweb#961). x86_64 was built in engine-686 from the series at `73d25ec`, and aarch64 on the Mac in
 its kept volume, `omaweb-engine-work`. Both gates read 128 of 128. x86_64's stock-engine pass was
 skipped for want of an installed stock engine, as for 6.140.0-1.
+
+6.140.0-3 adds 0033, a dark mode that darkens a page by the role each colour plays (omaweb#975).
+x86_64 was built in engine-686 from the series at `7dce3cd`, and aarch64 on the Mac in its kept
+volume, `omaweb-engine-work`. Both gates read 149 of 149, 21 of them for the new dark mode. Neither
+build had a stock engine installed, so the stock comparison was skipped.
 
 ## Licence
 
